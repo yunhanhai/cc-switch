@@ -413,7 +413,14 @@ pub fn get_codex_config_dir() -> PathBuf {
         return custom;
     }
 
-    get_home_dir().join(".codex")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".codex")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        get_home_dir().join(".codex")
+    }
 }
 
 /// 获取 Codex auth.json 路径

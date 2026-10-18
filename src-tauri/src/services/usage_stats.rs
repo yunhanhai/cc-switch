@@ -109,6 +109,7 @@ pub struct LogFilters {
     pub status_code: Option<u16>,
     pub start_date: Option<i64>,
     pub end_date: Option<i64>,
+    pub session_id: Option<String>,
 }
 
 /// 分页请求日志响应
@@ -116,6 +117,27 @@ pub struct LogFilters {
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedLogs {
     pub data: Vec<RequestLogDetail>,
+    pub total: u32,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub app_types: Vec<String>,
+    pub providers: Vec<String>,
+    pub models: Vec<String>,
+    pub request_count: u64,
+    pub total_cost_usd: String,
+    pub last_request_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedSessions {
+    pub data: Vec<SessionSummary>,
     pub total: u32,
     pub page: u32,
     pub page_size: u32,
@@ -130,6 +152,8 @@ pub struct RequestLogDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_name: Option<String>,
     pub app_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_model: Option<String>,
@@ -160,10 +184,10 @@ pub struct RequestLogDetail {
     pub pricing_model: Option<String>,
 }
 
-/// 把 26 列的查询结果映射为 `RequestLogDetail`。
+/// 把 27 列的查询结果映射为 `RequestLogDetail`。
 ///
-/// 调用方的 SELECT **必须**按以下顺序返回 26 列：
-/// `request_id, provider_id, provider_name, app_type, model, request_model,
+/// 调用方的 SELECT **必须**按以下顺序返回 27 列：
+/// `request_id, provider_id, provider_name, app_type, session_id, model, request_model,
 ///  cost_multiplier, input_tokens, output_tokens, cache_read_tokens,
 ///  cache_creation_tokens, input_cost_usd, output_cost_usd, cache_read_cost_usd,
 ///  cache_creation_cost_usd, total_cost_usd, is_streaming, latency_ms,
@@ -177,30 +201,31 @@ fn row_to_request_log_detail(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reques
         provider_id: row.get(1)?,
         provider_name: row.get(2)?,
         app_type: row.get(3)?,
-        model: row.get(4)?,
-        request_model: row.get(5)?,
+        session_id: row.get(4)?,
+        model: row.get(5)?,
+        request_model: row.get(6)?,
         cost_multiplier: row
-            .get::<_, Option<String>>(6)?
+            .get::<_, Option<String>>(7)?
             .unwrap_or_else(|| "1".to_string()),
-        input_tokens: row.get::<_, i64>(7)? as u32,
-        output_tokens: row.get::<_, i64>(8)? as u32,
-        cache_read_tokens: row.get::<_, i64>(9)? as u32,
-        cache_creation_tokens: row.get::<_, i64>(10)? as u32,
-        input_cost_usd: row.get(11)?,
-        output_cost_usd: row.get(12)?,
-        cache_read_cost_usd: row.get(13)?,
-        cache_creation_cost_usd: row.get(14)?,
-        total_cost_usd: row.get(15)?,
-        is_streaming: row.get::<_, i64>(16)? != 0,
-        latency_ms: row.get::<_, i64>(17)? as u64,
-        first_token_ms: row.get::<_, Option<i64>>(18)?.map(|v| v as u64),
-        duration_ms: row.get::<_, Option<i64>>(19)?.map(|v| v as u64),
-        status_code: row.get::<_, i64>(20)? as u16,
-        error_message: row.get(21)?,
-        created_at: row.get(22)?,
-        data_source: row.get(23)?,
-        pricing_model: row.get(24)?,
-        input_token_semantics: row.get::<_, i64>(25)?,
+        input_tokens: row.get::<_, i64>(8)? as u32,
+        output_tokens: row.get::<_, i64>(9)? as u32,
+        cache_read_tokens: row.get::<_, i64>(10)? as u32,
+        cache_creation_tokens: row.get::<_, i64>(11)? as u32,
+        input_cost_usd: row.get(12)?,
+        output_cost_usd: row.get(13)?,
+        cache_read_cost_usd: row.get(14)?,
+        cache_creation_cost_usd: row.get(15)?,
+        total_cost_usd: row.get(16)?,
+        is_streaming: row.get::<_, i64>(17)? != 0,
+        latency_ms: row.get::<_, i64>(18)? as u64,
+        first_token_ms: row.get::<_, Option<i64>>(19)?.map(|v| v as u64),
+        duration_ms: row.get::<_, Option<i64>>(20)?.map(|v| v as u64),
+        status_code: row.get::<_, i64>(21)? as u16,
+        error_message: row.get(22)?,
+        created_at: row.get(23)?,
+        data_source: row.get(24)?,
+        pricing_model: row.get(25)?,
+        input_token_semantics: row.get::<_, i64>(26)?,
     })
 }
 
@@ -1592,6 +1617,10 @@ impl Database {
             conditions.push("l.created_at <= ?".to_string());
             params.push(Box::new(end));
         }
+        if let Some(session_id) = filters.session_id.as_deref() {
+            conditions.push("l.session_id = ?".to_string());
+            params.push(Box::new(session_id.to_string()));
+        }
 
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -1617,7 +1646,7 @@ impl Database {
 
         let logs_pname = provider_name_coalesce("l", "p");
         let sql = format!(
-            "SELECT l.request_id, l.provider_id, {logs_pname} as provider_name, l.app_type, l.model,
+            "SELECT l.request_id, l.provider_id, {logs_pname} as provider_name, l.app_type, l.session_id, l.model,
                     l.request_model, l.cost_multiplier,
                     l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_creation_tokens,
                     l.input_cost_usd, l.output_cost_usd, l.cache_read_cost_usd, l.cache_creation_cost_usd, l.total_cost_usd,
@@ -1661,7 +1690,7 @@ impl Database {
 
         let detail_pname = provider_name_coalesce("l", "p");
         let detail_sql = format!(
-            "SELECT l.request_id, l.provider_id, {detail_pname} as provider_name, l.app_type, l.model,
+            "SELECT l.request_id, l.provider_id, {detail_pname} as provider_name, l.app_type, l.session_id, l.model,
                     l.request_model, l.cost_multiplier,
                     input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                     input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd, total_cost_usd,
@@ -1683,6 +1712,63 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(AppError::Database(e.to_string())),
         }
+    }
+
+    pub fn get_session_summaries(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> Result<PaginatedSessions, AppError> {
+        let conn = lock_conn!(self.conn);
+        let page_size = page_size.clamp(1, 100);
+        let offset = page.saturating_mul(page_size);
+        let total: u32 = conn.query_row(
+            "SELECT COUNT(DISTINCT session_id) FROM proxy_request_logs
+             WHERE session_id IS NOT NULL AND TRIM(session_id) != ''",
+            [],
+            |row| row.get::<_, i64>(0).map(|value| value as u32),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT l.session_id,
+                    GROUP_CONCAT(DISTINCT l.app_type),
+                    GROUP_CONCAT(DISTINCT COALESCE(p.name, l.provider_id)),
+                    GROUP_CONCAT(DISTINCT COALESCE(NULLIF(l.pricing_model, ''), l.model)),
+                    COUNT(*),
+                    COALESCE(SUM(CAST(l.total_cost_usd AS REAL)), 0),
+                    MAX(l.created_at) AS last_request_at
+             FROM proxy_request_logs l
+             LEFT JOIN providers p ON l.provider_id = p.id AND l.app_type = p.app_type
+             WHERE l.session_id IS NOT NULL AND TRIM(l.session_id) != ''
+             GROUP BY l.session_id
+             ORDER BY last_request_at DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![page_size, offset], |row| {
+            let split = |value: Option<String>| {
+                value
+                    .unwrap_or_default()
+                    .split(',')
+                    .filter(|item| !item.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            };
+            Ok(SessionSummary {
+                session_id: row.get(0)?,
+                app_types: split(row.get(1)?),
+                providers: split(row.get(2)?),
+                models: split(row.get(3)?),
+                request_count: row.get::<_, i64>(4)? as u64,
+                total_cost_usd: format!("{:.6}", row.get::<_, f64>(5)?),
+                last_request_at: row.get(6)?,
+            })
+        })?;
+        let data = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(PaginatedSessions {
+            data,
+            total,
+            page,
+            page_size,
+        })
     }
 
     /// 检查 Provider 使用限额
@@ -1817,7 +1903,7 @@ impl Database {
         only_model_id: Option<&str>,
     ) -> Result<u64, AppError> {
         const BASE_SQL: &str =
-            "SELECT request_id, provider_id, NULL AS provider_name, app_type, model, request_model,
+            "SELECT request_id, provider_id, NULL AS provider_name, app_type, session_id, model, request_model,
                         cost_multiplier,
                         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
                         input_cost_usd, output_cost_usd, cache_read_cost_usd,

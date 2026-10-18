@@ -22,6 +22,9 @@ import {
   DatabaseBackup,
   Loader2,
   ScanSearch,
+  MessageSquareText,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import {
@@ -31,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usageKeys, useModelStats, useProviderStats } from "@/lib/query/usage";
 import { useUsageEventBridge } from "@/hooks/useUsageEventBridge";
 import {
@@ -112,6 +115,14 @@ export function UsageDashboard({
   const [showRebuildConfirm, setShowRebuildConfirm] = useState(false);
   const [rebuildingCodex, setRebuildingCodex] = useState(false);
   const [syncingSession, setSyncingSession] = useState(false);
+  const [activeTab, setActiveTab] = useState("logs");
+  const [sessionPage, setSessionPage] = useState(0);
+  const sessionsQuery = useQuery({
+    queryKey: ["usage", "session-summaries", sessionPage],
+    queryFn: () => usageApi.getSessionSummaries(sessionPage, 20),
+    enabled: activeTab === "sessions",
+    refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
+  });
 
   useEffect(() => {
     setRefreshIntervalMs(normalizeRefreshInterval(savedRefreshIntervalMs));
@@ -423,7 +434,7 @@ export function UsageDashboard({
       />
 
       <div className="space-y-4">
-        <Tabs defaultValue="logs" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="flex items-center justify-between mb-4">
             <TabsList className="bg-muted/50">
               <TabsTrigger value="logs" className="gap-2">
@@ -437,6 +448,10 @@ export function UsageDashboard({
               <TabsTrigger value="models" className="gap-2">
                 <BarChart3 className="h-4 w-4" />
                 {t("usage.modelStats")}
+              </TabsTrigger>
+              <TabsTrigger value="sessions" className="gap-2">
+                <MessageSquareText className="h-4 w-4" />
+                {t("usage.sessions")}
               </TabsTrigger>
             </TabsList>
           </div>
@@ -476,6 +491,110 @@ export function UsageDashboard({
                 model={model}
                 refreshIntervalMs={refreshIntervalMs}
               />
+            </TabsContent>
+
+            <TabsContent value="sessions" className="mt-0">
+              <div className="rounded-lg border border-border/50 bg-card/40 p-4">
+                {sessionsQuery.isLoading ? (
+                  <div className="h-48 animate-pulse rounded bg-muted" />
+                ) : sessionsQuery.isError ? (
+                  <div className="py-12 text-center text-sm text-muted-foreground">
+                    {t("usage.sessionsError")}
+                    <Button
+                      className="ml-3"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void sessionsQuery.refetch()}
+                    >
+                      {t("usage.retry")}
+                    </Button>
+                  </div>
+                ) : sessionsQuery.data?.data.length ? (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-muted-foreground">
+                            <th className="px-3 py-2">Session</th>
+                            <th className="px-3 py-2">{t("usage.appType")}</th>
+                            <th className="px-3 py-2">{t("usage.provider")}</th>
+                            <th className="px-3 py-2">{t("usage.model")}</th>
+                            <th className="px-3 py-2 text-right">
+                              {t("usage.requests")}
+                            </th>
+                            <th className="px-3 py-2 text-right">
+                              {t("usage.totalCost")}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessionsQuery.data.data.map((session) => (
+                            <tr
+                              key={session.sessionId}
+                              className="border-b last:border-0"
+                            >
+                              <td
+                                className="max-w-[220px] truncate px-3 py-2 font-mono text-xs"
+                                title={session.sessionId}
+                              >
+                                {session.sessionId}
+                              </td>
+                              <td className="px-3 py-2">
+                                {session.appTypes.join(", ")}
+                              </td>
+                              <td className="px-3 py-2">
+                                {session.providers.join(", ")}
+                              </td>
+                              <td
+                                className="max-w-[240px] truncate px-3 py-2 font-mono text-xs"
+                                title={session.models.join(", ")}
+                              >
+                                {session.models.join(", ")}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {session.requestCount}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                ${session.totalCostUsd}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>
+                        {sessionsQuery.data.total} {t("usage.sessions")}
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          disabled={sessionPage === 0}
+                          onClick={() => setSessionPage((page) => page - 1)}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          disabled={
+                            (sessionPage + 1) * sessionsQuery.data.pageSize >=
+                            sessionsQuery.data.total
+                          }
+                          onClick={() => setSessionPage((page) => page + 1)}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="py-12 text-center text-sm text-muted-foreground">
+                    {t("usage.noSessions")}
+                  </div>
+                )}
+              </div>
             </TabsContent>
           </motion.div>
         </Tabs>

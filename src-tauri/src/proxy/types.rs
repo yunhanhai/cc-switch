@@ -43,7 +43,11 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             listen_address: "127.0.0.1".to_string(),
-            listen_port: 15721, // 使用较少占用的高位端口
+            listen_port: if cfg!(all(cc_switch_dev_build, not(test))) {
+                15722
+            } else {
+                15721
+            },
             max_retries: 3,
             request_timeout: 600,
             enable_logging: true,
@@ -184,6 +188,16 @@ pub struct AppProxyConfig {
     pub circuit_error_rate_threshold: f64,
     /// 计算错误率的最小请求数
     pub circuit_min_requests: u32,
+    /// 429 限流等待重试开关：开启后 429 时等待 Retry-After（或指数退避）后重试同一 Provider
+    #[serde(default)]
+    pub rate_limit_retry_enabled: bool,
+    /// 429 等待重试的最长等待时间（秒），超过则放弃等待、切换下一家 Provider
+    #[serde(default = "default_rate_limit_max_wait_secs")]
+    pub rate_limit_max_wait_secs: u32,
+}
+
+fn default_rate_limit_max_wait_secs() -> u32 {
+    120
 }
 
 /// 整流器配置

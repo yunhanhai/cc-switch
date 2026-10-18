@@ -1690,6 +1690,10 @@
     "freshInput": "新規入力",
     "cacheHitRate": "キャッシュヒット率",
     "requestLogs": "リクエストログ",
+    "sessions": "統一セッション",
+    "sessionsError": "統一セッションの読み込みに失敗しました。再試行してください。",
+    "noSessions": "API横断のセッション記録はまだありません。",
+    "retry": "再試行",
     "providerStats": "プロバイダー統計",
     "modelStats": "モデル統計",
     "time": "時間",
@@ -2825,7 +2829,7 @@
         },
         "listenPort": {
           "label": "リッスンポート",
-          "placeholder": "15721",
+          "placeholder": "15722",
           "description": "ルーティングサーバーがリッスンするポート番号（1024 ~ 65535）"
         },
         "maxRetries": {

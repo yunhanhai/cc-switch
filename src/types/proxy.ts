@@ -138,4 +138,8 @@ export interface AppProxyConfig {
   circuitTimeoutSeconds: number;
   circuitErrorRateThreshold: number;
   circuitMinRequests: number;
+  /** 429 限流等待重试开关 */
+  rateLimitRetryEnabled?: boolean;
+  /** 429 等待重试最长等待秒数 */
+  rateLimitMaxWaitSecs?: number;
 }

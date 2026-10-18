@@ -130,6 +130,7 @@ import { resolveManagedAccountId } from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
 import { resolveCodexOfficialIdentity } from "@/utils/providerCapabilities";
+import { ModelMappingEditor } from "./ModelMappingEditor";
 
 type PresetEntry = {
   id: string;
@@ -1537,9 +1538,33 @@ function ProviderFormFull({
           auth: unknown;
           config: string;
           modelCatalog?: { models: CodexCatalogModel[] };
+          model_mapping?: unknown;
         };
         if (normalizedCatalogModels.length > 0) {
           configObj.modelCatalog = { models: normalizedCatalogModels };
+        }
+        // ModelMappingEditor 只写入表单 settingsConfig；此处重建 configObj 时
+        // 必须把规则带回，否则保存即静默丢映射。
+        try {
+          const currentConfig = JSON.parse(
+            form.getValues("settingsConfig") || "{}",
+          ) as { model_mapping?: unknown };
+          if (Array.isArray(currentConfig.model_mapping)) {
+            const validMapping = currentConfig.model_mapping.filter(
+              (rule) =>
+                typeof rule === "object" &&
+                rule !== null &&
+                typeof (rule as { source?: unknown }).source === "string" &&
+                typeof (rule as { target?: unknown }).target === "string" &&
+                (rule as { source: string }).source.trim() &&
+                (rule as { target: string }).target.trim(),
+            );
+            if (validMapping.length > 0) {
+              configObj.model_mapping = validMapping;
+            }
+          }
+        } catch {
+          // settingsConfig 非法 JSON 时保持原有兜底行为（下方 catch）
         }
         settingsConfig = JSON.stringify(configObj);
       } catch (err) {
@@ -2438,78 +2463,88 @@ function ProviderFormFull({
           )}
 
           {appId === "codex" && (
-            <CodexFormFields
-              providerId={providerId}
-              isXaiOauthPreset={
-                presetProviderType === "xai_oauth" ||
-                initialData?.meta?.providerType === "xai_oauth"
-              }
-              isXaiOauthAuthenticated={isXaiOauthAuthenticated}
-              selectedXaiAccountId={selectedXaiAccountId}
-              onXaiAccountSelect={setSelectedXaiAccountId}
-              codexApiKey={codexApiKey}
-              onApiKeyChange={handleCodexApiKeyChange}
-              category={category}
-              shouldShowApiKeyLink={shouldShowCodexApiKeyLink}
-              websiteUrl={codexWebsiteUrl}
-              isPartner={isCodexPartner}
-              partnerPromotionKey={codexPartnerPromotionKey}
-              isCodexOauthPreset={isCodexOfficialProvider}
-              selectedCodexAccountId={selectedCodexAccountId}
-              onCodexAccountSelect={setSelectedCodexAccountId}
-              onCodexAuthSelectionConfirmed={() =>
-                setHasValidCodexOfficialSelection(true)
-              }
-              onCodexAuthSelectionInvalidated={() =>
-                setHasValidCodexOfficialSelection(false)
-              }
-              onManageAuthAccounts={onManageAuthAccounts}
-              codexOauthSelectionLabel={t("codexOauth.signInMethod")}
-              codexOauthNoneOptionLabel={t("codexOauth.noneOptionLabel")}
-              codexOauthNoneOptionDescription={t(
-                "codex.followCodexLoginDescription",
+            <>
+              <CodexFormFields
+                providerId={providerId}
+                isXaiOauthPreset={
+                  presetProviderType === "xai_oauth" ||
+                  initialData?.meta?.providerType === "xai_oauth"
+                }
+                isXaiOauthAuthenticated={isXaiOauthAuthenticated}
+                selectedXaiAccountId={selectedXaiAccountId}
+                onXaiAccountSelect={setSelectedXaiAccountId}
+                codexApiKey={codexApiKey}
+                onApiKeyChange={handleCodexApiKeyChange}
+                category={category}
+                shouldShowApiKeyLink={shouldShowCodexApiKeyLink}
+                websiteUrl={codexWebsiteUrl}
+                isPartner={isCodexPartner}
+                partnerPromotionKey={codexPartnerPromotionKey}
+                isCodexOauthPreset={isCodexOfficialProvider}
+                selectedCodexAccountId={selectedCodexAccountId}
+                onCodexAccountSelect={setSelectedCodexAccountId}
+                onCodexAuthSelectionConfirmed={() =>
+                  setHasValidCodexOfficialSelection(true)
+                }
+                onCodexAuthSelectionInvalidated={() =>
+                  setHasValidCodexOfficialSelection(false)
+                }
+                onManageAuthAccounts={onManageAuthAccounts}
+                codexOauthSelectionLabel={t("codexOauth.signInMethod")}
+                codexOauthNoneOptionLabel={t("codexOauth.noneOptionLabel")}
+                codexOauthNoneOptionDescription={t(
+                  "codex.followCodexLoginDescription",
+                )}
+                codexOauthAllowUnboundSelection
+                codexOauthAllowUnboundSelectionWithoutStatus
+                codexOauthRequireExplicitSelection={
+                  requiresExplicitCodexOfficialSelection
+                }
+                shouldShowSpeedTest={shouldShowSpeedTest}
+                codexBaseUrl={codexBaseUrl}
+                onBaseUrlChange={handleCodexBaseUrlChange}
+                isFullUrl={localIsFullUrl}
+                onFullUrlChange={setLocalIsFullUrl}
+                isEndpointModalOpen={isCodexEndpointModalOpen}
+                onEndpointModalToggle={setIsCodexEndpointModalOpen}
+                onCustomEndpointsChange={
+                  isEditMode ? undefined : setDraftCustomEndpoints
+                }
+                autoSelect={endpointAutoSelect}
+                onAutoSelectChange={setEndpointAutoSelect}
+                codexModel={codexModel}
+                onModelChange={handleCodexModelChange}
+                apiFormat={localCodexApiFormat}
+                onApiFormatChange={handleCodexApiFormatChange}
+                anthropicAuthField={localCodexAnthropicAuthField}
+                onAnthropicAuthFieldChange={setLocalCodexAnthropicAuthField}
+                impersonateClaudeCode={localCodexImpersonateClaudeCode}
+                onImpersonateClaudeCodeChange={
+                  setLocalCodexImpersonateClaudeCode
+                }
+                maxOutputTokens={localCodexMaxOutputTokens}
+                onMaxOutputTokensChange={setLocalCodexMaxOutputTokens}
+                codexChatReasoning={codexChatReasoning}
+                onCodexChatReasoningChange={setCodexChatReasoning}
+                promptCacheRouting={promptCacheRouting}
+                onPromptCacheRoutingChange={setPromptCacheRouting}
+                catalogModels={codexCatalogModels}
+                onCatalogModelsChange={setCodexCatalogModels}
+                speedTestEndpoints={speedTestEndpoints}
+                customUserAgent={customUserAgent}
+                onCustomUserAgentChange={setCustomUserAgent}
+                localProxyHeadersOverride={localProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                localProxyBodyOverride={localProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              />
+              {category !== "official" && (
+                <ModelMappingEditor
+                  value={form.watch("settingsConfig")}
+                  onChange={handleSettingsConfigChange}
+                />
               )}
-              codexOauthAllowUnboundSelection
-              codexOauthAllowUnboundSelectionWithoutStatus
-              codexOauthRequireExplicitSelection={
-                requiresExplicitCodexOfficialSelection
-              }
-              shouldShowSpeedTest={shouldShowSpeedTest}
-              codexBaseUrl={codexBaseUrl}
-              onBaseUrlChange={handleCodexBaseUrlChange}
-              isFullUrl={localIsFullUrl}
-              onFullUrlChange={setLocalIsFullUrl}
-              isEndpointModalOpen={isCodexEndpointModalOpen}
-              onEndpointModalToggle={setIsCodexEndpointModalOpen}
-              onCustomEndpointsChange={
-                isEditMode ? undefined : setDraftCustomEndpoints
-              }
-              autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
-              codexModel={codexModel}
-              onModelChange={handleCodexModelChange}
-              apiFormat={localCodexApiFormat}
-              onApiFormatChange={handleCodexApiFormatChange}
-              anthropicAuthField={localCodexAnthropicAuthField}
-              onAnthropicAuthFieldChange={setLocalCodexAnthropicAuthField}
-              impersonateClaudeCode={localCodexImpersonateClaudeCode}
-              onImpersonateClaudeCodeChange={setLocalCodexImpersonateClaudeCode}
-              maxOutputTokens={localCodexMaxOutputTokens}
-              onMaxOutputTokensChange={setLocalCodexMaxOutputTokens}
-              codexChatReasoning={codexChatReasoning}
-              onCodexChatReasoningChange={setCodexChatReasoning}
-              promptCacheRouting={promptCacheRouting}
-              onPromptCacheRoutingChange={setPromptCacheRouting}
-              catalogModels={codexCatalogModels}
-              onCatalogModelsChange={setCodexCatalogModels}
-              speedTestEndpoints={speedTestEndpoints}
-              customUserAgent={customUserAgent}
-              onCustomUserAgentChange={setCustomUserAgent}
-              localProxyHeadersOverride={localProxyHeadersOverride}
-              onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
-              localProxyBodyOverride={localProxyBodyOverride}
-              onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
-            />
+            </>
           )}
 
           {appId === "gemini" && (

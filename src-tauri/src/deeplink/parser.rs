@@ -19,9 +19,14 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
 
     // Validate scheme
     let scheme = url.scheme();
-    if scheme != "ccswitch" {
+    let expected_scheme = if cfg!(all(cc_switch_dev_build, not(test))) {
+        "ccswitch-dev"
+    } else {
+        "ccswitch"
+    };
+    if scheme != expected_scheme {
         return Err(AppError::InvalidInput(format!(
-            "Invalid scheme: expected 'ccswitch', got '{scheme}'"
+            "Invalid scheme: expected '{expected_scheme}', got '{scheme}'"
         )));
     }
 

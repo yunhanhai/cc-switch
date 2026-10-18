@@ -25,6 +25,9 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         // 上游错误：使用实际状态码
         ProxyError::UpstreamError { status, .. } => *status,
 
+        // 额度耗尽已被本地识别，客户端收到网关错误；代理会先尝试备用 Provider。
+        ProxyError::BillingExhausted(_) => 502,
+
         // 超时错误：504 Gateway Timeout
         ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => 504,
 
@@ -72,6 +75,9 @@ pub fn get_error_message(error: &ProxyError) -> String {
             } else {
                 format!("上游错误 ({status})")
             }
+        }
+        ProxyError::BillingExhausted(message) => {
+            format!("API 额度耗尽，已尝试切换备用供应商: {message}")
         }
         ProxyError::Timeout(msg) => format!("请求超时: {msg}"),
         ProxyError::ForwardFailed(msg) => format!("转发失败: {msg}"),

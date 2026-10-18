@@ -37,7 +37,21 @@ pub fn get_openclaw_dir() -> PathBuf {
         return override_dir;
     }
 
-    crate::config::get_home_dir().join(".openclaw")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".openclaw")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        #[cfg(all(cc_switch_dev_build, not(test)))]
+        {
+            crate::config::get_app_config_dir().join(".openclaw")
+        }
+        #[cfg(any(not(cc_switch_dev_build), test))]
+        {
+            crate::config::get_home_dir().join(".openclaw")
+        }
+    }
 }
 
 /// 获取 OpenClaw 配置文件路径

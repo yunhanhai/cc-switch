@@ -14,6 +14,7 @@ import type {
   PaginatedLogs,
   SessionSyncResult,
   DataSourceSummary,
+  PaginatedSessions,
 } from "@/types/usage";
 import type { UsageResult } from "@/types";
 import type { AppId } from "./types";
@@ -143,6 +144,12 @@ export const usageApi = {
   getRequestDetail: async (requestId: string): Promise<RequestLog | null> => {
     return invoke("get_request_detail", { requestId });
   },
+
+  getSessionSummaries: async (
+    page = 0,
+    pageSize = 20,
+  ): Promise<PaginatedSessions> =>
+    invoke("get_session_summaries", { page, pageSize }),
 
   getModelPricing: async (): Promise<ModelPricing[]> => {
     return invoke("get_model_pricing");

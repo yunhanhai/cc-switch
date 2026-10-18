@@ -1,4 +1,6 @@
-use crate::config::{get_home_dir, write_text_file};
+#[cfg(any(not(cc_switch_dev_build), test))]
+use crate::config::get_home_dir;
+use crate::config::write_text_file;
 use crate::error::AppError;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -11,7 +13,14 @@ pub fn get_gemini_dir() -> PathBuf {
         return custom;
     }
 
-    get_home_dir().join(".gemini")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".gemini")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        get_home_dir().join(".gemini")
+    }
 }
 
 /// 获取 Gemini .env 文件路径

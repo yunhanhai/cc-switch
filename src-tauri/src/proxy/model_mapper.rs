@@ -4,7 +4,88 @@
 
 use crate::claude_desktop_config::ONE_M_CONTEXT_MARKER;
 use crate::provider::Provider;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Provider-specific model alias rule.
+///
+/// Rules are stored in `settingsConfig.model_mapping` and are applied before
+/// protocol conversion. `source` supports `*` wildcards; exact rules win over
+/// wildcard rules, and equal-specificity rules keep their configured order.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct GenericModelMappingRule {
+    pub source: String,
+    pub target: String,
+    #[serde(default = "default_mapping_enabled")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+fn default_mapping_enabled() -> bool {
+    true
+}
+
+fn matches_model_pattern(model: &str, pattern: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return model == pattern;
+    }
+
+    let mut remaining = model;
+    let parts: Vec<&str> = pattern.split('*').collect();
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let is_first = index == 0;
+        let is_last = index == parts.len() - 1;
+        if is_first {
+            if !remaining.starts_with(part) {
+                return false;
+            }
+            remaining = &remaining[part.len()..];
+        } else if is_last {
+            return remaining.ends_with(part);
+        } else if let Some(position) = remaining.find(part) {
+            remaining = &remaining[position + part.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn mapping_specificity(pattern: &str) -> (u32, u32) {
+    let wildcard_count = pattern.matches('*').count() as u32;
+    let literal_count = pattern
+        .chars()
+        .filter(|character| *character != '*')
+        .count() as u32;
+    if wildcard_count == 0 {
+        (2, literal_count)
+    } else if pattern == "*" {
+        (0, 0)
+    } else {
+        (1, literal_count.saturating_sub(wildcard_count))
+    }
+}
+
+fn generic_mapping_rules(provider: &Provider) -> Vec<GenericModelMappingRule> {
+    provider
+        .settings_config
+        .get("model_mapping")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<GenericModelMappingRule>(value.clone()).ok())
+        .filter(|rule| {
+            rule.enabled && !rule.source.trim().is_empty() && !rule.target.trim().is_empty()
+        })
+        .collect()
+}
 
 /// 模型映射配置
 pub struct ModelMapping {
@@ -120,17 +201,47 @@ pub fn apply_model_mapping(
     mut body: Value,
     provider: &Provider,
 ) -> (Value, Option<String>, Option<String>) {
+    let original_model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    if let Some(original) = original_model.as_deref() {
+        let mut indexed_rules: Vec<(usize, GenericModelMappingRule)> =
+            generic_mapping_rules(provider)
+                .into_iter()
+                .enumerate()
+                .collect();
+        indexed_rules.sort_by_key(|(index, rule)| {
+            let (wildcard_class, literal_count) = mapping_specificity(&rule.source);
+            (
+                std::cmp::Reverse(wildcard_class),
+                std::cmp::Reverse(literal_count),
+                *index,
+            )
+        });
+
+        if let Some((_, rule)) = indexed_rules
+            .into_iter()
+            .find(|(_, rule)| matches_model_pattern(original, &rule.source))
+        {
+            let mapped = rule.target.trim().to_string();
+            if mapped != original {
+                log::debug!("[ModelMapper] 通用模型映射: {original} → {mapped}");
+                body["model"] = Value::String(mapped.clone());
+                return (body, Some(original.to_string()), Some(mapped));
+            }
+        }
+    }
+
     let mapping = ModelMapping::from_provider(provider);
 
     // 如果没有配置映射，直接返回
     if !mapping.has_mapping() {
-        let original = body.get("model").and_then(|m| m.as_str()).map(String::from);
-        return (body, original, None);
+        return (body, original_model, None);
     }
 
     // 提取原始模型名
-    let original_model = body.get("model").and_then(|m| m.as_str()).map(String::from);
-
     if let Some(ref original) = original_model {
         let mapped = mapping.map_model(original);
 
@@ -176,6 +287,48 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn generic_model_mapping_prefers_exact_rule_over_wildcard() {
+        let provider = provider_with_generic_mapping(json!([
+            {"source": "*", "target": "fallback"},
+            {"source": "o*", "target": "prefix"},
+            {"source": "o3", "target": "exact"}
+        ]));
+
+        let (body, original, mapped) = apply_model_mapping(json!({"model": "o3"}), &provider);
+
+        assert_eq!(body["model"], "exact");
+        assert_eq!(original.as_deref(), Some("o3"));
+        assert_eq!(mapped.as_deref(), Some("exact"));
+    }
+
+    #[test]
+    fn generic_model_mapping_preserves_order_for_equal_specificity() {
+        let provider = provider_with_generic_mapping(json!([
+            {"source": "claude-*", "target": "first"},
+            {"source": "claude-*", "target": "second"}
+        ]));
+
+        let (body, _, mapped) = apply_model_mapping(json!({"model": "claude-sonnet"}), &provider);
+
+        assert_eq!(body["model"], "first");
+        assert_eq!(mapped.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn generic_model_mapping_ignores_empty_rules() {
+        let provider = provider_with_generic_mapping(json!([
+            {"source": "", "target": "bad"},
+            {"source": "o3", "target": ""}
+        ]));
+
+        let (body, original, mapped) = apply_model_mapping(json!({"model": "o3"}), &provider);
+
+        assert_eq!(body["model"], "o3");
+        assert_eq!(original.as_deref(), Some("o3"));
+        assert!(mapped.is_none());
+    }
+
     fn create_provider_with_mapping() -> Provider {
         Provider {
             id: "test".to_string(),
@@ -216,6 +369,12 @@ mod tests {
             icon_color: None,
             in_failover_queue: false,
         }
+    }
+
+    fn provider_with_generic_mapping(mapping: Value) -> Provider {
+        let mut provider = create_provider_without_mapping();
+        provider.settings_config = json!({"model_mapping": mapping});
+        provider
     }
 
     #[test]

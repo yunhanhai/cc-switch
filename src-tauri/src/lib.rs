@@ -249,7 +249,12 @@ fn handle_deeplink_url(
     focus_main_window: bool,
     source: &str,
 ) -> bool {
-    if !url_str.starts_with("ccswitch://") {
+    let scheme_prefix = if cfg!(all(cc_switch_dev_build, not(test))) {
+        "ccswitch-dev://"
+    } else {
+        "ccswitch://"
+    };
+    if !url_str.starts_with(scheme_prefix) {
         return false;
     }
 
@@ -1595,6 +1600,7 @@ pub fn run() {
             commands::get_model_stats,
             commands::get_request_logs,
             commands::get_request_detail,
+            commands::get_session_summaries,
             commands::get_model_pricing,
             commands::update_model_pricing,
             commands::update_model_pricing_batch,
@@ -1806,7 +1812,12 @@ pub fn run() {
                             url_for_log(&url_str)
                         );
 
-                        if url_str.starts_with("ccswitch://") {
+                        let scheme_prefix = if cfg!(all(cc_switch_dev_build, not(test))) {
+                            "ccswitch-dev://"
+                        } else {
+                            "ccswitch://"
+                        };
+                        if url_str.starts_with(scheme_prefix) {
                             if crate::lightweight::is_lightweight_mode() {
                                 if let Err(e) = crate::lightweight::exit_lightweight_mode(app_handle)
                                 {

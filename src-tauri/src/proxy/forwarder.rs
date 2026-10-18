@@ -188,6 +188,10 @@ pub struct RequestForwarder {
     /// `max_attempts = max_retries + 1`，所以 max_retries=0 表示仅尝试一家、
     /// max_retries=3（默认）表示最多 4 家。loop 同时受 providers.len() 自然限制。
     max_attempts: usize,
+    /// 429 限流等待重试开关（per-app 配置）
+    rate_limit_retry_enabled: bool,
+    /// 429 等待重试的最长等待时间（秒）。超过则不等待、走故障转移。
+    rate_limit_max_wait_secs: u64,
 }
 
 impl RequestForwarder {
@@ -255,6 +259,8 @@ impl RequestForwarder {
         optimizer_config: OptimizerConfig,
         copilot_optimizer_config: CopilotOptimizerConfig,
         max_retries: u32,
+        rate_limit_retry_enabled: bool,
+        rate_limit_max_wait_secs: u64,
     ) -> Self {
         // max_retries 是「失败后重试次数」语义，attempt 上限 = retries + 1。
         // saturating_add 防止 u32::MAX + 1 溢出。
@@ -278,6 +284,8 @@ impl RequestForwarder {
                 streaming_first_byte_timeout,
             ),
             max_attempts,
+            rate_limit_retry_enabled,
+            rate_limit_max_wait_secs,
         }
     }
 
@@ -525,19 +533,51 @@ impl RequestForwarder {
             }
 
             // 转发请求（每个 Provider 只尝试一次，重试由客户端控制）
-            match self
-                .forward(
-                    app_type,
-                    &method,
-                    provider,
-                    endpoint,
-                    &provider_body,
-                    &headers,
-                    &extensions,
-                    adapter.as_ref(),
-                )
-                .await
-            {
+            // 429 限流等待重试是唯一例外：开关开启时对同一 Provider 等待重试，
+            // 不消耗 attempted_providers 配额（它不是 provider 故障，是节奏控制）。
+            let mut rate_limit_attempt: u32 = 0;
+            let forward_outcome = loop {
+                match self
+                    .forward(
+                        app_type,
+                        &method,
+                        provider,
+                        endpoint,
+                        &provider_body,
+                        &headers,
+                        &extensions,
+                        adapter.as_ref(),
+                    )
+                    .await
+                {
+                    Ok(ok) => break Ok(ok),
+                    Err(ProxyError::RateLimited {
+                        retry_after_secs,
+                        body,
+                    }) => {
+                        rate_limit_attempt += 1;
+                        match self.rate_limit_wait_secs(retry_after_secs, rate_limit_attempt) {
+                            Some(wait_secs) => {
+                                log::info!(
+                                    "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
+                                    provider.name
+                                );
+                                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                                continue;
+                            }
+                            None => {
+                                break Err(ProxyError::RateLimited {
+                                    retry_after_secs,
+                                    body,
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => break Err(e),
+                }
+            };
+
+            match forward_outcome {
                 Ok((response, claude_api_format, outbound_model)) => {
                     // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
@@ -1056,16 +1096,31 @@ impl RequestForwarder {
                     match category {
                         ErrorCategory::Retryable => {
                             // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                            let _ = self
-                                .router
-                                .record_result(
-                                    &provider.id,
-                                    app_type_str,
-                                    used_half_open_permit,
-                                    false,
-                                    Some(e.to_string()),
-                                )
-                                .await;
+                            let record_result = if matches!(&e, ProxyError::BillingExhausted(_)) {
+                                self.router
+                                    .record_fatal_result(
+                                        &provider.id,
+                                        app_type_str,
+                                        used_half_open_permit,
+                                        e.to_string(),
+                                    )
+                                    .await
+                            } else {
+                                self.router
+                                    .record_result(
+                                        &provider.id,
+                                        app_type_str,
+                                        used_half_open_permit,
+                                        false,
+                                        Some(e.to_string()),
+                                    )
+                                    .await
+                            };
+                            if let Err(record_error) = record_result {
+                                log::warn!(
+                                    "[{app_type_str}] failed to record provider failure: {record_error}"
+                                );
+                            }
 
                             {
                                 let mut status = self.status.write().await;
@@ -2422,6 +2477,16 @@ impl RequestForwarder {
             // 自动解压 feature，这里拿到的是原始字节；不解压的话，压缩过的错误体会
             // 在 from_utf8 处变成非 UTF-8 而被丢弃，隐藏掉上游的限流/鉴权等详情。
             let encoding = get_content_encoding(response.headers());
+            // bytes_with_limit 会消费 response；先提取 Retry-After 供 429 决策
+            let retry_after_header = if status_code == 429 {
+                response
+                    .headers()
+                    .get(http::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(super::error::parse_retry_after)
+            } else {
+                None
+            };
             let raw = response.bytes_with_limit(MAX_RESPONSE_BODY_BYTES).await?;
             let decoded = match encoding {
                 Some(encoding) => {
@@ -2435,6 +2500,22 @@ impl RequestForwarder {
                 None => raw.to_vec(),
             };
             let body_text = String::from_utf8(decoded).ok();
+
+            if status_code == 403 {
+                if let Some(body) = body_text.as_deref() {
+                    if super::error::is_billing_exhausted_body(body) {
+                        return Err(ProxyError::BillingExhausted(body.to_string()));
+                    }
+                }
+            }
+
+            // 429 限流：携带 Retry-After 供等待重试决策
+            if status_code == 429 {
+                return Err(ProxyError::RateLimited {
+                    retry_after_secs: retry_after_header,
+                    body: body_text,
+                });
+            }
 
             Err(ProxyError::UpstreamError {
                 status: status_code,
@@ -2757,6 +2838,37 @@ impl RequestForwarder {
         }
     }
 
+    /// 429 等待重试决策：本次限流是否值得等待后重试同一 Provider。
+    ///
+    /// - 开关关闭 → 不等待
+    /// - Retry-After 明确且 ≤ max_wait → 等待该时长
+    /// - Retry-After 缺失/非法 → 指数退避兜底（attempt 从 1 起：1s, 2s, 4s... 封顶 30s）
+    /// - Retry-After 超过 max_wait → 不等待（等待太久不如切备用）
+    ///
+    /// 返回 `Some(等待秒数)` 表示可重试，`None` 表示放弃等待、走故障转移。
+    fn rate_limit_wait_secs(
+        &self,
+        retry_after_secs: Option<u64>,
+        rate_limit_attempt: u32,
+    ) -> Option<u64> {
+        if !self.rate_limit_retry_enabled {
+            return None;
+        }
+
+        match retry_after_secs {
+            Some(secs) if secs <= self.rate_limit_max_wait_secs => Some(secs),
+            Some(_) => None,
+            None => {
+                // 无 Retry-After：指数退避 2^(n-1)，封顶 30s
+                let backoff = 1u64
+                    .checked_shl(rate_limit_attempt.saturating_sub(1).min(5))
+                    .unwrap_or(30)
+                    .min(30);
+                (backoff <= self.rate_limit_max_wait_secs).then_some(backoff)
+            }
+        }
+    }
+
     fn categorize_proxy_error(&self, error: &ProxyError, provider: &Provider) -> ErrorCategory {
         // Authentication belongs to the Codex client for an official route.
         // Every retry would reuse the selected account's inbound Authorization
@@ -2790,6 +2902,9 @@ impl RequestForwarder {
             //
             // 其他 4xx（401/403/404/408/409/429/451 等）和全部 5xx 都保留
             // Retryable —— 换一家 provider 可能持有不同的 key、配额、地域或模型映射。
+            ProxyError::BillingExhausted(_) => ErrorCategory::Retryable,
+            // 429：等待重试开关关闭或等待超限时，换下一家 provider 可能不受同一限流窗口约束
+            ProxyError::RateLimited { .. } => ErrorCategory::Retryable,
             ProxyError::UpstreamError { status, .. } => match *status {
                 400 | 405 | 406 | 413 | 414 | 415 | 422 | 501 => ErrorCategory::NonRetryable,
                 _ => ErrorCategory::Retryable,
@@ -3797,6 +3912,8 @@ mod tests {
             non_streaming_timeout,
             streaming_first_byte_timeout,
             max_attempts: 1,
+            rate_limit_retry_enabled: false,
+            rate_limit_max_wait_secs: 120,
         }
     }
 
@@ -4992,6 +5109,54 @@ mod tests {
         let mut fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
         fwd.rectifier_config = config;
         fwd
+    }
+
+    fn forwarder_with_rate_limit_retry(enabled: bool, max_wait_secs: u64) -> RequestForwarder {
+        let mut fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        fwd.rate_limit_retry_enabled = enabled;
+        fwd.rate_limit_max_wait_secs = max_wait_secs;
+        fwd
+    }
+
+    #[test]
+    fn rate_limit_wait_disabled_returns_none() {
+        let fwd = forwarder_with_rate_limit_retry(false, 120);
+        assert_eq!(fwd.rate_limit_wait_secs(Some(30), 1), None);
+        assert_eq!(fwd.rate_limit_wait_secs(None, 1), None);
+    }
+
+    #[test]
+    fn rate_limit_wait_honors_retry_after_within_cap() {
+        let fwd = forwarder_with_rate_limit_retry(true, 120);
+        assert_eq!(fwd.rate_limit_wait_secs(Some(30), 1), Some(30));
+        assert_eq!(fwd.rate_limit_wait_secs(Some(120), 1), Some(120));
+    }
+
+    #[test]
+    fn rate_limit_wait_rejects_retry_after_beyond_cap() {
+        let fwd = forwarder_with_rate_limit_retry(true, 120);
+        assert_eq!(fwd.rate_limit_wait_secs(Some(600), 1), None);
+        assert_eq!(fwd.rate_limit_wait_secs(Some(121), 1), None);
+    }
+
+    #[test]
+    fn rate_limit_wait_exponential_backoff_without_header() {
+        let fwd = forwarder_with_rate_limit_retry(true, 120);
+        // 无 Retry-After：1s, 2s, 4s, 8s, 16s, 32s→封顶30s
+        assert_eq!(fwd.rate_limit_wait_secs(None, 1), Some(1));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 2), Some(2));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 3), Some(4));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 6), Some(30));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 99), Some(30));
+    }
+
+    #[test]
+    fn rate_limit_wait_backoff_respects_cap() {
+        // max_wait=3s：前两档退避(1s,2s)可等，第 3 档 4s 超上限放弃
+        let fwd = forwarder_with_rate_limit_retry(true, 3);
+        assert_eq!(fwd.rate_limit_wait_secs(None, 1), Some(1));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 2), Some(2));
+        assert_eq!(fwd.rate_limit_wait_secs(None, 3), None);
     }
 
     fn provider_with_settings(settings_config: Value) -> Provider {

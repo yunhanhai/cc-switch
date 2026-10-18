@@ -86,7 +86,11 @@ impl Database {
                 Ok(GlobalProxyConfig {
                     proxy_enabled: false,
                     listen_address: "127.0.0.1".to_string(),
-                    listen_port: 15721,
+                    listen_port: if cfg!(all(cc_switch_dev_build, not(test))) {
+                        15722
+                    } else {
+                        15721
+                    },
                     enable_logging: true,
                 })
             }
@@ -224,7 +228,8 @@ impl Database {
                 "SELECT app_type, enabled, auto_failover_enabled,
                         max_retries, streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                         circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                        circuit_error_rate_threshold, circuit_min_requests
+                        circuit_error_rate_threshold, circuit_min_requests,
+                        rate_limit_retry_enabled, rate_limit_max_wait_secs
                  FROM proxy_config WHERE app_type = ?1",
                 [app_type],
                 |row| {
@@ -241,6 +246,8 @@ impl Database {
                         circuit_timeout_seconds: row.get::<_, i32>(9)? as u32,
                         circuit_error_rate_threshold: row.get(10)?,
                         circuit_min_requests: row.get::<_, i32>(11)? as u32,
+                        rate_limit_retry_enabled: row.get::<_, i32>(12)? != 0,
+                        rate_limit_max_wait_secs: row.get::<_, i32>(13)? as u32,
                     })
                 },
             )
@@ -265,6 +272,8 @@ impl Database {
                     circuit_timeout_seconds: 60,
                     circuit_error_rate_threshold: 0.6,
                     circuit_min_requests: 10,
+                    rate_limit_retry_enabled: false,
+                    rate_limit_max_wait_secs: 120,
                 })
             }
             Err(e) => Err(AppError::Database(e.to_string())),
@@ -291,6 +300,8 @@ impl Database {
                 circuit_timeout_seconds = ?10,
                 circuit_error_rate_threshold = ?11,
                 circuit_min_requests = ?12,
+                rate_limit_retry_enabled = ?13,
+                rate_limit_max_wait_secs = ?14,
                 updated_at = datetime('now')
              WHERE app_type = ?1",
             rusqlite::params![
@@ -306,6 +317,12 @@ impl Database {
                 config.circuit_timeout_seconds as i32,
                 config.circuit_error_rate_threshold,
                 config.circuit_min_requests as i32,
+                if config.rate_limit_retry_enabled {
+                    1
+                } else {
+                    0
+                },
+                config.rate_limit_max_wait_secs as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;

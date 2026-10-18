@@ -1690,6 +1690,10 @@
     "freshInput": "Fresh Input",
     "cacheHitRate": "Cache Hit Rate",
     "requestLogs": "Request Logs",
+    "sessions": "Sessions",
+    "sessionsError": "Failed to load unified sessions. Please retry.",
+    "noSessions": "No cross-API session records yet.",
+    "retry": "Retry",
     "providerStats": "Provider Stats",
     "modelStats": "Model Stats",
     "time": "Time",
@@ -2825,7 +2829,7 @@
         },
         "listenPort": {
           "label": "Listen Port",
-          "placeholder": "15721",
+          "placeholder": "15722",
           "description": "Port number the routing server listens on (1024 ~ 65535)"
         },
         "maxRetries": {

@@ -50,9 +50,16 @@ pub fn get_opencode_dir() -> PathBuf {
         return override_dir;
     }
 
-    crate::config::get_home_dir()
-        .join(".config")
-        .join("opencode")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".opencode")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        crate::config::get_home_dir()
+            .join(".config")
+            .join("opencode")
+    }
 }
 
 pub fn get_opencode_config_path() -> PathBuf {
@@ -87,10 +94,17 @@ fn get_opencode_data_dir() -> PathBuf {
 
     // OpenCode 使用 xdg-basedir，不遵守 macOS/Windows 平台约定，
     // 所有平台默认都落在 ~/.local/share/opencode
-    crate::config::get_home_dir()
-        .join(".local")
-        .join("share")
-        .join("opencode")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".opencode-data")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        crate::config::get_home_dir()
+            .join(".local")
+            .join("share")
+            .join("opencode")
+    }
 }
 
 #[allow(dead_code)]

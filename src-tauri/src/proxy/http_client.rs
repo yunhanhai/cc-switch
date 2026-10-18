@@ -40,7 +40,11 @@ fn get_proxy_port() -> u16 {
         .get()
         .and_then(|lock| lock.read().ok())
         .map(|port| *port)
-        .unwrap_or(15721) // 默认端口作为回退
+        .unwrap_or(if cfg!(all(cc_switch_dev_build, not(test))) {
+            15722
+        } else {
+            15721
+        })
 }
 
 /// 初始化全局 HTTP 客户端

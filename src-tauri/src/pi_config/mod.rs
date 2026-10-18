@@ -44,7 +44,13 @@ pub(crate) fn get_pi_agent_dir() -> Result<PathBuf, AppError> {
     resolve_pi_agent_dir(
         crate::settings::get_pi_override_dir(),
         std::env::var_os("PI_CODING_AGENT_DIR"),
-        get_home_dir().join(".pi").join("agent"),
+        if cfg!(all(cc_switch_dev_build, not(test))) {
+            crate::config::get_app_config_dir()
+                .join(".pi")
+                .join("agent")
+        } else {
+            get_home_dir().join(".pi").join("agent")
+        },
     )
 }
 

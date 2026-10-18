@@ -1690,6 +1690,10 @@
     "freshInput": "新增输入",
     "cacheHitRate": "缓存命中率",
     "requestLogs": "请求日志",
+    "sessions": "统一会话",
+    "sessionsError": "统一会话加载失败，请重试。",
+    "noSessions": "暂无跨 API 会话记录。",
+    "retry": "重试",
     "providerStats": "Provider 统计",
     "modelStats": "模型统计",
     "time": "时间",
@@ -2825,7 +2829,7 @@
         },
         "listenPort": {
           "label": "监听端口",
-          "placeholder": "15721",
+          "placeholder": "15722",
           "description": "路由服务器监听的端口号（1024 ~ 65535）"
         },
         "maxRetries": {

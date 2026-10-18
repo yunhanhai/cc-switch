@@ -2017,6 +2017,8 @@ fn codex_proxy_error_code(error: &ProxyError) -> &'static str {
         ProxyError::TransformError(_) => "cc_switch_transform_error",
         ProxyError::InvalidRequest(_) => "cc_switch_invalid_request",
         ProxyError::AuthError(_) => "cc_switch_auth_error",
+        ProxyError::BillingExhausted(_) => "cc_switch_billing_exhausted",
+        ProxyError::RateLimited { .. } => "cc_switch_rate_limited",
         ProxyError::UpstreamError { .. } => "cc_switch_upstream_error",
         ProxyError::DatabaseError(_) => "cc_switch_database_error",
         ProxyError::Internal(_) => "cc_switch_internal_error",

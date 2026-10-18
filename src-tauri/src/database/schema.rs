@@ -133,6 +133,7 @@ impl Database {
             circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
             circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
             circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+            rate_limit_retry_enabled INTEGER NOT NULL DEFAULT 0, rate_limit_max_wait_secs INTEGER NOT NULL DEFAULT 120,
             default_cost_multiplier TEXT NOT NULL DEFAULT '1',
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -177,6 +178,13 @@ impl Database {
                 circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                 circuit_error_rate_threshold, circuit_min_requests)
                 VALUES ('grokbuild', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
+                [],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+            #[cfg(all(cc_switch_dev_build, not(test)))]
+            conn.execute(
+                "UPDATE proxy_config SET listen_port = 15722 WHERE listen_port = 15721",
                 [],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -591,6 +599,23 @@ impl Database {
             "BOOLEAN NOT NULL DEFAULT 0",
         )?;
 
+        // proxy_config 表：429 限流等待重试（v3.20.1-custom 新增）
+        // 旧 fixture 库可能没有 proxy_config 表（由建表路径负责），存在才迁移
+        if Self::table_exists(conn, "proxy_config")? {
+            Self::add_column_if_missing(
+                conn,
+                "proxy_config",
+                "rate_limit_retry_enabled",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "proxy_config",
+                "rate_limit_max_wait_secs",
+                "INTEGER NOT NULL DEFAULT 120",
+            )?;
+        }
+
         // provider_endpoints 表
         Self::add_column_if_missing(conn, "provider_endpoints", "added_at", "INTEGER")?;
 
@@ -889,6 +914,7 @@ impl Database {
             circuit_failure_threshold INTEGER NOT NULL DEFAULT 4, circuit_success_threshold INTEGER NOT NULL DEFAULT 2,
             circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
             circuit_min_requests INTEGER NOT NULL DEFAULT 10,
+            rate_limit_retry_enabled INTEGER NOT NULL DEFAULT 0, rate_limit_max_wait_secs INTEGER NOT NULL DEFAULT 120,
             default_cost_multiplier TEXT NOT NULL DEFAULT '1',
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             live_takeover_active INTEGER NOT NULL DEFAULT 0,

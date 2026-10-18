@@ -12,6 +12,7 @@ export interface RequestLog {
   providerId: string;
   providerName?: string;
   appType: string;
+  sessionId?: string;
   model: string;
   requestModel?: string;
   /** 写入时实际用于计价的模型名；路由接管 + request 计价模式下可能与 model 不同 */
@@ -53,6 +54,23 @@ export interface DataSourceSummary {
 
 export interface PaginatedLogs {
   data: RequestLog[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  appTypes: string[];
+  providers: string[];
+  models: string[];
+  requestCount: number;
+  totalCostUsd: string;
+  lastRequestAt: number;
+}
+
+export interface PaginatedSessions {
+  data: SessionSummary[];
   total: number;
   page: number;
   pageSize: number;
@@ -136,6 +154,8 @@ export interface LogFilters {
   statusCode?: number;
   startDate?: number;
   endDate?: number;
+  /** 按会话筛选请求日志（统一会话视图下钻） */
+  sessionId?: string;
 }
 
 /**

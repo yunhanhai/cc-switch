@@ -183,6 +183,31 @@ impl ProviderRouter {
         Ok(())
     }
 
+    /// Record a billing/quota failure and immediately open the provider circuit.
+    pub async fn record_fatal_result(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        used_half_open_permit: bool,
+        error_msg: String,
+    ) -> Result<(), AppError> {
+        let circuit_key = format!("{app_type}:{provider_id}");
+        let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+        breaker.record_fatal_failure(used_half_open_permit).await;
+        self.db
+            .update_provider_health_with_threshold(
+                provider_id,
+                app_type,
+                false,
+                Some(error_msg),
+                // Billing exhaustion is terminal for this provider until the
+                // circuit recovery probe succeeds; reflect that immediately
+                // in the persisted health state as well.
+                1,
+            )
+            .await
+    }
+
     /// 重置熔断器（手动恢复）
     pub async fn reset_circuit_breaker(&self, circuit_key: &str) {
         let breakers = self.circuit_breakers.read().await;

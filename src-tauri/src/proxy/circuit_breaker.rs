@@ -287,6 +287,27 @@ impl CircuitBreaker {
         }
     }
 
+    /// Record an unrecoverable provider failure and open the circuit immediately.
+    ///
+    /// Billing exhaustion must not wait for the normal failure threshold: retrying
+    /// the same provider only repeats the upstream 403 and may surface a payment
+    /// flow to the client.
+    pub async fn record_fatal_failure(&self, used_half_open_permit: bool) {
+        if used_half_open_permit {
+            self.release_half_open_permit();
+        }
+
+        let config = self.config.read().await;
+        self.consecutive_failures
+            .store(config.failure_threshold, Ordering::SeqCst);
+        drop(config);
+
+        self.total_requests.fetch_add(1, Ordering::SeqCst);
+        self.failed_requests.fetch_add(1, Ordering::SeqCst);
+        self.consecutive_successes.store(0, Ordering::SeqCst);
+        self.transition_to_open().await;
+    }
+
     /// 获取当前状态
     #[allow(dead_code)]
     pub async fn get_state(&self) -> CircuitState {

@@ -2,7 +2,9 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::config::{get_home_dir, write_text_file};
+#[cfg(any(not(cc_switch_dev_build), test))]
+use crate::config::get_home_dir;
+use crate::config::write_text_file;
 use crate::error::AppError;
 use crate::provider::Provider;
 
@@ -24,7 +26,18 @@ pub struct GrokModelConfig {
 
 /// Grok Build configuration directory (`~/.grok`).
 pub fn get_grok_config_dir() -> PathBuf {
-    crate::settings::get_grok_override_dir().unwrap_or_else(|| get_home_dir().join(".grok"))
+    if let Some(custom) = crate::settings::get_grok_override_dir() {
+        return custom;
+    }
+
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        crate::config::get_app_config_dir().join(".grok")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        get_home_dir().join(".grok")
+    }
 }
 
 /// Grok Build live configuration path (`~/.grok/config.toml`).

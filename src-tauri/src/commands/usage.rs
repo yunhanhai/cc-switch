@@ -119,6 +119,15 @@ pub fn get_request_detail(
     state.db.get_request_detail(&request_id)
 }
 
+#[tauri::command]
+pub fn get_session_summaries(
+    state: State<'_, AppState>,
+    page: u32,
+    page_size: u32,
+) -> Result<PaginatedSessions, AppError> {
+    state.db.get_session_summaries(page, page_size)
+}
+
 /// 获取模型定价列表
 #[tauri::command]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {

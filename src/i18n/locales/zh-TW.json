@@ -1691,6 +1691,10 @@
     "freshInput": "新增輸入",
     "cacheHitRate": "快取命中率",
     "requestLogs": "請求日誌",
+    "sessions": "統一會話",
+    "sessionsError": "統一會話載入失敗，請重試。",
+    "noSessions": "暫無跨 API 會話記錄。",
+    "retry": "重試",
     "providerStats": "Provider 統計",
     "modelStats": "模型統計",
     "time": "時間",
@@ -2826,7 +2830,7 @@
         },
         "listenPort": {
           "label": "監聽連接埠",
-          "placeholder": "15721",
+          "placeholder": "15722",
           "description": "路由伺服器監聽的連接埠號（1024 ~ 65535）"
         },
         "maxRetries": {

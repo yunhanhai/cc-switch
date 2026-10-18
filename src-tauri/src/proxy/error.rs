@@ -45,6 +45,16 @@ pub enum ProxyError {
     #[error("上游错误 (状态码 {status}): {body:?}")]
     UpstreamError { status: u16, body: Option<String> },
 
+    #[error("上游额度耗尽 (403): {0}")]
+    BillingExhausted(String),
+
+    /// 上游限流（429）：携带 Retry-After 提示（秒），供等待重试决策使用
+    #[error("上游限流 (429), Retry-After: {retry_after_secs:?}秒")]
+    RateLimited {
+        retry_after_secs: Option<u64>,
+        body: Option<String>,
+    },
+
     #[error("超过最大重试次数")]
     MaxRetriesExceeded,
 
@@ -163,6 +173,27 @@ impl IntoResponse for ProxyError {
                         (StatusCode::BAD_GATEWAY, self.to_string())
                     }
                     ProxyError::UpstreamError { .. } => unreachable!(),
+                    ProxyError::BillingExhausted(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
+                    // 限流：透传 429 与 Retry-After，客户端可按规范自行等待重试
+                    ProxyError::RateLimited {
+                        retry_after_secs, ..
+                    } => {
+                        let mut resp = axum::Json(json!({
+                            "error": {
+                                "message": self.to_string(),
+                                "type": "rate_limit_error",
+                            }
+                        }))
+                        .into_response();
+                        if let Some(secs) = retry_after_secs {
+                            if let Ok(value) = axum::http::HeaderValue::from_str(&secs.to_string())
+                            {
+                                resp.headers_mut().insert("retry-after", value);
+                            }
+                        }
+                        *resp.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                        return resp;
+                    }
                 };
 
                 let error_body = json!({
@@ -177,6 +208,101 @@ impl IntoResponse for ProxyError {
         };
 
         (status, Json(body)).into_response()
+    }
+}
+
+/// Detect quota/billing exhaustion without classifying ordinary permissions or rate limits.
+pub fn is_billing_exhausted_body(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("billing_error")
+        || lower.contains("credit balance is too low")
+        || lower.contains("insufficient_quota")
+        || lower.contains("billing_hard_limit_reached")
+        || lower.contains("payment required")
+        || (lower.contains("quota") && (lower.contains("exceeded") || lower.contains("exhausted")))
+        || (lower.contains("spending limit")
+            && (lower.contains("reached") || lower.contains("exceeded")))
+        || (lower.contains("usage limit")
+            && (lower.contains("reached") || lower.contains("exceeded")))
+}
+
+/// 解析上游 `Retry-After` 响应头
+///
+/// 支持两种规范格式：
+/// - 秒数：`Retry-After: 30`
+/// - HTTP-date：`Retry-After: Wed, 21 Oct 2026 07:28:00 GMT`（转为相对秒数）
+///
+/// 非法值返回 `None`，由调用方走指数退避兜底。
+pub fn parse_retry_after(value: &str) -> Option<u64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // 数字秒
+    if let Ok(secs) = trimmed.parse::<u64>() {
+        return Some(secs);
+    }
+
+    // HTTP-date（RFC 7231）
+    if let Ok(ts) = chrono::DateTime::parse_from_rfc2822(trimmed) {
+        let now = chrono::Utc::now().timestamp();
+        let secs = ts.timestamp() - now;
+        return (secs > 0).then_some(secs as u64);
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::parse_retry_after;
+
+    #[test]
+    fn parses_numeric_seconds() {
+        assert_eq!(parse_retry_after("30"), Some(30));
+        assert_eq!(parse_retry_after("  120  "), Some(120));
+        assert_eq!(parse_retry_after("0"), Some(0));
+    }
+
+    #[test]
+    fn parses_http_date_as_relative_seconds() {
+        let future = chrono::Utc::now().timestamp() + 90;
+        let date = chrono::DateTime::from_timestamp(future, 0)
+            .unwrap()
+            .to_rfc2822();
+        let parsed = parse_retry_after(&date).unwrap_or(0);
+        assert!((75..=95).contains(&parsed), "parsed={parsed}");
+    }
+
+    #[test]
+    fn returns_none_for_invalid_or_past_values() {
+        assert_eq!(parse_retry_after(""), None);
+        assert_eq!(parse_retry_after("abc"), None);
+        assert_eq!(parse_retry_after("-5"), None);
+    }
+}
+
+#[cfg(test)]
+mod billing_tests {
+    use super::is_billing_exhausted_body;
+
+    #[test]
+    fn detects_known_billing_payloads() {
+        assert!(is_billing_exhausted_body(
+            "billing_error: credit balance is too low"
+        ));
+        assert!(is_billing_exhausted_body("insufficient_quota"));
+        assert!(is_billing_exhausted_body("monthly quota exceeded"));
+    }
+
+    #[test]
+    fn ignores_rate_limits_permissions_and_empty_payloads() {
+        assert!(!is_billing_exhausted_body(
+            "rate limit exceeded; retry after 30 seconds"
+        ));
+        assert!(!is_billing_exhausted_body("permission denied"));
+        assert!(!is_billing_exhausted_body(""));
     }
 }
 

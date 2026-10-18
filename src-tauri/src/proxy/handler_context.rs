@@ -241,6 +241,8 @@ impl RequestContext {
             self.optimizer_config.clone(),
             self.copilot_optimizer_config.clone(),
             max_retries,
+            self.app_config.rate_limit_retry_enabled,
+            self.app_config.rate_limit_max_wait_secs as u64,
         )
     }
 

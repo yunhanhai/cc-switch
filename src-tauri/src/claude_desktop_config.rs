@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[cfg(any(target_os = "macos", windows))]
+#[cfg(any(target_os = "macos", all(windows, not(cc_switch_dev_build)), test))]
 use crate::config::get_home_dir;
 use crate::config::{atomic_write, delete_file, read_json_file, write_json_file};
 use crate::database::Database;
@@ -1216,18 +1216,32 @@ fn is_supported_platform() -> bool {
 
 #[allow(clippy::needless_return)]
 fn current_platform_paths() -> Result<ClaudeDesktopPaths, AppError> {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        let root = crate::config::get_app_config_dir().join(".claude-desktop");
+        return Ok(paths_from_dirs(root.join("Claude"), root.join("Claude-3p")));
+    }
+
+    #[cfg(test)]
+    {
+        return Ok(paths_from_dirs(
+            get_home_dir().join("Claude"),
+            get_home_dir().join("Claude-3p"),
+        ));
+    }
+
+    #[cfg(all(target_os = "macos", not(cc_switch_dev_build)))]
     {
         return Ok(macos_paths_from_home(&get_home_dir()));
     }
 
-    #[cfg(windows)]
+    #[cfg(all(windows, not(cc_switch_dev_build)))]
     {
         let local_app_data = windows_local_app_data_dir();
         return Ok(windows_paths_from_local_app_data(&local_app_data));
     }
 
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(all(not(any(target_os = "macos", windows)), not(cc_switch_dev_build)))]
     {
         Err(unsupported_platform_error())
     }
@@ -1239,14 +1253,14 @@ fn macos_paths_from_home(home: &Path) -> ClaudeDesktopPaths {
     paths_from_dirs(app_support.join("Claude"), app_support.join("Claude-3p"))
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(cc_switch_dev_build)))]
 fn windows_local_app_data_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| get_home_dir().join("AppData").join("Local"))
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(cc_switch_dev_build)))]
 fn windows_paths_from_local_app_data(local_app_data: &Path) -> ClaudeDesktopPaths {
     let normal_dir = pick_windows_claude_dir(local_app_data, false)
         .unwrap_or_else(|| local_app_data.join("Claude"));
@@ -1255,7 +1269,7 @@ fn windows_paths_from_local_app_data(local_app_data: &Path) -> ClaudeDesktopPath
     paths_from_dirs(normal_dir, threep_dir)
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(cc_switch_dev_build)))]
 fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBuf> {
     let exact_name = if threep { "Claude-3p" } else { "Claude" };
     let exact = local_app_data.join(exact_name);
@@ -1281,7 +1295,7 @@ fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBu
     candidates.into_iter().next()
 }
 
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows, test, cc_switch_dev_build))]
 fn paths_from_dirs(normal_dir: PathBuf, threep_dir: PathBuf) -> ClaudeDesktopPaths {
     let config_library_path = threep_dir.join(CONFIG_LIBRARY_DIR);
     let profile_path = config_library_path.join(format!("{PROFILE_ID}.json"));

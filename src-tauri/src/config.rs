@@ -39,12 +39,25 @@ pub fn get_claude_config_dir() -> PathBuf {
         return custom;
     }
 
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        return get_home_dir().join(".cc-switch-dev").join(".claude");
+    }
+
+    #[cfg(any(not(cc_switch_dev_build), test))]
     get_home_dir().join(".claude")
 }
 
 /// 默认 Claude MCP 配置文件路径 (~/.claude.json)
 pub fn get_default_claude_mcp_path() -> PathBuf {
-    get_home_dir().join(".claude.json")
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    {
+        get_app_config_dir().join(".claude.json")
+    }
+    #[cfg(any(not(cc_switch_dev_build), test))]
+    {
+        get_home_dir().join(".claude.json")
+    }
 }
 
 fn normalize_path_lexically(path: &Path) -> PathBuf {
@@ -205,13 +218,18 @@ pub fn get_app_config_dir() -> PathBuf {
         return custom;
     }
 
+    #[cfg(all(cc_switch_dev_build, not(test)))]
+    let default_dir = get_home_dir().join(".cc-switch-dev");
+    #[cfg(any(not(cc_switch_dev_build), test))]
     let default_dir = get_home_dir().join(".cc-switch");
 
     // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
     // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。
     // 这里仅在“默认位置没有数据库”时回退到旧位置，避免再次出现“供应商消失”问题，
     // 同时也避免新安装因为 `HOME` 被设置而写入非预期路径。
-    #[cfg(windows)]
+    // 开发版构建必须跳过：legacy 目录指向正式版数据，一旦回退开发版会
+    // 直接读写生产数据库，破坏“开发版与正式版可同时运行”的隔离承诺。
+    #[cfg(all(windows, not(cc_switch_dev_build)))]
     {
         let default_db = default_dir.join("cc-switch.db");
         if !default_db.exists() {

@@ -1,4 +1,8 @@
 fn main() {
+    // This checkout is the isolated development fork. Keep both debug and
+    // release artifacts away from the official app's database and CLI files.
+    println!("cargo:rustc-check-cfg=cfg(cc_switch_dev_build)");
+    println!("cargo:rustc-cfg=cc_switch_dev_build");
     tauri_build::build();
 
     // Windows: Embed Common Controls v6 manifest for test binaries

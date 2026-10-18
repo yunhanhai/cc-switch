@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Save, Loader2, Info } from "lucide-react";
 import { toast } from "sonner";
@@ -33,6 +34,8 @@ export function AutoFailoverConfigPanel({
     circuitTimeoutSeconds: "60",
     circuitErrorRateThreshold: "50", // 存储百分比值
     circuitMinRequests: "10",
+    rateLimitRetryEnabled: false,
+    rateLimitMaxWaitSecs: "120",
   });
 
   useEffect(() => {
@@ -50,6 +53,8 @@ export function AutoFailoverConfigPanel({
           Math.round(config.circuitErrorRateThreshold * 100),
         ),
         circuitMinRequests: String(config.circuitMinRequests),
+        rateLimitRetryEnabled: config.rateLimitRetryEnabled ?? false,
+        rateLimitMaxWaitSecs: String(config.rateLimitMaxWaitSecs ?? 120),
       });
     }
   }, [config]);
@@ -75,6 +80,7 @@ export function AutoFailoverConfigPanel({
       circuitTimeoutSeconds: { min: 0, max: 300 },
       circuitErrorRateThreshold: { min: 0, max: 100 },
       circuitMinRequests: { min: 5, max: 100 },
+      rateLimitMaxWaitSecs: { min: 5, max: 600 },
     };
 
     // 解析原始值
@@ -88,6 +94,7 @@ export function AutoFailoverConfigPanel({
       circuitTimeoutSeconds: parseNum(formData.circuitTimeoutSeconds),
       circuitErrorRateThreshold: parseNum(formData.circuitErrorRateThreshold),
       circuitMinRequests: parseNum(formData.circuitMinRequests),
+      rateLimitMaxWaitSecs: parseNum(formData.rateLimitMaxWaitSecs),
     };
 
     // 校验是否超出范围（NaN 也视为无效）
@@ -147,6 +154,11 @@ export function AutoFailoverConfigPanel({
       ranges.circuitMinRequests,
       t("proxy.autoFailover.minRequests", "最小请求数"),
     );
+    checkRange(
+      raw.rateLimitMaxWaitSecs,
+      ranges.rateLimitMaxWaitSecs,
+      t("proxy.autoFailover.rateLimitMaxWait", "限流等待上限"),
+    );
 
     if (errors.length > 0) {
       toast.error(
@@ -172,6 +184,8 @@ export function AutoFailoverConfigPanel({
         circuitTimeoutSeconds: raw.circuitTimeoutSeconds,
         circuitErrorRateThreshold: raw.circuitErrorRateThreshold / 100,
         circuitMinRequests: raw.circuitMinRequests,
+        rateLimitRetryEnabled: formData.rateLimitRetryEnabled,
+        rateLimitMaxWaitSecs: raw.rateLimitMaxWaitSecs,
       });
       toast.success(
         t("proxy.autoFailover.configSaved", "自动故障转移配置已保存"),
@@ -199,6 +213,8 @@ export function AutoFailoverConfigPanel({
           Math.round(config.circuitErrorRateThreshold * 100),
         ),
         circuitMinRequests: String(config.circuitMinRequests),
+        rateLimitRetryEnabled: config.rateLimitRetryEnabled ?? false,
+        rateLimitMaxWaitSecs: String(config.rateLimitMaxWaitSecs ?? 120),
       });
     }
   };
@@ -286,6 +302,53 @@ export function AutoFailoverConfigPanel({
                   "连续失败多少次后打开熔断器（建议: 3-10）",
                 )}
               </p>
+            </div>
+          </div>
+
+          {/* 429 限流等待重试 */}
+          <div className="flex items-start justify-between gap-4 pt-2 border-t border-white/10">
+            <div className="space-y-1">
+              <Label htmlFor={`rateLimitRetry-${appType}`}>
+                {t("proxy.autoFailover.rateLimitRetry", "429 限流等待重试")}
+              </Label>
+              <p className="text-xs text-muted-foreground max-w-md">
+                {t(
+                  "proxy.autoFailover.rateLimitRetryHint",
+                  "遇到 429 时按上游 Retry-After（无头则指数退避）等待后重试同一供应商，超过等待上限则切换下一家。",
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <Input
+                id={`rateLimitMaxWait-${appType}`}
+                type="number"
+                min="5"
+                max="600"
+                value={formData.rateLimitMaxWaitSecs}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    rateLimitMaxWaitSecs: e.target.value,
+                  })
+                }
+                disabled={isDisabled || !formData.rateLimitRetryEnabled}
+                className="w-24"
+                aria-label={t(
+                  "proxy.autoFailover.rateLimitMaxWait",
+                  "等待上限（秒）",
+                )}
+              />
+              <span className="text-xs text-muted-foreground">
+                {t("proxy.autoFailover.rateLimitMaxWaitUnit", "秒上限")}
+              </span>
+              <Switch
+                id={`rateLimitRetry-${appType}`}
+                checked={formData.rateLimitRetryEnabled}
+                onCheckedChange={(checked) =>
+                  setFormData({ ...formData, rateLimitRetryEnabled: checked })
+                }
+                disabled={isDisabled}
+              />
             </div>
           </div>
         </div>
