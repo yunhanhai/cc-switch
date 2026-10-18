@@ -1694,6 +1694,9 @@
     "sessionsError": "Failed to load unified sessions. Please retry.",
     "noSessions": "No cross-API session records yet.",
     "retry": "Retry",
+    "sessionFilter": "Session",
+    "clearSessionFilter": "Clear session filter",
+    "sessionDrillHint": "Click to view this session's request logs",
     "providerStats": "Provider Stats",
     "modelStats": "Model Stats",
     "time": "Time",
@@ -2899,7 +2902,10 @@
     "failover": {
       "proxyRequired": "Routing service must be started to configure failover",
       "autoSwitch": "Auto Failover",
-      "autoSwitchDescription": "When enabled, switches to queue P1 immediately and automatically tries the next provider in the queue on failures"
+      "autoSwitchDescription": "When enabled, switches to queue P1 immediately and automatically tries the next provider in the queue on failures",
+      "notifBilling": "Provider quota exhausted; automatically switched to {{name}}",
+      "notifRateLimit": "Upstream rate limited (429); automatically switched to {{name}}",
+      "notifGeneric": "Provider request failed; automatically switched to {{name}}"
     },
     "failoverQueue": {
       "title": "Failover Queue",

@@ -2057,11 +2057,26 @@ requires_openai_auth = true
                 .expect("update app proxy config");
         }
 
+        // 绑定临时端口：避免与用户正在运行的正式版（默认 15721）冲突。
+        // start() 会把实际分配的端口写回 DB，后续断言读取真实端口。
+        {
+            let mut global = db.get_proxy_config().await.expect("get global config");
+            global.listen_port = 0;
+            db.update_proxy_config(global)
+                .await
+                .expect("set ephemeral port");
+        }
+
         state
             .proxy_service
             .start()
             .await
             .expect("start proxy service");
+        let gateway_port = db
+            .get_proxy_config()
+            .await
+            .expect("read back actual port")
+            .listen_port;
 
         let mut updated = Provider::with_id(
             "p1".into(),
@@ -2105,7 +2120,7 @@ requires_openai_auth = true
         let profile: Value = read_json_file(&profile_path).expect("read desktop profile");
         assert_eq!(
             profile["inferenceGatewayBaseUrl"],
-            json!("http://127.0.0.1:15721/claude-desktop"),
+            json!(format!("http://127.0.0.1:{gateway_port}/claude-desktop")),
             "desktop profile should stay pointed at the local gateway during takeover"
         );
         assert_eq!(profile["inferenceGatewayAuthScheme"], json!("bearer"));

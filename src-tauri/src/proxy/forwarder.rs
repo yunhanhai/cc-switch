@@ -603,15 +603,18 @@ impl RequestForwarder {
                         if should_switch {
                             status.failover_count += 1;
 
-                            // 异步触发供应商切换，更新 UI/托盘，并把“当前供应商”同步为实际使用的 provider
+                            // 异步触发供应商切换（更新 UI/托盘），把实际使用的 provider 同步为真实使用的 provider
                             let fm = self.failover_manager.clone();
                             let ah = self.app_handle.clone();
                             let pid = provider.id.clone();
                             let pname = provider.name.clone();
                             let at = app_type_str.to_string();
+                            // last_error 保存着触发切换的上游错误，转成原因标识供前端提示
+                            let freason = last_error.as_ref().map(failover_reason_label);
 
                             tokio::spawn(async move {
-                                let _ = fm.try_switch(ah.as_ref(), &at, &pid, &pname).await;
+                                let _ =
+                                    fm.try_switch(ah.as_ref(), &at, &pid, &pname, freason).await;
                             });
                         }
                         // 重新计算成功率
@@ -711,10 +714,17 @@ impl RequestForwarder {
                                             let pid = provider.id.clone();
                                             let pname = provider.name.clone();
                                             let at = app_type_str.to_string();
+                                            let freason = Some(failover_reason_label(&e));
 
                                             tokio::spawn(async move {
                                                 let _ = fm
-                                                    .try_switch(ah.as_ref(), &at, &pid, &pname)
+                                                    .try_switch(
+                                                        ah.as_ref(),
+                                                        &at,
+                                                        &pid,
+                                                        &pname,
+                                                        freason,
+                                                    )
                                                     .await;
                                             });
                                         }
@@ -853,16 +863,23 @@ impl RequestForwarder {
                                             if should_switch {
                                                 status.failover_count += 1;
 
-                                                // 异步触发供应商切换，更新 UI/托盘
+                                                // 异步触发供应商切换（更新 UI/托盘）
                                                 let fm = self.failover_manager.clone();
                                                 let ah = self.app_handle.clone();
                                                 let pid = provider.id.clone();
                                                 let pname = provider.name.clone();
                                                 let at = app_type_str.to_string();
+                                                let freason = Some(failover_reason_label(&e));
 
                                                 tokio::spawn(async move {
                                                     let _ = fm
-                                                        .try_switch(ah.as_ref(), &at, &pid, &pname)
+                                                        .try_switch(
+                                                            ah.as_ref(),
+                                                            &at,
+                                                            &pid,
+                                                            &pname,
+                                                            freason,
+                                                        )
                                                         .await;
                                                 });
                                             }
@@ -1021,9 +1038,16 @@ impl RequestForwarder {
                                             let pid = provider.id.clone();
                                             let pname = provider.name.clone();
                                             let at = app_type_str.to_string();
+                                            let freason = Some(failover_reason_label(&e));
                                             tokio::spawn(async move {
                                                 let _ = fm
-                                                    .try_switch(ah.as_ref(), &at, &pid, &pname)
+                                                    .try_switch(
+                                                        ah.as_ref(),
+                                                        &at,
+                                                        &pid,
+                                                        &pname,
+                                                        freason,
+                                                    )
                                                     .await;
                                             });
                                         }
@@ -2939,6 +2963,15 @@ fn is_bedrock_provider(provider: &Provider) -> bool {
         .and_then(|v| v.as_str())
         .map(|v| v == "1")
         .unwrap_or(false)
+}
+
+/// 从触发故障转移的错误中提炼前端通知用的原因标识
+fn failover_reason_label(error: &ProxyError) -> &'static str {
+    match error {
+        ProxyError::BillingExhausted(_) => "billing_exhausted",
+        ProxyError::RateLimited { .. } => "rate_limited",
+        _ => "provider_failed",
+    }
 }
 
 fn build_retryable_failure_log(

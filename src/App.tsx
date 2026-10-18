@@ -410,6 +410,22 @@ function App() {
             if (event.appType === "pi") {
               await invalidatePiProviderCaches(queryClient);
             }
+            // 故障转移触发的切换：toast 明确告知用户发生了什么、切到了谁。
+            // 只对已知故障原因提示；用户开启自动转移的即时切换（reason 为空）不打扰。
+            if (event.source === "failover") {
+              const name = event.providerName ?? event.providerId;
+              const message =
+                event.reason === "billing_exhausted"
+                  ? t("proxy.failover.notifBilling", { name })
+                  : event.reason === "rate_limited"
+                    ? t("proxy.failover.notifRateLimit", { name })
+                    : event.reason === "provider_failed"
+                      ? t("proxy.failover.notifGeneric", { name })
+                      : null;
+              if (message) {
+                toast.warning(message, { duration: 6000 });
+              }
+            }
           },
         );
         if (!active) {

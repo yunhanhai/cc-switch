@@ -15,6 +15,12 @@ export interface ProviderSortUpdate {
 export interface ProviderSwitchEvent {
   appType: AppId;
   providerId: string;
+  /** 切换来源："failover" 表示代理故障转移触发 */
+  source?: string;
+  /** 故障转移原因："billing_exhausted" | "rate_limited" | "provider_failed" */
+  reason?: string;
+  /** 切换目标供应商名称（故障转移事件携带） */
+  providerName?: string;
 }
 
 export interface SwitchResult {

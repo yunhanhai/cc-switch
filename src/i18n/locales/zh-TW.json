@@ -1695,6 +1695,9 @@
     "sessionsError": "統一會話載入失敗，請重試。",
     "noSessions": "暫無跨 API 會話記錄。",
     "retry": "重試",
+    "sessionFilter": "會話篩選",
+    "clearSessionFilter": "清除會話篩選",
+    "sessionDrillHint": "點擊查看該會話的請求日誌",
     "providerStats": "Provider 統計",
     "modelStats": "模型統計",
     "time": "時間",
@@ -2900,7 +2903,10 @@
     "failover": {
       "proxyRequired": "需要先啟動路由服務才能設定故障轉移",
       "autoSwitch": "自動故障轉移",
-      "autoSwitchDescription": "開啟後將立即切換至佇列 P1，並在請求失敗時自動切換至佇列中的下一個供應商"
+      "autoSwitchDescription": "開啟後將立即切換至佇列 P1，並在請求失敗時自動切換至佇列中的下一個供應商",
+      "notifBilling": "供應商額度耗盡，已自動切換至 {{name}}",
+      "notifRateLimit": "上游限流（429），已自動切換至 {{name}}",
+      "notifGeneric": "供應商請求失敗，已自動切換至 {{name}}"
     },
     "failoverQueue": {
       "title": "故障轉移佇列",

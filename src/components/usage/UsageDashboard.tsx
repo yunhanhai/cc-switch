@@ -117,6 +117,10 @@ export function UsageDashboard({
   const [syncingSession, setSyncingSession] = useState(false);
   const [activeTab, setActiveTab] = useState("logs");
   const [sessionPage, setSessionPage] = useState(0);
+  // 统一会话下钻：选中的 session_id，传给请求日志过滤
+  const [sessionIdFilter, setSessionIdFilter] = useState<string | undefined>(
+    undefined,
+  );
   const sessionsQuery = useQuery({
     queryKey: ["usage", "session-summaries", sessionPage],
     queryFn: () => usageApi.getSessionSummaries(sessionPage, 20),
@@ -468,6 +472,8 @@ export function UsageDashboard({
                 appType={appType}
                 providerName={providerName}
                 model={model}
+                sessionId={sessionIdFilter}
+                onClearSessionId={() => setSessionIdFilter(undefined)}
                 refreshIntervalMs={refreshIntervalMs}
                 onRangeChange={setRange}
               />
@@ -531,7 +537,12 @@ export function UsageDashboard({
                           {sessionsQuery.data.data.map((session) => (
                             <tr
                               key={session.sessionId}
-                              className="border-b last:border-0"
+                              className="cursor-pointer border-b last:border-0 transition-colors hover:bg-muted/40"
+                              title={t("usage.sessionDrillHint")}
+                              onClick={() => {
+                                setSessionIdFilter(session.sessionId);
+                                setActiveTab("logs");
+                              }}
                             >
                               <td
                                 className="max-w-[220px] truncate px-3 py-2 font-mono text-xs"

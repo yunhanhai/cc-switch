@@ -44,6 +44,7 @@ impl FailoverSwitchManager {
         app_type: &str,
         provider_id: &str,
         provider_name: &str,
+        reason: Option<&str>,
     ) -> Result<bool, AppError> {
         let switch_key = format!("{app_type}:{provider_id}");
 
@@ -59,7 +60,7 @@ impl FailoverSwitchManager {
 
         // 执行切换（确保最后清理 pending 标记）
         let result = self
-            .do_switch(app_handle, app_type, provider_id, provider_name)
+            .do_switch(app_handle, app_type, provider_id, provider_name, reason)
             .await;
 
         // 清理 pending 标记
@@ -77,6 +78,7 @@ impl FailoverSwitchManager {
         app_type: &str,
         provider_id: &str,
         provider_name: &str,
+        reason: Option<&str>,
     ) -> Result<bool, AppError> {
         // 检查该应用是否已被代理接管（enabled=true）
         // 只有被接管的应用才允许执行故障转移切换
@@ -120,9 +122,12 @@ impl FailoverSwitchManager {
             }
 
             // 发射事件到前端
+            // reason 让前端能区分"额度耗尽/限流/一般故障"并给出对应提示
             let event_data = serde_json::json!({
                 "appType": app_type,
                 "providerId": provider_id,
+                "providerName": provider_name,
+                "reason": reason,
                 "source": "failover"  // 标识来源是故障转移
             });
             if let Err(e) = app.emit("provider-switched", event_data) {

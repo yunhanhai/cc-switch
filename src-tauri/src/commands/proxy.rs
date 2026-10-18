@@ -404,10 +404,18 @@ pub async fn reset_circuit_breaker(
                         .unwrap_or_else(|| provider_id.clone());
 
                     // 创建故障转移切换管理器并执行切换
+                    // reason=None：这是用户开启自动转移后的即时切换，不是故障驱动，
+                    // 前端不会为它弹"请求失败"类通知
                     let switch_manager =
                         crate::proxy::failover_switch::FailoverSwitchManager::new(db.clone());
                     if let Err(e) = switch_manager
-                        .try_switch(Some(&app_handle), &app_type, &provider_id, &provider_name)
+                        .try_switch(
+                            Some(&app_handle),
+                            &app_type,
+                            &provider_id,
+                            &provider_name,
+                            None,
+                        )
                         .await
                     {
                         log::error!("[Recovery] 自动切换失败: {e}");

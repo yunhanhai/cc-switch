@@ -24,7 +24,7 @@ import {
   type LogFilters,
   type UsageRangeSelection,
 } from "@/types/usage";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import {
   fmtInt,
@@ -39,6 +39,10 @@ interface RequestLogTableProps {
   appType?: string;
   providerName?: string;
   model?: string;
+  /** 统一会话下钻：按 session_id 过滤请求日志 */
+  sessionId?: string;
+  /** 清除会话筛选（chip 的 X 按钮） */
+  onClearSessionId?: () => void;
   refreshIntervalMs: number;
   onRangeChange?: (range: UsageRangeSelection) => void;
 }
@@ -49,6 +53,8 @@ export function RequestLogTable({
   appType: dashboardAppType,
   providerName,
   model,
+  sessionId,
+  onClearSessionId,
   refreshIntervalMs,
   onRangeChange,
 }: RequestLogTableProps) {
@@ -69,6 +75,7 @@ export function RequestLogTable({
     providerName,
     model,
     statusCode,
+    sessionId,
   };
 
   const { data: result, isLoading } = useRequestLogs({
@@ -91,6 +98,7 @@ export function RequestLogTable({
     dashboardAppType,
     providerName,
     model,
+    sessionId,
     range.customEndDate,
     range.customStartDate,
     range.preset,
@@ -142,6 +150,28 @@ export function RequestLogTable({
               triggerLabel={rangeLabel}
               onApply={onRangeChange}
             />
+          )}
+
+          {/* 会话下钻筛选 chip：显示当前 session_id，点 X 清除 */}
+          {sessionId && (
+            <span
+              className="inline-flex max-w-[280px] items-center gap-1 rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-700 dark:text-blue-400"
+              title={sessionId}
+            >
+              <span className="truncate font-mono">
+                {t("usage.sessionFilter")}: {sessionId}
+              </span>
+              {onClearSessionId && (
+                <button
+                  type="button"
+                  onClick={onClearSessionId}
+                  aria-label={t("usage.clearSessionFilter")}
+                  className="shrink-0 opacity-70 transition-opacity hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
           )}
         </div>
       </div>

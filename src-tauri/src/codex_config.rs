@@ -7676,7 +7676,17 @@ model_catalog_json = "cc-switch-model-catalog.json"
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside_dir, base_dir.join("link")).expect("symlink");
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside_dir, base_dir.join("link")).expect("symlink");
+        {
+            // 无 SeCreateSymbolicLinkPrivilege 的 Windows 环境无法创建符号链接；
+            // 此时跳过本测试（而非误报失败）。有权限的环境照常真实验证。
+            if let Err(e) = std::os::windows::fs::symlink_dir(&outside_dir, base_dir.join("link")) {
+                if e.raw_os_error() == Some(1314) {
+                    eprintln!("skipped: symlink privilege not held on Windows");
+                    return;
+                }
+                panic!("symlink: {e}");
+            }
+        }
 
         let config_text = r#"model_catalog_json = "link/cc-switch-model-catalog.json"
 "#;

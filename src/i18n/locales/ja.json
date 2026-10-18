@@ -1694,6 +1694,9 @@
     "sessionsError": "統一セッションの読み込みに失敗しました。再試行してください。",
     "noSessions": "API横断のセッション記録はまだありません。",
     "retry": "再試行",
+    "sessionFilter": "セッション",
+    "clearSessionFilter": "セッションフィルターを解除",
+    "sessionDrillHint": "クリックしてこのセッションのリクエストログを表示",
     "providerStats": "プロバイダー統計",
     "modelStats": "モデル統計",
     "time": "時間",
@@ -2899,7 +2902,10 @@
     "failover": {
       "proxyRequired": "フェイルオーバーを設定するには、ルーティングサービスを先に起動する必要があります",
       "autoSwitch": "自動フェイルオーバー",
-      "autoSwitchDescription": "有効にするとキューの P1 に即時切り替え、リクエスト失敗時はキュー内の次のプロバイダーを自動で試行します"
+      "autoSwitchDescription": "有効にするとキューの P1 に即時切り替え、リクエスト失敗時はキュー内の次のプロバイダーを自動で試行します",
+      "notifBilling": "プロバイダーの利用枠を使い切ったため、{{name}} に自動切り替えしました",
+      "notifRateLimit": "上流のレート制限（429）のため、{{name}} に自動切り替えしました",
+      "notifGeneric": "プロバイダーのリクエストが失敗したため、{{name}} に自動切り替えしました"
     },
     "failoverQueue": {
       "title": "フェイルオーバーキュー",
