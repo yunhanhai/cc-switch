@@ -385,6 +385,51 @@ pub struct ResilienceSummary {
     pub longest_cooldown_secs: u64,
 }
 
+/// 连通性检测结果的聚合概况
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct StreamCheckSummary {
+    /// 不可达站点数
+    pub unreachable_count: u64,
+    /// 可达站点的平均延迟（无可用样本为 None）
+    pub avg_latency_ms: Option<u64>,
+    /// 最慢站点（provider_id + 毫秒）
+    pub slowest: Option<(String, u64)>,
+}
+
+/// 把「每个 provider 最近一次检测结果」聚合成摘要指标。
+///
+/// 抽成纯函数是为了能直接测边界情况 —— 尤其是「该应用一个供应商都没有」
+/// 这种只能靠构造状态复现的场景，在命令层里没法单独验证。
+pub fn summarize_stream_checks(
+    checks: &[crate::database::LatestStreamCheck],
+) -> StreamCheckSummary {
+    let mut summary = StreamCheckSummary::default();
+    let mut latency_total_ms = 0u64;
+    let mut latency_samples = 0u64;
+
+    for check in checks {
+        if !check.success {
+            summary.unreachable_count += 1;
+            continue;
+        }
+        let Some(latency_ms) = check.response_time_ms else {
+            continue;
+        };
+        latency_total_ms = latency_total_ms.saturating_add(latency_ms);
+        latency_samples += 1;
+        if summary
+            .slowest
+            .as_ref()
+            .is_none_or(|(_, previous_ms)| latency_ms > *previous_ms)
+        {
+            summary.slowest = Some((check.provider_id.clone(), latency_ms));
+        }
+    }
+
+    summary.avg_latency_ms = (latency_samples > 0).then(|| latency_total_ms / latency_samples);
+    summary
+}
+
 #[tauri::command]
 pub async fn get_resilience_summary(
     state: tauri::State<'_, crate::store::AppState>,
@@ -426,64 +471,56 @@ pub async fn get_resilience_summary(
         .get_latest_stream_checks(&app_type)
         .map_err(|e| e.to_string())?;
 
-    // 只统计仍然存在的供应商。
+    // 只统计仍然存在的供应商：需要 provider 名称来标注「最慢站点」。
     //
     // 删除供应商时已经会级联清理检测记录，但历史数据库里可能残留旧记录
     // （清理逻辑上线前删掉的供应商）。这些行会让「不可达」「平均延迟」把
     // 已经不存在的站点也算进去，而用户没有任何入口能发现或修正它。
-    let existing_provider_ids: std::collections::HashSet<String> = state
-        .db
-        .get_all_providers(&app_type)
-        .map(|providers| providers.into_keys().collect())
-        .unwrap_or_default();
-    let checks: Vec<_> = checks
-        .into_iter()
-        .filter(|check| {
-            existing_provider_ids.is_empty() || existing_provider_ids.contains(&check.provider_id)
-        })
-        .collect();
+    //
+    // 这里只查一次 provider 表并复用：`get_all_providers` 内部会为每个供应商
+    // 单独查一次 endpoints（N+1），而本函数被前端每 15 秒轮询一次，调用两遍
+    // 等于把 N+1 翻倍。
+    let all_providers = state.db.get_all_providers(&app_type);
+    let provider_names: Option<std::collections::HashMap<String, String>> =
+        all_providers.as_ref().ok().map(|providers| {
+            providers
+                .iter()
+                .map(|(id, provider)| (id.clone(), provider.name.clone()))
+                .collect()
+        });
 
-    let mut unreachable_count = 0u64;
-    let mut latencies: Vec<(String, u64)> = Vec::new();
-    for c in &checks {
-        if !c.success {
-            unreachable_count += 1;
-        } else if let Some(ms) = c.response_time_ms {
-            latencies.push((String::new(), ms));
+    // 查询失败时才回退到「不过滤」（宁可显示旧数据，也不要凭空清零）；
+    // 查询成功则严格按现有供应商过滤 —— 包括「该应用一个供应商都没有」的情况，
+    // 此时应当全部剔除，而不是因为集合为空就放过所有孤儿记录。
+    let checks: Vec<_> = match &provider_names {
+        Some(names) => checks
+            .into_iter()
+            .filter(|check| names.contains_key(&check.provider_id))
+            .collect(),
+        None => {
+            log::warn!("[{app_type}] 读取供应商列表失败，韧性摘要将包含无法校验归属的检测记录");
+            checks
         }
-    }
-    let avg_latency_ms = if latencies.is_empty() {
-        None
-    } else {
-        Some(latencies.iter().map(|(_, ms)| ms).sum::<u64>() / latencies.len() as u64)
     };
-    // 最慢站点：需要 provider 名称，从 checks 里找 response_time_ms 最大的
-    let slowest = checks
-        .iter()
-        .filter(|c| c.success)
-        .filter_map(|c| c.response_time_ms.map(|ms| (c.provider_id.clone(), ms)))
-        .max_by_key(|(_, ms)| *ms);
-    let slowest_provider = match slowest {
-        Some((pid, ms)) => {
-            let name = state
-                .db
-                .get_all_providers(&app_type)
-                .ok()
-                .and_then(|ps| ps.get(&pid).map(|p| p.name.clone()))
-                .unwrap_or(pid);
-            Some((name, ms))
-        }
-        None => None,
-    };
+
+    let check_summary = summarize_stream_checks(&checks);
+
+    let slowest_provider = check_summary.slowest.map(|(provider_id, latency_ms)| {
+        let name = provider_names
+            .as_ref()
+            .and_then(|names| names.get(&provider_id).cloned())
+            .unwrap_or(provider_id);
+        (name, latency_ms)
+    });
 
     Ok(ResilienceSummary {
         app_type,
         today_failover_count,
         rate_limit_wait_count: app_rate_limit_waits.count,
         rate_limit_wait_total_secs: app_rate_limit_waits.total_secs,
-        avg_latency_ms,
+        avg_latency_ms: check_summary.avg_latency_ms,
         slowest_provider,
-        unreachable_count,
+        unreachable_count: check_summary.unreachable_count,
         cooling_down_count: cooldowns.len() as u64,
         longest_cooldown_secs: cooldowns
             .iter()
@@ -660,4 +697,93 @@ pub async fn get_rate_limit_cooldowns(
         .proxy_service
         .get_rate_limit_cooldowns(&app_type)
         .await
+}
+
+#[cfg(test)]
+mod resilience_summary_tests {
+    use super::{summarize_stream_checks, StreamCheckSummary};
+    use crate::database::LatestStreamCheck;
+
+    fn check(provider_id: &str, success: bool, latency_ms: Option<u64>) -> LatestStreamCheck {
+        LatestStreamCheck {
+            provider_id: provider_id.to_string(),
+            success,
+            response_time_ms: latency_ms,
+        }
+    }
+
+    /// 没有任何检测记录时，所有指标都应是「无数据」而不是 0。
+    ///
+    /// 用 0 表示「无数据」会让 UI 显示出「平均延迟 0ms」这种误导性的数字。
+    #[test]
+    fn empty_input_reports_no_data() {
+        assert_eq!(summarize_stream_checks(&[]), StreamCheckSummary::default());
+    }
+
+    /// 全部不可达时不应有延迟数据。
+    #[test]
+    fn all_unreachable_has_no_latency() {
+        let summary =
+            summarize_stream_checks(&[check("a", false, None), check("b", false, Some(50))]);
+
+        assert_eq!(summary.unreachable_count, 2);
+        assert_eq!(summary.avg_latency_ms, None, "不可达站点的延迟不应计入平均");
+        assert_eq!(summary.slowest, None);
+    }
+
+    /// 延迟恰好为 0ms 是合法样本，必须参与计算而不是被当成缺失。
+    #[test]
+    fn zero_latency_counts_as_a_real_sample() {
+        let summary = summarize_stream_checks(&[
+            check("fast", true, Some(0)),
+            check("slow", true, Some(100)),
+        ]);
+
+        assert_eq!(
+            summary.avg_latency_ms,
+            Some(50),
+            "0ms 必须作为样本参与平均，否则会把 0 当缺失丢掉"
+        );
+        assert_eq!(
+            summary.slowest,
+            Some(("slow".to_string(), 100)),
+            "最慢站点不应被 0ms 抢走"
+        );
+    }
+
+    /// 可达但缺少延迟读数时，计入「可达」但不进延迟样本。
+    #[test]
+    fn reachable_without_latency_is_not_a_latency_sample() {
+        let summary = summarize_stream_checks(&[
+            check("no-reading", true, None),
+            check("measured", true, Some(80)),
+        ]);
+
+        assert_eq!(summary.unreachable_count, 0);
+        assert_eq!(summary.avg_latency_ms, Some(80));
+        assert_eq!(summary.slowest, Some(("measured".to_string(), 80)));
+    }
+
+    /// 平均延迟向下取整，且不会因溢出 panic。
+    #[test]
+    fn average_is_integer_division_of_measured_samples() {
+        let summary = summarize_stream_checks(&[
+            check("a", true, Some(10)),
+            check("b", true, Some(11)),
+            check("c", true, Some(12)),
+        ]);
+
+        assert_eq!(summary.avg_latency_ms, Some(11));
+    }
+
+    /// 最慢站点取严格最大值；并列时保留先遇到的那个（稳定输出）。
+    #[test]
+    fn slowest_keeps_first_provider_on_ties() {
+        let summary = summarize_stream_checks(&[
+            check("first", true, Some(200)),
+            check("second", true, Some(200)),
+        ]);
+
+        assert_eq!(summary.slowest, Some(("first".to_string(), 200)));
+    }
 }
