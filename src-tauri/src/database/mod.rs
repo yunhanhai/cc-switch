@@ -154,6 +154,11 @@ impl Database {
         if let Err(e) = db.cleanup_old_stream_check_logs(7) {
             log::warn!("Startup stream_check_logs cleanup failed: {e}");
         }
+        // 故障转移事件只在时间线上展示最近若干条，没有长期保留价值；
+        // 不清理会随每次切换线性增长，最终拖慢时间线查询与备份体积。
+        if let Err(e) = db.cleanup_old_failover_events(30) {
+            log::warn!("Startup failover_events cleanup failed: {e}");
+        }
         if let Err(e) = db.rollup_and_prune(30) {
             log::warn!("Startup rollup_and_prune failed: {e}");
         }

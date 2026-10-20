@@ -96,3 +96,74 @@ impl Database {
         Ok(deleted as u64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 插入一条指定时间的事件（绕过 save_failover_event 的"当前时间"）。
+    ///
+    /// 直接拿锁而不是用 `lock_conn!`：该宏内部带 `?`，只能用于返回 Result 的函数，
+    /// 而测试辅助函数用 panic 表达失败更直观。
+    fn insert_event_at(db: &Database, app_type: &str, created_at: i64) {
+        let conn = db.conn.lock().expect("lock db connection");
+        conn.execute(
+            "INSERT INTO failover_events
+             (app_type, from_provider_id, from_provider_name,
+              to_provider_id, to_provider_name, reason, created_at)
+             VALUES (?1, 'from', 'From', 'to', 'To', 'provider_failed', ?2)",
+            rusqlite::params![app_type, created_at],
+        )
+        .expect("insert failover event");
+    }
+
+    /// 清理只删过期记录，保留窗口内的事件。
+    ///
+    /// 这条路径此前从未被任何代码调用，`failover_events` 会随每次切换无限增长。
+    #[test]
+    fn cleanup_removes_only_events_older_than_retention_window() {
+        let db = Database::memory().expect("memory db");
+        let now = Utc::now().timestamp();
+        let forty_days_ago = now - 40 * 86400;
+
+        insert_event_at(&db, "claude", forty_days_ago);
+        insert_event_at(&db, "claude", now - 3600);
+
+        let deleted = db.cleanup_old_failover_events(30).expect("cleanup");
+
+        assert_eq!(deleted, 1, "只应删除 40 天前的那条");
+        let remaining = db.get_failover_events("claude", 10).expect("events");
+        assert_eq!(remaining.len(), 1, "窗口内的事件必须保留");
+    }
+
+    /// 保留天数为 0 时不应误删"刚刚发生"的事件。
+    #[test]
+    fn cleanup_with_zero_retention_keeps_current_events() {
+        let db = Database::memory().expect("memory db");
+        insert_event_at(&db, "claude", Utc::now().timestamp());
+
+        let deleted = db.cleanup_old_failover_events(0).expect("cleanup");
+
+        assert_eq!(deleted, 0);
+        assert_eq!(db.get_failover_events("claude", 10).unwrap().len(), 1);
+    }
+
+    /// 清理不跨 app 误伤，且事件按时间倒序返回。
+    #[test]
+    fn events_are_app_scoped_and_ordered_newest_first() {
+        let db = Database::memory().expect("memory db");
+        let now = Utc::now().timestamp();
+
+        insert_event_at(&db, "claude", now - 300);
+        insert_event_at(&db, "claude", now - 100);
+        insert_event_at(&db, "codex", now - 200);
+
+        let claude_events = db.get_failover_events("claude", 10).expect("claude events");
+        assert_eq!(claude_events.len(), 2);
+        assert!(
+            claude_events[0].created_at > claude_events[1].created_at,
+            "应按时间倒序返回"
+        );
+        assert!(claude_events.iter().all(|event| event.app_type == "claude"));
+    }
+}

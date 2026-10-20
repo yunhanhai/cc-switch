@@ -4031,6 +4031,20 @@ impl ProxyService {
         }
         Ok(Vec::new())
     }
+
+    /// 读取单个 provider 的剩余限流冷却秒数（O(1) 点查）。
+    ///
+    /// 健康轮询按 provider 粒度调用，不能走「拉全表再过滤」的路径。
+    pub async fn get_rate_limit_cooldown_secs(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Result<u64, String> {
+        if let Some(server) = self.server.read().await.as_ref() {
+            return Ok(server.rate_limit_cooldown_secs(provider_id, app_type).await);
+        }
+        Ok(0)
+    }
 }
 
 #[cfg(test)]

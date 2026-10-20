@@ -10,17 +10,24 @@ import { getAppLabel } from "@/config/appConfig";
 
 /**
  * 获取供应商健康状态
+ *
+ * @param enabled 是否查询（通常绑定 app 是否为代理应用）
+ * @param poll    是否持续轮询。熔断倒计时与限流冷却都是代理进程内的活状态，
+ *                代理没运行时这些字段恒为 0，继续 5 秒轮询只是让每张卡片
+ *                反复空转一次 IPC。关掉轮询仍会取到首次结果（含数据库里
+ *                持久化的失败计数），所以卡片信息不会缺失。
  */
 export function useProviderHealth(
   providerId: string,
   appType: string,
   enabled = true,
+  poll = true,
 ) {
   return useQuery({
     queryKey: ["providerHealth", providerId, appType],
     queryFn: () => failoverApi.getProviderHealth(providerId, appType),
     enabled: enabled && !!providerId && !!appType,
-    refetchInterval: 5000, // 每 5 秒刷新一次
+    refetchInterval: poll ? 5000 : false,
     retry: false,
   });
 }

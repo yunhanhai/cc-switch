@@ -240,10 +240,13 @@ export function ProviderCard({
   const isAdditiveMode = (appId === "opencode" && !isAnyOmo) || appId === "pi";
 
   const resetCircuitBreaker = useResetCircuitBreaker();
+  // 熔断倒计时/限流冷却只在代理运行时才有意义；代理关着时仍取一次
+  // （拿到持久化的连续失败计数），但不再 5 秒轮询，避免每张卡片空转 IPC。
   const { data: health } = useProviderHealth(
     provider.id,
     appId,
     isProxyAppId(appId),
+    isProxyRunning,
   );
 
   const fallbackUrlText = t("provider.notConfigured", {

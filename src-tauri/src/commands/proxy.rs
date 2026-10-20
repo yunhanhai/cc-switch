@@ -349,16 +349,14 @@ pub async fn get_provider_health(
         health.fatal = stats.fatal;
     }
 
-    if let Ok(cooldowns) = state
+    // 点查而非拉全表：这个命令被每个 provider 卡片独立轮询（5s 一次），
+    // 若每次都 clone 整张冷却表再线性过滤，provider 越多浪费越大。
+    if let Ok(cooldown_secs) = state
         .proxy_service
-        .get_rate_limit_cooldowns(&app_type)
+        .get_rate_limit_cooldown_secs(&provider_id, &app_type)
         .await
     {
-        health.rate_limit_cooldown_secs = cooldowns
-            .iter()
-            .find(|cooldown| cooldown.provider_id == provider_id)
-            .map(|cooldown| cooldown.remaining_secs)
-            .unwrap_or(0);
+        health.rate_limit_cooldown_secs = cooldown_secs;
     }
 
     Ok(health)

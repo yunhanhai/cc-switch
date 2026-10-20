@@ -309,6 +309,17 @@ impl ProviderRouter {
             .await;
     }
 
+    /// 查询单个 provider 的剩余限流冷却秒数（0 表示未冷却）。
+    ///
+    /// 与 `rate_limit_cooldown_snapshots` 的区别：这是一次 O(1) 的点查，
+    /// 适合被前端按 provider 高频轮询；快照接口会 clone 整张表，只该用于
+    /// 汇总展示。健康查询走这条路径，避免 N 个卡片各拉一次全表。
+    pub async fn rate_limit_cooldown_secs(&self, provider_id: &str, app_type: &str) -> u64 {
+        self.rate_limit_cooldown
+            .remaining_secs(app_type, provider_id)
+            .await
+    }
+
     /// 清除该 provider 的限流冷却（请求成功后调用）。
     pub async fn clear_rate_limit_cooldown(&self, provider_id: &str, app_type: &str) {
         self.rate_limit_cooldown.clear(app_type, provider_id).await;

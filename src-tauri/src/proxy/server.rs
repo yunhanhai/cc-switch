@@ -440,6 +440,14 @@ impl ProxyServer {
             .filter(|snapshot| snapshot.app_type == app_type)
             .collect()
     }
+
+    /// 单个 provider 的剩余限流冷却秒数（O(1) 点查，供健康轮询使用）
+    pub async fn rate_limit_cooldown_secs(&self, provider_id: &str, app_type: &str) -> u64 {
+        self.state
+            .provider_router
+            .rate_limit_cooldown_secs(provider_id, app_type)
+            .await
+    }
 }
 
 #[cfg(test)]
