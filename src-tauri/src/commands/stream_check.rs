@@ -112,6 +112,15 @@ pub async fn stream_check_all_providers(
 }
 
 /// 获取连通性检查配置
+/// 查询每个 Provider 最近一次连通性检测结果（用于排序与批量操作）
+#[tauri::command]
+pub fn get_latest_stream_checks(
+    state: State<'_, AppState>,
+    app_type: AppType,
+) -> Result<Vec<crate::database::LatestStreamCheck>, AppError> {
+    state.db.get_latest_stream_checks(app_type.as_str())
+}
+
 #[tauri::command]
 pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, AppError> {
     state.db.get_stream_check_config()

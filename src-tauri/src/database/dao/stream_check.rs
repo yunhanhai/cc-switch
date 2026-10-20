@@ -71,4 +71,46 @@ impl Database {
             .map_err(|e| AppError::Message(format!("序列化配置失败: {e}")))?;
         self.set_setting("stream_check_config", &json)
     }
+
+    /// 查询指定应用下每个 Provider 最近一次连通性检测结果
+    ///
+    /// 用于前端按健康/延迟排序与"选中不可达"快捷操作。
+    /// 返回 (provider_id, success, response_time_ms)；从未检测过的 Provider 不在结果中。
+    pub fn get_latest_stream_checks(
+        &self,
+        app_type: &str,
+    ) -> Result<Vec<LatestStreamCheck>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut stmt = conn.prepare(
+            "SELECT l.provider_id, l.success, l.response_time_ms
+             FROM stream_check_logs l
+             INNER JOIN (
+                 SELECT provider_id, MAX(tested_at) AS max_tested
+                 FROM stream_check_logs
+                 WHERE app_type = ?1
+                 GROUP BY provider_id
+             ) latest
+               ON l.provider_id = latest.provider_id
+              AND l.tested_at = latest.max_tested
+             WHERE l.app_type = ?1",
+        )?;
+        let rows = stmt.query_map([app_type], |row| {
+            Ok(LatestStreamCheck {
+                provider_id: row.get(0)?,
+                success: row.get::<_, i64>(1)? != 0,
+                response_time_ms: row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))
+    }
+}
+
+/// Provider 最近一次连通性检测结果摘要
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatestStreamCheck {
+    pub provider_id: String,
+    pub success: bool,
+    pub response_time_ms: Option<u64>,
 }

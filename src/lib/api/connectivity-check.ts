@@ -50,6 +50,22 @@ export async function streamCheckAllProviders(
 /**
  * 获取连通性检查配置
  */
+export interface LatestStreamCheck {
+  providerId: string;
+  success: boolean;
+  responseTimeMs?: number;
+}
+
+/**
+ * Query each provider's latest connectivity result
+ * (used for health/latency sorting and "select unreachable" batch actions)
+ */
+export async function getLatestStreamChecks(
+  appType: AppId,
+): Promise<LatestStreamCheck[]> {
+  return invoke("get_latest_stream_checks", { appType });
+}
+
 export async function getStreamCheckConfig(): Promise<StreamCheckConfig> {
   return invoke("get_stream_check_config");
 }

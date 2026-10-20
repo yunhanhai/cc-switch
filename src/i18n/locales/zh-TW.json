@@ -188,7 +188,21 @@
       "target": "實際模型",
       "remove": "刪除規則",
       "unpricedTargets": "以下目標模型沒有定價，用量統計中費用將記為 0：{{targets}}"
-    }
+    },
+    "sortBy": "排序方式",
+    "sortManual": "手動排序",
+    "sortByName": "按名稱",
+    "sortByHealth": "按健康狀態",
+    "sortByLatency": "按延遲",
+    "multiSelect": "多選",
+    "cancelSelect": "取消",
+    "selectUnreachable": "選中不可達",
+    "selectUnreachableHint": "選中最近一次檢測中不可達的全部供應商",
+    "batchDelete": "刪除所選 ({{count}})",
+    "batchDeleting": "刪除中...",
+    "batchDeleteConfirm": "確定刪除 {{count}} 個供應商嗎？\n{{names}}\n此操作不可撤銷。",
+    "batchDeleteDone": "已刪除 {{count}} 個供應商",
+    "batchDeletePartial": "刪除完成：成功 {{ok}} 個，失敗 {{fail}} 個"
   },
   "claudeCode": {
     "needsRouting": "需要路由",

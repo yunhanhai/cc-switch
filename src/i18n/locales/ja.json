@@ -188,7 +188,21 @@
       "target": "実際のモデル",
       "remove": "ルールを削除",
       "unpricedTargets": "以下のターゲットモデルには価格設定がないため、使用量コストは 0 と表示されます: {{targets}}"
-    }
+    },
+    "sortBy": "並び替え",
+    "sortManual": "手動順",
+    "sortByName": "名前",
+    "sortByHealth": "ヘルス状態",
+    "sortByLatency": "レイテンシ",
+    "multiSelect": "選択",
+    "cancelSelect": "キャンセル",
+    "selectUnreachable": "到達不可を選択",
+    "selectUnreachableHint": "最新の接続チェックで到達できなかったプロバイダーをすべて選択",
+    "batchDelete": "選択を削除 ({{count}})",
+    "batchDeleting": "削除中...",
+    "batchDeleteConfirm": "{{count}} 個のプロバイダーを削除しますか？\n{{names}}\nこの操作は元に戻せません。",
+    "batchDeleteDone": "{{count}} 個のプロバイダーを削除しました",
+    "batchDeletePartial": "完了：{{ok}} 件削除、{{fail}} 件失敗"
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",

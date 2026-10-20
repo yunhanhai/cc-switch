@@ -188,7 +188,21 @@
       "target": "实际模型",
       "remove": "删除规则",
       "unpricedTargets": "以下目标模型没有定价，用量统计中费用将记为 0：{{targets}}"
-    }
+    },
+    "sortBy": "排序方式",
+    "sortManual": "手动排序",
+    "sortByName": "按名称",
+    "sortByHealth": "按健康状态",
+    "sortByLatency": "按延迟",
+    "multiSelect": "多选",
+    "cancelSelect": "取消",
+    "selectUnreachable": "选中不可达",
+    "selectUnreachableHint": "选中最近一次检测中不可达的全部供应商",
+    "batchDelete": "删除所选 ({{count}})",
+    "batchDeleting": "删除中...",
+    "batchDeleteConfirm": "确定删除 {{count}} 个供应商吗？\n{{names}}\n此操作不可撤销。",
+    "batchDeleteDone": "已删除 {{count}} 个供应商",
+    "batchDeletePartial": "删除完成：成功 {{ok}} 个，失败 {{fail}} 个"
   },
   "claudeCode": {
     "needsRouting": "需要路由",

@@ -13,7 +13,16 @@ import {
   type CSSProperties,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Activity, AlertTriangle, Search, X } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CheckSquare,
+  ChevronDown,
+  Search,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -31,6 +40,10 @@ import {
   useHermesModelConfig,
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import {
+  getLatestStreamChecks,
+  type LatestStreamCheck,
+} from "@/lib/api/connectivity-check";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -202,6 +215,16 @@ export function ProviderList({
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // 定制：排序模式（manual=拖拽原序 / name / health / latency）
+  const [sortMode, setSortMode] = useState<
+    "manual" | "name" | "health" | "latency"
+  >("manual");
+  // 定制：多选模式与已选集合
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // 定制：最近一次连通性检测结果（延迟/健康排序 + 选中不可达）
+  const [latestChecks, setLatestChecks] = useState<LatestStreamCheck[]>([]);
   const { data: claudeDesktopStatus } = useQuery({
     queryKey: ["claudeDesktopStatus"],
     queryFn: () => providersApi.getClaudeDesktopStatus(),
@@ -231,10 +254,98 @@ export function ProviderList({
     [checkProvider],
   );
 
-  // 批量连通性检查：一次探测全部供应商并汇总结果。
-  const handleCheckAll = useCallback(() => {
-    void checkAllProviders(false);
-  }, [checkAllProviders]);
+  // 批量连通性检查：一次探测全部供应商并汇总结果，完成后刷新最近检测缓存。
+  const handleCheckAll = useCallback(async () => {
+    const results = await checkAllProviders(false);
+    if (results) {
+      try {
+        setLatestChecks(await getLatestStreamChecks(appId));
+      } catch {
+        // 查询失败不阻断主流程，排序退回无数据状态
+      }
+    }
+  }, [checkAllProviders, appId]);
+
+  // 进入多选模式时预取最近检测结果（用于"选中不可达"）
+  const enterSelectMode = useCallback(() => {
+    setSelectMode(true);
+    setSelectedIds(new Set());
+    getLatestStreamChecks(appId)
+      .then(setLatestChecks)
+      .catch(() => {});
+  }, [appId]);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelected = useCallback((providerId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  }, []);
+
+  // 选中全部不可达供应商（依赖最近检测结果）
+  const selectUnreachable = useCallback(() => {
+    const failedIds = new Set(
+      latestChecks.filter((c) => !c.success).map((c) => c.providerId),
+    );
+    setSelectedIds(failedIds);
+  }, [latestChecks]);
+
+  // 批量删除：逐个调用现有 delete API，汇总成功/失败数
+  const [deletingBatch, setDeletingBatch] = useState(false);
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const names = sortedProviders
+      .filter((p) => selectedIds.has(p.id))
+      .map((p) => p.name);
+    const confirmed = window.confirm(
+      t("provider.batchDeleteConfirm", {
+        count: selectedIds.size,
+        names: names.slice(0, 5).join(", "),
+        defaultValue: `确定删除 ${selectedIds.size} 个供应商吗？\n${names.slice(0, 5).join(", ")}${names.length > 5 ? " 等" : ""}\n此操作不可撤销。`,
+      }),
+    );
+    if (!confirmed) return;
+
+    setDeletingBatch(true);
+    let ok = 0;
+    let fail = 0;
+    const results = await Promise.allSettled(
+      [...selectedIds].map((id) => providersApi.delete(id, appId)),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled") ok++;
+      else fail++;
+    }
+    setDeletingBatch(false);
+
+    if (fail === 0) {
+      toast.success(
+        t("provider.batchDeleteDone", {
+          count: ok,
+          defaultValue: `已删除 ${ok} 个供应商`,
+        }),
+      );
+    } else {
+      toast.error(
+        t("provider.batchDeletePartial", {
+          ok,
+          fail,
+          defaultValue: `删除完成：成功 ${ok} 个，失败 ${fail} 个`,
+        }),
+      );
+    }
+    exitSelectMode();
+  }, [selectedIds, sortedProviders, appId, t, exitSelectMode]);
 
   // Import current live config as default provider
   const queryClient = useQueryClient();
@@ -312,16 +423,44 @@ export function ProviderList({
     }
   }, [isSearchOpen]);
 
+  // 按模式排序的展示列表（manual = useDragSort 的原序）
+  const displayProviders = useMemo(() => {
+    if (sortMode === "manual") return sortedProviders;
+    const list = [...sortedProviders];
+    if (sortMode === "name") {
+      return list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    const checkMap = new Map(latestChecks.map((c) => [c.providerId, c]));
+    if (sortMode === "health") {
+      // 不可达在前，其次未检测，可达在后；同组内保持原序
+      const rank = (id: string) => {
+        const c = checkMap.get(id);
+        if (!c) return 1;
+        return c.success ? 2 : 0;
+      };
+      return list.sort((a, b) => rank(a.id) - rank(b.id));
+    }
+    // latency：有延迟数据的按延迟升序，无数据的排最后
+    return list.sort((a, b) => {
+      const la = checkMap.get(a.id)?.responseTimeMs;
+      const lb = checkMap.get(b.id)?.responseTimeMs;
+      if (la === undefined && lb === undefined) return 0;
+      if (la === undefined) return 1;
+      if (lb === undefined) return -1;
+      return la - lb;
+    });
+  }, [sortedProviders, sortMode, latestChecks]);
+
   const filteredProviders = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
-    if (!keyword) return sortedProviders;
-    return sortedProviders.filter((provider) => {
+    if (!keyword) return displayProviders;
+    return displayProviders.filter((provider) => {
       const fields = [provider.name, provider.notes, provider.websiteUrl];
       return fields.some((field) =>
         field?.toString().toLowerCase().includes(keyword),
       );
     });
-  }, [searchTerm, sortedProviders]);
+  }, [searchTerm, displayProviders]);
 
   const claudeDesktopStatusMessages = useMemo(() => {
     if (appId !== "claude-desktop" || !claudeDesktopStatus) return [];
@@ -519,6 +658,9 @@ export function ProviderList({
                     ? (modelId) => onSetAsDefault(provider, modelId)
                     : undefined
                 }
+                selectMode={selectMode}
+                isSelected={selectedIds.has(provider.id)}
+                onToggleSelect={toggleSelected}
               />
             );
           })}
@@ -545,25 +687,106 @@ export function ProviderList({
           </ul>
         </div>
       )}
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          disabled={checkingAll || sortedProviders.length === 0}
-          onClick={handleCheckAll}
-        >
-          <Activity
-            className={checkingAll ? "h-4 w-4 animate-pulse" : "h-4 w-4"}
-          />
-          {checkingAll
-            ? t("streamCheck.batchRunning", {
-                defaultValue: "检测中...",
-              })
-            : t("streamCheck.batchCheckAll", {
-                defaultValue: "全部检测",
-              })}
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* 排序模式：manual=拖拽原序 */}
+        <div className="relative">
+          <select
+            value={sortMode}
+            onChange={(e) =>
+              setSortMode(
+                e.target.value as "manual" | "name" | "health" | "latency",
+              )
+            }
+            className="h-8 appearance-none rounded-md border border-border bg-background pl-3 pr-8 text-xs text-foreground"
+            aria-label={t("provider.sortBy", { defaultValue: "排序方式" })}
+          >
+            <option value="manual">
+              {t("provider.sortManual", { defaultValue: "手动排序" })}
+            </option>
+            <option value="name">
+              {t("provider.sortByName", { defaultValue: "按名称" })}
+            </option>
+            <option value="health">
+              {t("provider.sortByHealth", { defaultValue: "按健康状态" })}
+            </option>
+            <option value="latency">
+              {t("provider.sortByLatency", { defaultValue: "按延迟" })}
+            </option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={checkingAll || sortedProviders.length === 0}
+            onClick={handleCheckAll}
+          >
+            <Activity
+              className={checkingAll ? "h-4 w-4 animate-pulse" : "h-4 w-4"}
+            />
+            {checkingAll
+              ? t("streamCheck.batchRunning", { defaultValue: "检测中..." })
+              : t("streamCheck.batchCheckAll", { defaultValue: "全部检测" })}
+          </Button>
+
+          {selectMode ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={selectUnreachable}
+                disabled={latestChecks.length === 0}
+                title={t("provider.selectUnreachableHint", {
+                  defaultValue: "选中最近一次检测中不可达的全部供应商",
+                })}
+              >
+                <AlertTriangle className="h-4 w-4" />
+                {t("provider.selectUnreachable", {
+                  defaultValue: "选中不可达",
+                })}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                disabled={selectedIds.size === 0 || deletingBatch}
+                onClick={handleBatchDelete}
+              >
+                <Trash2 className="h-4 w-4" />
+                {deletingBatch
+                  ? t("provider.batchDeleting", { defaultValue: "删除中..." })
+                  : t("provider.batchDelete", {
+                      count: selectedIds.size,
+                      defaultValue: `删除所选 (${selectedIds.size})`,
+                    })}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={exitSelectMode}
+                className="gap-1"
+              >
+                <X className="h-4 w-4" />
+                {t("provider.cancelSelect", { defaultValue: "取消" })}
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={sortedProviders.length === 0}
+              onClick={enterSelectMode}
+            >
+              <CheckSquare className="h-4 w-4" />
+              {t("provider.multiSelect", { defaultValue: "多选" })}
+            </Button>
+          )}
+        </div>
       </div>
 
       <AnimatePresence>
@@ -674,6 +897,10 @@ interface SortableProviderCardProps {
   isRemovalProtected?: boolean;
   isStateChangeProtected?: boolean;
   onSetAsDefault?: (modelId?: string) => void;
+  // 定制：多选模式
+  selectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (providerId: string) => void;
 }
 
 function SortableProviderCard({
@@ -706,6 +933,9 @@ function SortableProviderCard({
   isRemovalProtected,
   isStateChangeProtected,
   onSetAsDefault,
+  selectMode,
+  isSelected,
+  onToggleSelect,
 }: SortableProviderCardProps) {
   const {
     setNodeRef,
@@ -722,46 +952,77 @@ function SortableProviderCard({
   };
 
   return (
-    <div ref={setNodeRef} style={style}>
-      <ProviderCard
-        provider={provider}
-        isCurrent={isCurrent}
-        appId={appId}
-        isInConfig={isInConfig}
-        isOmo={isOmo}
-        isOmoSlim={isOmoSlim}
-        onSwitch={onSwitch}
-        onEdit={onEdit}
-        onDelete={onDelete}
-        onRemoveFromConfig={onRemoveFromConfig}
-        onDisableOmo={onDisableOmo}
-        onDisableOmoSlim={onDisableOmoSlim}
-        onDuplicate={onDuplicate}
-        onConfigureUsage={
-          onConfigureUsage ? (item) => onConfigureUsage(item) : () => undefined
+    <div ref={setNodeRef} style={style} className="relative">
+      {selectMode && (
+        <button
+          type="button"
+          className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border bg-background/95 shadow-sm"
+          aria-label={isSelected ? "deselect" : "select"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleSelect?.(provider.id);
+          }}
+        >
+          {isSelected ? (
+            <CheckSquare className="h-4 w-4 text-primary" />
+          ) : (
+            <Square className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+      )}
+      <div
+        className={selectMode ? "cursor-pointer" : undefined}
+        onClick={
+          selectMode
+            ? (event) => {
+                event.stopPropagation();
+                onToggleSelect?.(provider.id);
+              }
+            : undefined
         }
-        onOpenWebsite={onOpenWebsite}
-        onOpenTerminal={onOpenTerminal}
-        onTest={onTest}
-        isTesting={isTesting}
-        isProxyRunning={isProxyRunning}
-        isProxyTakeover={isProxyTakeover}
-        dragHandleProps={{
-          attributes,
-          listeners,
-          isDragging,
-        }}
-        isAutoFailoverEnabled={isAutoFailoverEnabled}
-        failoverPriority={failoverPriority}
-        isInFailoverQueue={isInFailoverQueue}
-        onToggleFailover={onToggleFailover}
-        activeProviderId={activeProviderId}
-        // OpenClaw: default model
-        isDefaultModel={isDefaultModel}
-        isRemovalProtected={isRemovalProtected}
-        isStateChangeProtected={isStateChangeProtected}
-        onSetAsDefault={onSetAsDefault}
-      />
+      >
+        <ProviderCard
+          provider={provider}
+          isCurrent={isCurrent}
+          appId={appId}
+          isInConfig={isInConfig}
+          isOmo={isOmo}
+          isOmoSlim={isOmoSlim}
+          onSwitch={onSwitch}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRemoveFromConfig={onRemoveFromConfig}
+          onDisableOmo={onDisableOmo}
+          onDisableOmoSlim={onDisableOmoSlim}
+          onDuplicate={onDuplicate}
+          onConfigureUsage={
+            onConfigureUsage
+              ? (item) => onConfigureUsage(item)
+              : () => undefined
+          }
+          onOpenWebsite={onOpenWebsite}
+          onOpenTerminal={onOpenTerminal}
+          onTest={onTest}
+          isTesting={isTesting}
+          isProxyRunning={isProxyRunning}
+          isProxyTakeover={isProxyTakeover}
+          dragHandleProps={{
+            attributes,
+            listeners,
+            isDragging,
+          }}
+          isAutoFailoverEnabled={isAutoFailoverEnabled}
+          failoverPriority={failoverPriority}
+          isInFailoverQueue={isInFailoverQueue}
+          onToggleFailover={onToggleFailover}
+          activeProviderId={activeProviderId}
+          // OpenClaw: default model
+          isDefaultModel={isDefaultModel}
+          isRemovalProtected={isRemovalProtected}
+          isStateChangeProtected={isStateChangeProtected}
+          onSetAsDefault={onSetAsDefault}
+        />
+      </div>
     </div>
   );
 }

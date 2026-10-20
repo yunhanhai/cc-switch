@@ -188,7 +188,21 @@
       "target": "Actual model",
       "remove": "Remove rule",
       "unpricedTargets": "These target models have no pricing; usage cost will show as 0: {{targets}}"
-    }
+    },
+    "sortBy": "Sort by",
+    "sortManual": "Manual order",
+    "sortByName": "Name",
+    "sortByHealth": "Health",
+    "sortByLatency": "Latency",
+    "multiSelect": "Select",
+    "cancelSelect": "Cancel",
+    "selectUnreachable": "Select unreachable",
+    "selectUnreachableHint": "Select all providers that failed the latest connectivity check",
+    "batchDelete": "Delete selected ({{count}})",
+    "batchDeleting": "Deleting...",
+    "batchDeleteConfirm": "Delete {{count}} providers?\n{{names}}\nThis cannot be undone.",
+    "batchDeleteDone": "Deleted {{count}} providers",
+    "batchDeletePartial": "Done: {{ok}} deleted, {{fail}} failed"
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
