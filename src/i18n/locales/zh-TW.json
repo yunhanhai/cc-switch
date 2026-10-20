@@ -2800,7 +2800,12 @@
     "degraded": "降級",
     "failed": "失敗",
     "circuitOpen": "斷路",
+    "circuitOpenCountdown": "{{label}} {{seconds}}s 後探測",
     "consecutiveFailures": "連續失敗 {{count}} 次",
+    "recoveryCountdownHint": "約 {{seconds}} 秒後自動半開探測",
+    "fatalCircuitHint": "由額度耗盡觸發：恢復視窗內直接快速失敗，不再打上游",
+    "rateLimitedCooldown": "限流 {{seconds}}s",
+    "rateLimitedCooldownHint": "上游回傳 429 並要求等待。該供應商仍會被嘗試，但在路由選擇時排到佇列末尾。",
     "resetCircuit": "重置熔斷",
     "resetCircuitHint": "立即重置熔斷並重新探測該供應商"
   },
@@ -3017,6 +3022,8 @@
       "avgLatency": "平均延遲",
       "slowest": "最慢站點",
       "unreachable": "不可達",
+      "coolingDown": "冷卻中",
+      "coolingDownHint": "上游回傳 429 並要求等待的站點數。它們仍可被嘗試，但在選路時排到佇列末尾。",
       "noData": "—"
     }
   },

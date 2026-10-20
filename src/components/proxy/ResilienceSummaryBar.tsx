@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowLeftRight,
   Gauge,
+  Hourglass,
   Timer,
   TrendingUp,
   WifiOff,
@@ -76,14 +77,35 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
           ? "text-red-600 dark:text-red-400"
           : "text-emerald-600 dark:text-emerald-400",
     },
+    {
+      icon: Hourglass,
+      label: t("proxy.resilience.coolingDown", { defaultValue: "冷却中" }),
+      value:
+        summary.coolingDownCount > 0
+          ? `${summary.coolingDownCount} (${summary.longestCooldownSecs}s)`
+          : "0",
+      tone:
+        summary.coolingDownCount > 0
+          ? "text-amber-600 dark:text-amber-400"
+          : "text-emerald-600 dark:text-emerald-400",
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
       {items.map((item) => (
         <div
           key={item.label}
           className="flex flex-col gap-1 rounded-xl border border-border/60 bg-card/50 px-3 py-2.5"
+          title={
+            item.label ===
+            t("proxy.resilience.coolingDown", { defaultValue: "冷却中" })
+              ? t("proxy.resilience.coolingDownHint", {
+                  defaultValue:
+                    "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
+                })
+              : undefined
+          }
         >
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <item.icon className="h-3 w-3" />

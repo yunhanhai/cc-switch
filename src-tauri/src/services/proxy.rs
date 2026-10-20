@@ -4004,6 +4004,33 @@ impl ProxyService {
         }
         Ok(())
     }
+
+    /// 读取运行中熔断器的实时统计（含恢复倒计时）。
+    ///
+    /// 代理未运行时返回 `None`（内存态随服务器一起释放）。
+    pub async fn get_provider_circuit_breaker_stats(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Result<Option<crate::proxy::CircuitBreakerStats>, String> {
+        if let Some(server) = self.server.read().await.as_ref() {
+            return Ok(server
+                .get_provider_circuit_breaker_stats(provider_id, app_type)
+                .await);
+        }
+        Ok(None)
+    }
+
+    /// 读取该应用当前处于限流冷却中的 provider 列表。
+    pub async fn get_rate_limit_cooldowns(
+        &self,
+        app_type: &str,
+    ) -> Result<Vec<crate::proxy::rate_limit::CooldownSnapshot>, String> {
+        if let Some(server) = self.server.read().await.as_ref() {
+            return Ok(server.rate_limit_cooldowns_for_app(app_type).await);
+        }
+        Ok(Vec::new())
+    }
 }
 
 #[cfg(test)]

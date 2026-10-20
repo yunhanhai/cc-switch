@@ -139,6 +139,21 @@ pub struct ProviderHealth {
     pub last_failure_at: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: String,
+    /// 熔断器当前状态（`closed` / `open` / `half_open`）。
+    ///
+    /// 仅当代理正在运行且该 provider 已产生过流量时有值 —— 熔断器是纯内存态，
+    /// 数据库里的 `provider_health` 只记录持久化的失败计数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_state: Option<String>,
+    /// 熔断自动恢复探测的剩余秒数（0 = 无需等待或未熔断）
+    #[serde(default)]
+    pub recovery_remaining_secs: u64,
+    /// 429 限流冷却的剩余秒数（0 = 未冷却）
+    #[serde(default)]
+    pub rate_limit_cooldown_secs: u64,
+    /// 本次熔断是否由额度耗尽（致命失败）触发
+    #[serde(default)]
+    pub fatal: bool,
 }
 
 /// Live 配置备份记录

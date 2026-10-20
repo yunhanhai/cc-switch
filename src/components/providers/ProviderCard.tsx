@@ -501,6 +501,11 @@ export function ProviderCard({
                         consecutiveFailures={health.consecutive_failures}
                         isHealthy={health.is_healthy}
                         lastError={health.last_error}
+                        recoveryRemainingSecs={
+                          health.recovery_remaining_secs ?? 0
+                        }
+                        cooldownSecs={health.rate_limit_cooldown_secs ?? 0}
+                        fatal={health.fatal ?? false}
                       />
                       {lastLatencyMs !== undefined && (
                         <span

@@ -2799,7 +2799,12 @@
     "degraded": "低下",
     "failed": "失敗",
     "circuitOpen": "サーキットオープン",
+    "circuitOpenCountdown": "{{label}} · {{seconds}}秒後にプローブ",
     "consecutiveFailures": "{{count}} 回連続失敗",
+    "recoveryCountdownHint": "約 {{seconds}} 秒後に自動でハーフオープンプローブ",
+    "fatalCircuitHint": "クォータ枯渇による遮断です。復旧ウィンドウ中はアップストリームへ再送せず即座に失敗します",
+    "rateLimitedCooldown": "レート制限 {{seconds}}秒",
+    "rateLimitedCooldownHint": "上流が 429 と待機時間を返しました。このプロバイダーは引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
     "resetCircuit": "サーキットをリセット",
     "resetCircuitHint": "サーキットを即座にリセットし、このプロバイダーを再プローブします"
   },
@@ -3016,6 +3021,8 @@
       "avgLatency": "平均レイテンシ",
       "slowest": "最遅",
       "unreachable": "到達不可",
+      "coolingDown": "クールダウン中",
+      "coolingDownHint": "上流が 429 と待機時間を返したプロバイダー数です。引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
       "noData": "—"
     }
   },

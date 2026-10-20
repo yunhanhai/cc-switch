@@ -304,3 +304,19 @@ export function useResilienceSummary(appType: string) {
     refetchInterval: 15000,
   });
 }
+
+/**
+ * 获取该应用当前处于 429 限流冷却中的供应商。
+ *
+ * 冷却来自上游 Retry-After：这些供应商仍会被尝试，但在路由选择阶段排到
+ * 队列末尾。5 秒刷新一次，让卡片上的倒计时能跟着走。
+ */
+export function useRateLimitCooldowns(appType: string, enabled = true) {
+  return useQuery({
+    queryKey: ["rateLimitCooldowns", appType],
+    queryFn: () => failoverApi.getRateLimitCooldowns(appType),
+    enabled: enabled && !!appType,
+    refetchInterval: 5000,
+    retry: false,
+  });
+}

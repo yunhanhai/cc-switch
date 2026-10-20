@@ -61,6 +61,14 @@ export interface ProviderHealth {
   last_failure_at: string | null;
   last_error: string | null;
   updated_at: string;
+  /** 熔断器当前状态（仅代理运行且有流量时有值） */
+  circuit_state?: CircuitState | null;
+  /** 熔断自动恢复探测的剩余秒数（0 = 未熔断或已到期） */
+  recovery_remaining_secs?: number;
+  /** 429 限流冷却的剩余秒数（0 = 未冷却） */
+  rate_limit_cooldown_secs?: number;
+  /** 本次熔断是否由额度耗尽触发 */
+  fatal?: boolean;
 }
 
 // 熔断器相关类型
@@ -80,6 +88,22 @@ export interface CircuitBreakerStats {
   consecutiveSuccesses: number;
   totalRequests: number;
   failedRequests: number;
+  /** 距离自动恢复探测还有多少秒（仅 open 状态有意义，其余为 0） */
+  recoveryRemainingSecs?: number;
+  /** 本次 open 是否由额度耗尽（致命失败）触发 */
+  fatal?: boolean;
+  /** 半开状态下已放行的探测请求数 */
+  halfOpenProbes?: number;
+}
+
+/** 429 限流冷却快照（进程内共享状态） */
+export interface RateLimitCooldown {
+  providerId: string;
+  appType: string;
+  /** 剩余冷却秒数 */
+  remainingSecs: number;
+  /** 上游 Retry-After 原值，无该头时为 null */
+  retryAfterSecs?: number | null;
 }
 
 // 供应商健康状态枚举

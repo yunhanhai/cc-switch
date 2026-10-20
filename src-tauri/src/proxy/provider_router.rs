@@ -7,6 +7,7 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{AllowResult, CircuitBreaker, CircuitBreakerConfig};
+use crate::proxy::rate_limit::{CooldownSnapshot, RateLimitCooldown};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -26,6 +27,11 @@ pub struct ProviderRouter {
     db: Arc<Database>,
     /// 熔断器管理器 - key 格式: "app_type:provider_id"
     circuit_breakers: Arc<RwLock<HashMap<String, Arc<CircuitBreaker>>>>,
+    /// 共享限流冷却表 - key 格式同上
+    ///
+    /// 熔断器回答「这个 provider 坏了吗」，冷却表回答「它让我等多久」。
+    /// 冷却中的 provider 不会被剔除，只会被排到队尾（见 `select_providers`）。
+    rate_limit_cooldown: Arc<RateLimitCooldown>,
 }
 
 impl ProviderRouter {
@@ -34,6 +40,7 @@ impl ProviderRouter {
         Self {
             db,
             circuit_breakers: Arc::new(RwLock::new(HashMap::new())),
+            rate_limit_cooldown: Arc::new(RateLimitCooldown::new()),
         }
     }
 
@@ -91,6 +98,10 @@ impl ProviderRouter {
                 .map(|item| item.provider_id)
                 .collect();
 
+            // 先按队列顺序收集可用 provider，同时记下每个的剩余限流冷却。
+            // 冷却中的 provider 不剔除 —— 它只是不该当首选。
+            let mut available: Vec<(Provider, u64)> = Vec::with_capacity(ordered_ids.len());
+
             for provider_id in ordered_ids {
                 let Some(provider) = all_providers.get(&provider_id).cloned() else {
                     continue;
@@ -104,11 +115,40 @@ impl ProviderRouter {
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
 
                 if breaker.is_available().await {
-                    result.push(provider);
+                    let cooldown_secs = self
+                        .rate_limit_cooldown
+                        .remaining_secs(app_type, &provider.id)
+                        .await;
+                    available.push((provider, cooldown_secs));
                 } else {
                     circuit_open_count += 1;
                 }
             }
+
+            // 稳定重排：冷却中的排到队尾，冷却时间长的更靠后。
+            // 用「是否冷却」作为主键而不是直接按秒数排序，是为了保证
+            // 未冷却的 provider 之间仍严格保持用户配置的 P1→P2 顺序。
+            let any_cooling = available.iter().any(|(_, secs)| *secs > 0);
+            if any_cooling {
+                available.sort_by_key(|(_, cooldown_secs)| {
+                    if *cooldown_secs == 0 {
+                        (0u8, 0u64)
+                    } else {
+                        (1u8, *cooldown_secs)
+                    }
+                });
+
+                let cooling_count = available
+                    .iter()
+                    .filter(|(_, cooldown_secs)| *cooldown_secs > 0)
+                    .count();
+                log::info!(
+                    "[{app_type}] {cooling_count} 个 provider 处于限流冷却，已排到队列末尾（最长 {}s）",
+                    available.last().map(|(_, secs)| *secs).unwrap_or(0)
+                );
+            }
+
+            result.extend(available.into_iter().map(|(provider, _)| provider));
         } else {
             // 故障转移关闭：仅使用当前供应商，跳过熔断器检查
             if let Some(current) = current_provider {
@@ -248,6 +288,40 @@ impl ProviderRouter {
         let circuit_key = format!("{app_type}:{provider_id}");
         let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
         breaker.release_half_open_permit();
+    }
+
+    // ==================== 共享限流冷却 ====================
+
+    /// 登记一次限流冷却。
+    ///
+    /// 由 forwarder 在「决定等待后重试同一 provider」时调用。登记之后，
+    /// 其他并发请求在 `select_providers` 里就不会再把这家当首选，避免
+    /// N 个请求同时撞同一个上游限流窗口。
+    pub async fn note_rate_limited(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        wait_secs: u64,
+        retry_after_secs: Option<u64>,
+    ) {
+        self.rate_limit_cooldown
+            .note_rate_limited(app_type, provider_id, wait_secs, retry_after_secs)
+            .await;
+    }
+
+    /// 清除该 provider 的限流冷却（请求成功后调用）。
+    pub async fn clear_rate_limit_cooldown(&self, provider_id: &str, app_type: &str) {
+        self.rate_limit_cooldown.clear(app_type, provider_id).await;
+    }
+
+    /// 导出所有活跃冷却快照，并顺带清理过期条目。
+    pub async fn rate_limit_cooldown_snapshots(&self) -> Vec<CooldownSnapshot> {
+        // 低频读路径：顺手回收过期条目，避免长期运行后 map 无限增长
+        let pruned = self.rate_limit_cooldown.prune_expired().await;
+        if pruned > 0 {
+            log::debug!("[RateLimit] 清理 {pruned} 条过期限流冷却记录");
+        }
+        self.rate_limit_cooldown.snapshots().await
     }
 
     /// 更新所有熔断器的配置（热更新）
@@ -501,6 +575,162 @@ mod tests {
 
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "b");
+    }
+
+    /// 冷却中的 provider 不剔除，只排到队尾。
+    ///
+    /// 这是本特性的核心语义：429 冷却不等于「这个站点坏了」，
+    /// 如果把它从候选链里删掉，单 provider 场景会直接变成「无可用供应商」。
+    #[tokio::test]
+    #[serial]
+    async fn rate_limited_provider_moves_to_queue_tail_without_being_dropped() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        // P1 = a（sort_index 1），P2 = b（sort_index 2）
+        let mut provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        provider_a.sort_index = Some(1);
+        let mut provider_b =
+            Provider::with_id("b".to_string(), "Provider B".to_string(), json!({}), None);
+        provider_b.sort_index = Some(2);
+
+        db.save_provider("claude", &provider_a).unwrap();
+        db.save_provider("claude", &provider_b).unwrap();
+        db.add_to_failover_queue("claude", "a").unwrap();
+        db.add_to_failover_queue("claude", "b").unwrap();
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+
+        // P1 被限流 30 秒
+        router.note_rate_limited("a", "claude", 30, Some(30)).await;
+
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(
+            providers
+                .iter()
+                .map(|provider| provider.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "a"],
+            "冷却中的 P1 应排到队尾，但不能被剔除"
+        );
+    }
+
+    /// 未冷却的 provider 之间必须严格保持用户配置的 P1→P2 顺序。
+    ///
+    /// 排序主键是「是否冷却」而不是「剩余秒数」，否则一旦有站点冷却，
+    /// 其余健康站点的相对顺序会被剩余秒数意外打乱。
+    #[tokio::test]
+    #[serial]
+    async fn non_cooling_providers_keep_configured_order() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        for (id, sort_index) in [("a", 1), ("b", 2), ("c", 3)] {
+            let mut provider =
+                Provider::with_id(id.to_string(), format!("Provider {id}"), json!({}), None);
+            provider.sort_index = Some(sort_index);
+            db.save_provider("claude", &provider).unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        // 队尾的 c 冷却，a/b 都健康
+        router.note_rate_limited("c", "claude", 60, Some(60)).await;
+
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(
+            providers
+                .iter()
+                .map(|provider| provider.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    /// 请求成功后清除冷却，下一次选路立刻恢复原顺序。
+    #[tokio::test]
+    #[serial]
+    async fn clearing_cooldown_restores_configured_order() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+
+        let mut provider_a =
+            Provider::with_id("a".to_string(), "Provider A".to_string(), json!({}), None);
+        provider_a.sort_index = Some(1);
+        let mut provider_b =
+            Provider::with_id("b".to_string(), "Provider B".to_string(), json!({}), None);
+        provider_b.sort_index = Some(2);
+
+        db.save_provider("claude", &provider_a).unwrap();
+        db.save_provider("claude", &provider_b).unwrap();
+        db.add_to_failover_queue("claude", "a").unwrap();
+        db.add_to_failover_queue("claude", "b").unwrap();
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db.clone());
+        router.note_rate_limited("a", "claude", 30, Some(30)).await;
+        let cooldown_of = |snapshots: &[CooldownSnapshot], provider_id: &str, app_type: &str| {
+            snapshots
+                .iter()
+                .find(|snapshot| {
+                    snapshot.provider_id == provider_id && snapshot.app_type == app_type
+                })
+                .map(|snapshot| snapshot.remaining_secs)
+                .unwrap_or(0)
+        };
+        assert!(
+            cooldown_of(&router.rate_limit_cooldown_snapshots().await, "a", "claude") > 0,
+            "登记冷却后应能读到剩余秒数"
+        );
+
+        router.clear_rate_limit_cooldown("a", "claude").await;
+        assert_eq!(
+            cooldown_of(&router.rate_limit_cooldown_snapshots().await, "a", "claude"),
+            0
+        );
+
+        let providers = router.select_providers("claude").await.unwrap();
+        assert_eq!(
+            providers
+                .iter()
+                .map(|provider| provider.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    /// 冷却快照必须按 app_type 隔离，避免同名 provider id 跨应用串味。
+    #[tokio::test]
+    #[serial]
+    async fn cooldown_snapshots_are_scoped_per_app() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        router
+            .note_rate_limited("shared-id", "claude", 30, Some(30))
+            .await;
+
+        let snapshots = router.rate_limit_cooldown_snapshots().await;
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].app_type, "claude");
+        assert_eq!(snapshots[0].provider_id, "shared-id");
+        // codex 下同名 provider 不应出现在快照里
+        assert!(snapshots
+            .iter()
+            .all(|snapshot| snapshot.app_type != "codex"));
     }
 
     #[tokio::test]

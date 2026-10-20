@@ -411,6 +411,35 @@ impl ProxyServer {
             .reset_provider_breaker(provider_id, app_type)
             .await;
     }
+
+    /// 读取运行中熔断器的实时统计（含恢复倒计时与致命标记）。
+    ///
+    /// 返回 `None` 表示该 provider 从未在本进程内创建过熔断器实例
+    /// （典型：刚启动、还没有任何请求打到它）。
+    pub async fn get_provider_circuit_breaker_stats(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Option<super::circuit_breaker::CircuitBreakerStats> {
+        self.state
+            .provider_router
+            .get_circuit_breaker_stats(provider_id, app_type)
+            .await
+    }
+
+    /// 当前处于限流冷却中的 provider 列表（按 app 过滤）
+    pub async fn rate_limit_cooldowns_for_app(
+        &self,
+        app_type: &str,
+    ) -> Vec<super::rate_limit::CooldownSnapshot> {
+        self.state
+            .provider_router
+            .rate_limit_cooldown_snapshots()
+            .await
+            .into_iter()
+            .filter(|snapshot| snapshot.app_type == app_type)
+            .collect()
+    }
 }
 
 #[cfg(test)]

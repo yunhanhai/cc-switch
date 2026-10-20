@@ -4,6 +4,7 @@ import type {
   CircuitBreakerConfig,
   CircuitBreakerStats,
   FailoverQueueItem,
+  RateLimitCooldown,
 } from "@/types/proxy";
 
 export interface Provider {
@@ -39,6 +40,10 @@ export interface ResilienceSummary {
   avgLatencyMs?: number | null;
   slowestProvider?: [string, number] | null;
   unreachableCount: number;
+  /** 当前处于 429 限流冷却中的站点数 */
+  coolingDownCount: number;
+  /** 当前最长剩余冷却秒数（无冷却为 0） */
+  longestCooldownSecs: number;
 }
 
 export const failoverApi = {
@@ -89,6 +94,11 @@ export const failoverApi = {
     appType: string,
   ): Promise<CircuitBreakerStats | null> {
     return invoke("get_circuit_breaker_stats", { providerId, appType });
+  },
+
+  // 获取该应用当前处于 429 限流冷却中的供应商
+  async getRateLimitCooldowns(appType: string): Promise<RateLimitCooldown[]> {
+    return invoke("get_rate_limit_cooldowns", { appType });
   },
 
   // ========== 故障转移队列 API（新） ==========

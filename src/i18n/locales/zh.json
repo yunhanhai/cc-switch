@@ -2799,7 +2799,12 @@
     "degraded": "降级",
     "failed": "失败",
     "circuitOpen": "熔断",
+    "circuitOpenCountdown": "{{label}} {{seconds}}s 后探测",
     "consecutiveFailures": "连续失败 {{count}} 次",
+    "recoveryCountdownHint": "约 {{seconds}} 秒后自动半开探测",
+    "fatalCircuitHint": "由额度耗尽触发：恢复窗口内直接快速失败，不再打上游",
+    "rateLimitedCooldown": "限流 {{seconds}}s",
+    "rateLimitedCooldownHint": "上游返回 429 并要求等待。该供应商仍会被尝试，但在路由选择时排到队列末尾。",
     "resetCircuit": "重置熔断",
     "resetCircuitHint": "立即重置熔断并重新探测该供应商"
   },
@@ -3016,6 +3021,8 @@
       "avgLatency": "平均延迟",
       "slowest": "最慢站点",
       "unreachable": "不可达",
+      "coolingDown": "冷却中",
+      "coolingDownHint": "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
       "noData": "—"
     }
   },

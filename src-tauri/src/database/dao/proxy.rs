@@ -568,6 +568,11 @@ impl Database {
                         last_failure_at: row.get(5)?,
                         last_error: row.get(6)?,
                         updated_at: row.get(7)?,
+                        // 熔断器/冷却都是进程内存态，由命令层在返回前合并进来
+                        circuit_state: None,
+                        recovery_remaining_secs: 0,
+                        rate_limit_cooldown_secs: 0,
+                        fatal: false,
                     })
                 },
             )
@@ -585,6 +590,10 @@ impl Database {
                 last_failure_at: None,
                 last_error: None,
                 updated_at: chrono::Utc::now().to_rfc3339(),
+                circuit_state: None,
+                recovery_remaining_secs: 0,
+                rate_limit_cooldown_secs: 0,
+                fatal: false,
             }),
             Err(e) => Err(AppError::Database(e.to_string())),
         }

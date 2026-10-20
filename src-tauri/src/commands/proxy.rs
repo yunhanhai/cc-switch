@@ -318,6 +318,13 @@ pub async fn switch_proxy_provider(
 // ==================== 故障转移相关命令 ====================
 
 /// 获取供应商健康状态
+///
+/// 返回的是「持久化健康计数」+「进程内存态」的合成视图：
+/// - `is_healthy` / `consecutive_failures` 来自数据库（跨重启保留）
+/// - `circuit_state` / `recovery_remaining_secs` / `rate_limit_cooldown_secs`
+///   来自运行中的熔断器与冷却表（重启即重置）
+///
+/// 这样前端的一次 5 秒轮询就能同时拿到「为什么熔断」和「还要等多久」。
 #[tauri::command]
 pub async fn get_provider_health(
     state: tauri::State<'_, AppState>,
@@ -326,17 +333,38 @@ pub async fn get_provider_health(
 ) -> Result<ProviderHealth, String> {
     require_proxy_app(&app_type)?;
     let db = &state.db;
-    db.get_provider_health(&provider_id, &app_type)
+    let mut health = db
+        .get_provider_health(&provider_id, &app_type)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // 内存态可能不可用（代理未运行 / 该 provider 尚无流量），此时保持默认值
+    if let Ok(Some(stats)) = state
+        .proxy_service
+        .get_provider_circuit_breaker_stats(&provider_id, &app_type)
+        .await
+    {
+        health.circuit_state = Some(stats.state.to_string());
+        health.recovery_remaining_secs = stats.recovery_remaining_secs;
+        health.fatal = stats.fatal;
+    }
+
+    if let Ok(cooldowns) = state
+        .proxy_service
+        .get_rate_limit_cooldowns(&app_type)
+        .await
+    {
+        health.rate_limit_cooldown_secs = cooldowns
+            .iter()
+            .find(|cooldown| cooldown.provider_id == provider_id)
+            .map(|cooldown| cooldown.remaining_secs)
+            .unwrap_or(0);
+    }
+
+    Ok(health)
 }
 
-/// 重置熔断器
-///
-/// 重置后会检查是否应该切回队列中优先级更高的供应商：
-/// 1. 检查自动故障转移是否开启
-/// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
-/// 韧性健康摘要：今日转移次数 + 429 等待统计 + 最近检测延迟概况
+/// 韧性健康摘要：今日转移次数 + 429 等待统计 + 当前冷却状态 + 最近检测延迟概况
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResilienceSummary {
@@ -353,6 +381,10 @@ pub struct ResilienceSummary {
     pub slowest_provider: Option<(String, u64)>,
     /// 最近一轮检测不可达站点数
     pub unreachable_count: u64,
+    /// 当前处于 429 限流冷却中的站点数
+    pub cooling_down_count: u64,
+    /// 当前最长剩余冷却秒数（无冷却为 0）
+    pub longest_cooldown_secs: u64,
 }
 
 #[tauri::command]
@@ -382,6 +414,13 @@ pub async fn get_resilience_summary(
         Ok(st) => (st.rate_limit_wait_count, st.rate_limit_wait_total_secs),
         Err(_) => (0, 0),
     };
+
+    // 当前仍处于冷却窗口的站点（429 Retry-After 驱动的进程内共享状态）
+    let cooldowns = state
+        .proxy_service
+        .get_rate_limit_cooldowns(&app_type)
+        .await
+        .unwrap_or_default();
 
     // 最近一轮检测延迟概况
     let checks = state
@@ -429,6 +468,12 @@ pub async fn get_resilience_summary(
         avg_latency_ms,
         slowest_provider,
         unreachable_count,
+        cooling_down_count: cooldowns.len() as u64,
+        longest_cooldown_secs: cooldowns
+            .iter()
+            .map(|cooldown| cooldown.remaining_secs)
+            .max()
+            .unwrap_or(0),
     })
 }
 
@@ -578,8 +623,25 @@ pub async fn get_circuit_breaker_stats(
     app_type: String,
 ) -> Result<Option<CircuitBreakerStats>, String> {
     require_proxy_app(&app_type)?;
-    // 这个功能需要访问运行中的代理服务器的内存状态
-    // 目前先返回 None，后续可以通过 ProxyService 暴露接口来实现
-    let _ = (state, provider_id, app_type);
-    Ok(None)
+    // 熔断器是纯内存态：代理未运行 / 该 provider 尚未产生流量时返回 None。
+    state
+        .proxy_service
+        .get_provider_circuit_breaker_stats(&provider_id, &app_type)
+        .await
+}
+
+/// 获取该应用当前处于限流冷却中的供应商列表
+///
+/// 冷却来自 429 Retry-After（或本地退避）：这些供应商仍可被尝试，
+/// 但在路由选择阶段会被排到队列末尾。前端据此在卡片上显示倒计时。
+#[tauri::command]
+pub async fn get_rate_limit_cooldowns(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+) -> Result<Vec<crate::proxy::rate_limit::CooldownSnapshot>, String> {
+    require_proxy_app(&app_type)?;
+    state
+        .proxy_service
+        .get_rate_limit_cooldowns(&app_type)
+        .await
 }

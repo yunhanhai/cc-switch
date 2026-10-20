@@ -344,14 +344,30 @@ impl CircuitBreaker {
     }
 
     /// 获取统计信息
-    #[allow(dead_code)]
+    ///
+    /// 额外暴露 `recovery_remaining_secs` / `fatal` / `half_open_probes`，
+    /// 让前端能把「还要等多久」直接显示出来，而不是只有一个 "熔断" 标签。
     pub async fn get_stats(&self) -> CircuitBreakerStats {
+        let state = *self.state.read().await;
+        let config = self.config.read().await;
+        let opened_at = *self.last_opened_at.read().await;
+
+        let recovery_remaining_secs = match (state, opened_at) {
+            (CircuitState::Open, Some(opened_at)) => config
+                .timeout_seconds
+                .saturating_sub(opened_at.elapsed().as_secs()),
+            _ => 0,
+        };
+
         CircuitBreakerStats {
-            state: *self.state.read().await,
+            state,
             consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
             consecutive_successes: self.consecutive_successes.load(Ordering::SeqCst),
             total_requests: self.total_requests.load(Ordering::SeqCst),
             failed_requests: self.failed_requests.load(Ordering::SeqCst),
+            recovery_remaining_secs,
+            fatal: self.fatal_open.load(Ordering::SeqCst),
+            half_open_probes: self.half_open_requests.load(Ordering::SeqCst),
         }
     }
 
@@ -446,6 +462,12 @@ pub struct CircuitBreakerStats {
     pub consecutive_successes: u32,
     pub total_requests: u32,
     pub failed_requests: u32,
+    /// 距离自动恢复探测还有多少秒（仅 Open 状态有意义，其余为 0）
+    pub recovery_remaining_secs: u64,
+    /// 本次 Open 是否由额度耗尽（致命失败）触发
+    pub fatal: bool,
+    /// 半开状态下已放行的探测请求数（便于判断探测是否卡住）
+    pub half_open_probes: u32,
 }
 
 #[cfg(test)]

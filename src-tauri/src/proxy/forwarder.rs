@@ -295,6 +295,11 @@ impl RequestForwarder {
         app_type: &str,
         used_half_open_permit: bool,
     ) {
+        // 成功即意味着限流窗口已过：清掉共享冷却，别让后来请求继续绕开它。
+        self.router
+            .clear_rate_limit_cooldown(provider_id, app_type)
+            .await;
+
         if used_half_open_permit {
             if let Err(e) = self
                 .router
@@ -584,6 +589,22 @@ impl RequestForwarder {
                                     let mut st = self.status.write().await;
                                     st.rate_limit_wait_count += 1;
                                     st.rate_limit_wait_total_secs += wait_secs;
+                                }
+                                // 共享冷却：让并发的其他请求别再来撞同一个限流窗口。
+                                // 只有「本请求决定等」时才登记——放弃等待走故障转移的
+                                // 情形已经被 attempted_providers 跳过，不存在并发放大。
+                                if super::rate_limit::should_register_cooldown(
+                                    self.rate_limit_retry_enabled,
+                                    Some(wait_secs),
+                                ) {
+                                    self.router
+                                        .note_rate_limited(
+                                            &provider.id,
+                                            app_type_str,
+                                            wait_secs,
+                                            retry_after_secs,
+                                        )
+                                        .await;
                                 }
                                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
                                 continue;
