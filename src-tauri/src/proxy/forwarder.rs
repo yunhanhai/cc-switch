@@ -2862,9 +2862,16 @@ impl RequestForwarder {
         }
     }
 
+    /// 429 等待重试的单 Provider 尝试上限。
+    ///
+    /// 防止上游持续返回小的 Retry-After（如恒为 1s）导致无限等待循环；
+    /// 超限后放弃等待，错误走故障转移分类（换下一家 provider）。
+    const MAX_RATE_LIMIT_RETRIES: u32 = 10;
+
     /// 429 等待重试决策：本次限流是否值得等待后重试同一 Provider。
     ///
     /// - 开关关闭 → 不等待
+    /// - 尝试次数超过上限 → 不等待（转故障转移）
     /// - Retry-After 明确且 ≤ max_wait → 等待该时长
     /// - Retry-After 缺失/非法 → 指数退避兜底（attempt 从 1 起：1s, 2s, 4s... 封顶 30s）
     /// - Retry-After 超过 max_wait → 不等待（等待太久不如切备用）
@@ -2876,6 +2883,11 @@ impl RequestForwarder {
         rate_limit_attempt: u32,
     ) -> Option<u64> {
         if !self.rate_limit_retry_enabled {
+            return None;
+        }
+
+        // 尝试上限：连续等待超过 MAX_RATE_LIMIT_RETRIES 次后放弃
+        if rate_limit_attempt > Self::MAX_RATE_LIMIT_RETRIES {
             return None;
         }
 
@@ -5180,7 +5192,8 @@ mod tests {
         assert_eq!(fwd.rate_limit_wait_secs(None, 2), Some(2));
         assert_eq!(fwd.rate_limit_wait_secs(None, 3), Some(4));
         assert_eq!(fwd.rate_limit_wait_secs(None, 6), Some(30));
-        assert_eq!(fwd.rate_limit_wait_secs(None, 99), Some(30));
+        // attempt 超过 MAX_RATE_LIMIT_RETRIES 后由上限拦截（见 gives_up_after_max_attempts）
+        assert_eq!(fwd.rate_limit_wait_secs(None, 99), None);
     }
 
     #[test]
@@ -5190,6 +5203,16 @@ mod tests {
         assert_eq!(fwd.rate_limit_wait_secs(None, 1), Some(1));
         assert_eq!(fwd.rate_limit_wait_secs(None, 2), Some(2));
         assert_eq!(fwd.rate_limit_wait_secs(None, 3), None);
+    }
+
+    #[test]
+    fn rate_limit_wait_gives_up_after_max_attempts() {
+        // 尝试上限：第 MAX 次仍可等，超过后即使 Retry-After 很小也放弃
+        let fwd = forwarder_with_rate_limit_retry(true, 120);
+        let max = RequestForwarder::MAX_RATE_LIMIT_RETRIES;
+        assert_eq!(fwd.rate_limit_wait_secs(Some(1), max), Some(1));
+        assert_eq!(fwd.rate_limit_wait_secs(Some(1), max + 1), None);
+        assert_eq!(fwd.rate_limit_wait_secs(None, max + 1), None);
     }
 
     fn provider_with_settings(settings_config: Value) -> Provider {

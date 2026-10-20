@@ -183,11 +183,31 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
             #[cfg(all(cc_switch_dev_build, not(test)))]
-            conn.execute(
-                "UPDATE proxy_config SET listen_port = 15722 WHERE listen_port = 15721",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
+            {
+                // 一次性端口迁移：把旧开发库的 15721 拉到 15722。
+                // 用 settings 标记确保只跑一次——用户此后在 UI 里选择的
+                // 任何端口（包括改回 15721）都不会再被启动迁移覆盖。
+                let migrated: bool = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = 'dev_port_migrated'",
+                        [],
+                        |row| Ok(row.get::<_, String>(0)?.eq("1")),
+                    )
+                    .unwrap_or(false);
+                if !migrated {
+                    conn.execute(
+                        "UPDATE proxy_config SET listen_port = 15722 WHERE listen_port = 15721",
+                        [],
+                    )
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                    conn.execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('dev_port_migrated', '1')",
+                        [],
+                    )
+                    .map_err(|e| AppError::Database(e.to_string()))?;
+                    log::info!("[Schema] 开发版端口一次性迁移完成 (15721 → 15722)");
+                }
+            }
         }
 
         // 9. Provider Health 表
