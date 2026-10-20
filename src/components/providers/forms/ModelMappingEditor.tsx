@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useModelPricing } from "@/lib/query/usage";
 
 export interface ModelMappingRuleDraft {
   source: string;
@@ -60,6 +61,25 @@ export function ModelMappingEditor({
   const config = useMemo(() => parseConfig(value), [value]);
   const rules = useMemo(() => parseRules(config), [config]);
 
+  // 定价表：映射目标若没有定价，用量统计中该模型的费用会显示为 0，
+  // 因此对未定价目标给出显式警告（通配符目标无法判定，跳过）。
+  const { data: pricing } = useModelPricing();
+  const pricedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const item of pricing ?? []) {
+      ids.add(item.modelId.trim().toLowerCase());
+    }
+    return ids;
+  }, [pricing]);
+  const unpricedTargets = useMemo(() => {
+    if (!pricing) return [];
+    return rules
+      .filter((rule) => rule.enabled && rule.target.trim())
+      .map((rule) => rule.target.trim())
+      .filter((target) => !target.includes("*"))
+      .filter((target) => !pricedIds.has(target.toLowerCase()));
+  }, [rules, pricing, pricedIds]);
+
   const updateRules = (nextRules: ModelMappingRuleDraft[]) => {
     const nextConfig = {
       ...config,
@@ -79,16 +99,9 @@ export function ModelMappingEditor({
     <section className="space-y-3 rounded-lg border border-border/50 bg-muted/20 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-medium">
-            {t("provider.modelMapping.title", {
-              defaultValue: "模型映射",
-            })}
-          </h3>
+          <h3 className="font-medium">{t("provider.modelMapping.title")}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {t("provider.modelMapping.description", {
-              defaultValue:
-                "客户端使用显示模型名，代理转发时替换为实际模型。支持 * 通配符，精确规则优先。",
-            })}
+            {t("provider.modelMapping.description")}
           </p>
         </div>
         <Button
@@ -100,15 +113,24 @@ export function ModelMappingEditor({
           }
         >
           <Plus className="mr-1 h-4 w-4" />
-          {t("provider.modelMapping.add", { defaultValue: "添加规则" })}
+          {t("provider.modelMapping.add")}
         </Button>
       </div>
 
+      {unpricedTargets.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            {t("provider.modelMapping.unpricedTargets", {
+              targets: [...new Set(unpricedTargets)].join(", "),
+            })}
+          </span>
+        </div>
+      )}
+
       {rules.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          {t("provider.modelMapping.empty", {
-            defaultValue: "尚未配置规则，未命中时保留客户端模型名。",
-          })}
+          {t("provider.modelMapping.empty")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -119,9 +141,7 @@ export function ModelMappingEditor({
             >
               <Switch
                 checked={rule.enabled}
-                aria-label={t("provider.modelMapping.enabled", {
-                  defaultValue: "启用规则",
-                })}
+                aria-label={t("provider.modelMapping.enabled")}
                 onCheckedChange={(enabled) => {
                   const next = [...rules];
                   next[index] = { ...rule, enabled };
@@ -131,9 +151,7 @@ export function ModelMappingEditor({
               <Input
                 value={rule.source}
                 placeholder="gpt-5.6-sol"
-                aria-label={t("provider.modelMapping.source", {
-                  defaultValue: "显示模型",
-                })}
+                aria-label={t("provider.modelMapping.source")}
                 onChange={(event) => {
                   const next = [...rules];
                   next[index] = { ...rule, source: event.target.value };
@@ -143,9 +161,7 @@ export function ModelMappingEditor({
               <Input
                 value={rule.target}
                 placeholder="glm-5.3"
-                aria-label={t("provider.modelMapping.target", {
-                  defaultValue: "实际模型",
-                })}
+                aria-label={t("provider.modelMapping.target")}
                 onChange={(event) => {
                   const next = [...rules];
                   next[index] = { ...rule, target: event.target.value };
@@ -156,9 +172,7 @@ export function ModelMappingEditor({
                 type="button"
                 size="icon"
                 variant="ghost"
-                aria-label={t("provider.modelMapping.remove", {
-                  defaultValue: "删除规则",
-                })}
+                aria-label={t("provider.modelMapping.remove")}
                 onClick={() => updateRules(rules.filter((_, i) => i !== index))}
               >
                 <Trash2 className="h-4 w-4" />

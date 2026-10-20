@@ -177,7 +177,18 @@
         "apiKeyPlaceholder": "Enter Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again"
+    "duplicateLiveIdsLoadFailed": "Failed to read provider identifiers from config, please fix the config and try again",
+    "modelMapping": {
+      "title": "Model Mapping",
+      "description": "The client uses the display model name; the proxy replaces it with the real model when forwarding. Supports * wildcards; exact rules win.",
+      "add": "Add rule",
+      "empty": "No rules yet; unmatched requests keep the client model name.",
+      "enabled": "Enable rule",
+      "source": "Display model",
+      "target": "Actual model",
+      "remove": "Remove rule",
+      "unpricedTargets": "These target models have no pricing; usage cost will show as 0: {{targets}}"
+    }
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",

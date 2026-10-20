@@ -177,7 +177,18 @@
         "apiKeyPlaceholder": "請輸入 Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "讀取設定中的供應商識別碼失敗，請先修復設定後再試"
+    "duplicateLiveIdsLoadFailed": "讀取設定中的供應商識別碼失敗，請先修復設定後再試",
+    "modelMapping": {
+      "title": "模型映射",
+      "description": "客戶端使用顯示模型名，代理轉發時替換為實際模型。支援 * 萬用字元，精確規則優先。",
+      "add": "新增規則",
+      "empty": "尚未設定規則，未命中時保留客戶端模型名。",
+      "enabled": "啟用規則",
+      "source": "顯示模型",
+      "target": "實際模型",
+      "remove": "刪除規則",
+      "unpricedTargets": "以下目標模型沒有定價，用量統計中費用將記為 0：{{targets}}"
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",

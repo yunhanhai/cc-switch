@@ -177,7 +177,18 @@
         "apiKeyPlaceholder": "Gemini API Key を入力"
       }
     },
-    "duplicateLiveIdsLoadFailed": "設定内のプロバイダー識別子を読み込めませんでした。設定を修正してから再度お試しください"
+    "duplicateLiveIdsLoadFailed": "設定内のプロバイダー識別子を読み込めませんでした。設定を修正してから再度お試しください",
+    "modelMapping": {
+      "title": "モデルマッピング",
+      "description": "クライアントは表示用モデル名を使い、プロキシが転送時に実際のモデルへ置き換えます。* ワイルドカード対応、完全一致が優先されます。",
+      "add": "ルールを追加",
+      "empty": "ルール未設定です。一致しない場合はクライアントのモデル名をそのまま使用します。",
+      "enabled": "ルールを有効化",
+      "source": "表示モデル",
+      "target": "実際のモデル",
+      "remove": "ルールを削除",
+      "unpricedTargets": "以下のターゲットモデルには価格設定がないため、使用量コストは 0 と表示されます: {{targets}}"
+    }
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",

@@ -90,6 +90,12 @@ pub struct CircuitBreaker {
     config: Arc<RwLock<CircuitBreakerConfig>>,
     /// 半开状态已放行的请求数（用于限流）
     half_open_requests: Arc<AtomicU32>,
+    /// 最近一次打开是否由致命失败（额度耗尽等）触发。
+    ///
+    /// 单 Provider 场景下熔断器被 bypass（避免唯一通道被永久阻断），但额度
+    /// 耗尽属于终态：恢复窗口内重复打上游只会再拿 403。该标记用于在 bypass
+    /// 路径下仍能快速失败并给出明确错误。
+    fatal_open: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// 熔断器放行结果
@@ -114,6 +120,7 @@ impl CircuitBreaker {
             last_opened_at: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(config)),
             half_open_requests: Arc::new(AtomicU32::new(0)),
+            fatal_open: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -208,8 +215,9 @@ impl CircuitBreaker {
             self.release_half_open_permit();
         }
 
-        // 重置失败计数
+        // 重置失败计数；成功意味着额度/可用性已恢复，清掉致命标记
         self.consecutive_failures.store(0, Ordering::SeqCst);
+        self.fatal_open.store(false, Ordering::SeqCst);
         self.total_requests.fetch_add(1, Ordering::SeqCst);
 
         if state == CircuitState::HalfOpen {
@@ -229,6 +237,8 @@ impl CircuitBreaker {
     /// 记录失败
     pub async fn record_failure(&self, used_half_open_permit: bool) {
         let state = *self.state.read().await;
+        // 普通失败不保留致命标记；随后的 transition_to_open 会正常打开熔断
+        self.fatal_open.store(false, Ordering::SeqCst);
         let config = self.config.read().await;
 
         if used_half_open_permit {
@@ -305,10 +315,29 @@ impl CircuitBreaker {
         self.total_requests.fetch_add(1, Ordering::SeqCst);
         self.failed_requests.fetch_add(1, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
+        self.fatal_open.store(true, Ordering::SeqCst);
         self.transition_to_open().await;
     }
 
     /// 获取当前状态
+    /// 熔断是否由致命失败（额度耗尽）触发，且仍处于 Open 窗口内。
+    ///
+    /// 供单 Provider bypass 路径使用：普通熔断不阻断唯一通道，但额度耗尽
+    /// 期间应快速失败，避免每次请求都重复打到已耗尽的上游。
+    pub async fn is_fatally_open(&self) -> bool {
+        if *self.state.read().await != CircuitState::Open {
+            return false;
+        }
+        if !self.fatal_open.load(Ordering::SeqCst) {
+            return false;
+        }
+        let config = self.config.read().await;
+        match *self.last_opened_at.read().await {
+            Some(opened_at) => opened_at.elapsed().as_secs() < config.timeout_seconds,
+            None => false,
+        }
+    }
+
     #[allow(dead_code)]
     pub async fn get_state(&self) -> CircuitState {
         *self.state.read().await
@@ -443,6 +472,50 @@ mod tests {
         // 应该转换到打开状态
         assert_eq!(breaker.get_state().await, CircuitState::Open);
         assert!(!breaker.allow_request().await.allowed);
+    }
+
+    #[tokio::test]
+    async fn fatal_failure_marks_breaker_and_normal_failure_does_not() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 3,
+            timeout_seconds: 60,
+            ..Default::default()
+        });
+
+        // 普通失败未达阈值：既非 Open，也不应被标记为致命
+        breaker.record_failure(false).await;
+        assert!(!breaker.is_fatally_open().await);
+
+        // 达到阈值打开：普通失败不应产生致命标记
+        breaker.record_failure(false).await;
+        breaker.record_failure(false).await;
+        assert_eq!(breaker.get_state().await, CircuitState::Open);
+        assert!(!breaker.is_fatally_open().await);
+
+        // 致命失败（额度耗尽）：打开且标记为致命
+        let breaker2 = CircuitBreaker::new(CircuitBreakerConfig::default());
+        breaker2.record_fatal_failure(false).await;
+        assert_eq!(breaker2.get_state().await, CircuitState::Open);
+        assert!(breaker2.is_fatally_open().await);
+
+        // 恢复窗口结束后不再快速失败（交由 HalfOpen 探测）
+        let breaker3 = CircuitBreaker::new(CircuitBreakerConfig {
+            timeout_seconds: 0,
+            ..Default::default()
+        });
+        breaker3.record_fatal_failure(false).await;
+        assert!(!breaker3.is_fatally_open().await);
+    }
+
+    #[tokio::test]
+    async fn success_clears_fatal_marker() {
+        let breaker = CircuitBreaker::new(CircuitBreakerConfig::default());
+        breaker.record_fatal_failure(false).await;
+        assert!(breaker.is_fatally_open().await);
+
+        breaker.record_success(false).await;
+        // 成功记录后状态仍为 Open（需要探测恢复），但致命标记已被清除
+        assert!(!breaker.is_fatally_open().await);
     }
 
     #[tokio::test]

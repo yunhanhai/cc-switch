@@ -488,8 +488,25 @@ impl RequestForwarder {
             }
 
             // 发起请求前先获取熔断器放行许可（HalfOpen 会占用探测名额）
-            // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求
+            // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求；
+            // 但额度耗尽属于终态，恢复窗口内快速失败而不是重复打上游。
             let (allowed, used_half_open_permit) = if bypass_circuit_breaker {
+                if self
+                    .router
+                    .is_fatally_open(&provider.id, app_type_str)
+                    .await
+                {
+                    log::warn!(
+                        "[{app_type_str}] Provider {} 额度耗尽（致命熔断中），快速失败",
+                        provider.name
+                    );
+                    return Err(ForwardError {
+                        error: ProxyError::BillingExhausted(
+                            "该供应商额度已耗尽，熔断恢复窗口结束后将自动重试".to_string(),
+                        ),
+                        provider: Some(provider.clone()),
+                    });
+                }
                 (true, false)
             } else {
                 let permit = self

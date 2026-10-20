@@ -184,6 +184,16 @@ impl ProviderRouter {
     }
 
     /// Record a billing/quota failure and immediately open the provider circuit.
+    /// 指定 provider 是否正处于「致命熔断」窗口（单 Provider bypass 路径专用）。
+    pub async fn is_fatally_open(&self, provider_id: &str, app_type: &str) -> bool {
+        let circuit_key = format!("{app_type}:{provider_id}");
+        let breakers = self.circuit_breakers.read().await;
+        match breakers.get(&circuit_key) {
+            Some(breaker) => breaker.is_fatally_open().await,
+            None => false,
+        }
+    }
+
     pub async fn record_fatal_result(
         &self,
         provider_id: &str,

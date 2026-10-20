@@ -177,7 +177,18 @@
         "apiKeyPlaceholder": "请输入 Gemini API Key"
       }
     },
-    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试"
+    "duplicateLiveIdsLoadFailed": "读取配置中的供应商标识失败，请先修复配置后再试",
+    "modelMapping": {
+      "title": "模型映射",
+      "description": "客户端使用显示模型名，代理转发时替换为实际模型。支持 * 通配符，精确规则优先。",
+      "add": "添加规则",
+      "empty": "尚未配置规则，未命中时保留客户端模型名。",
+      "enabled": "启用规则",
+      "source": "显示模型",
+      "target": "实际模型",
+      "remove": "删除规则",
+      "unpricedTargets": "以下目标模型没有定价，用量统计中费用将记为 0：{{targets}}"
+    }
   },
   "claudeCode": {
     "needsRouting": "需要路由",
