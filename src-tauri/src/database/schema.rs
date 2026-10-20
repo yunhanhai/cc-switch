@@ -490,6 +490,39 @@ impl Database {
         Self::apply_schema_migrations_on_conn(&conn)
     }
 
+    /// 补齐定制版追加的列（不递增 SCHEMA_VERSION 的那部分）。
+    ///
+    /// 为什么单独一个函数、且在版本循环之外无条件调用：
+    /// `SCHEMA_VERSION` 表示「上游 schema 的版本」，定制列是在其上追加的。
+    /// 从上游 v3.20.1 升上来的库 user_version 已经是 18，版本循环不会执行，
+    /// 只有放在循环外才能覆盖到这些用户。`add_column_if_missing` 幂等，
+    /// 每次启动跑一遍的代价只是几次 PRAGMA 查询。
+    ///
+    /// 新增定制列时把 `(表, 列, 类型)` 加进下面的列表即可，不需要动版本号。
+    fn ensure_custom_columns(conn: &Connection) -> Result<(), AppError> {
+        const CUSTOM_COLUMNS: &[(&str, &str, &str)] = &[
+            (
+                "proxy_config",
+                "rate_limit_retry_enabled",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            ),
+            (
+                "proxy_config",
+                "rate_limit_max_wait_secs",
+                "INTEGER NOT NULL DEFAULT 120",
+            ),
+        ];
+
+        for (table, column, definition) in CUSTOM_COLUMNS {
+            // 缺表的库（异常/测试夹具）跳过：create_tables 会以含列的新 DDL 建表。
+            if Self::table_exists(conn, table)? {
+                Self::add_column_if_missing(conn, table, column, definition)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// 在指定连接上应用 Schema 迁移
     pub(crate) fn apply_schema_migrations_on_conn(conn: &Connection) -> Result<(), AppError> {
         conn.execute("SAVEPOINT schema_migration;", [])
@@ -608,6 +641,17 @@ impl Database {
                 }
                 version = Self::get_user_version(conn)?;
             }
+
+            // 定制列补齐：必须在版本循环之外无条件执行。
+            //
+            // 这些列是在 SCHEMA_VERSION 之上追加的（未递增版本号），所以
+            // 「从上游 v3.20.1 升上来」的库 user_version 已经是 18，上面的
+            // `while version < SCHEMA_VERSION` 一次都不会进。若把补齐逻辑
+            // 放进某个 migrate_vN_to_vN+1，这些用户的 proxy_config 永远缺列，
+            // `get_proxy_config_for_app` 的 SELECT 会直接报 no such column。
+            //
+            // `add_column_if_missing` 是幂等的，每次启动都跑没有额外代价。
+            Self::ensure_custom_columns(conn)?;
             Ok(())
         })();
 
@@ -641,23 +685,6 @@ impl Database {
             "is_current",
             "BOOLEAN NOT NULL DEFAULT 0",
         )?;
-
-        // proxy_config 表：429 限流等待重试（v3.20.1-custom 新增）
-        // 旧 fixture 库可能没有 proxy_config 表（由建表路径负责），存在才迁移
-        if Self::table_exists(conn, "proxy_config")? {
-            Self::add_column_if_missing(
-                conn,
-                "proxy_config",
-                "rate_limit_retry_enabled",
-                "BOOLEAN NOT NULL DEFAULT 0",
-            )?;
-            Self::add_column_if_missing(
-                conn,
-                "proxy_config",
-                "rate_limit_max_wait_secs",
-                "INTEGER NOT NULL DEFAULT 120",
-            )?;
-        }
 
         // provider_endpoints 表
         Self::add_column_if_missing(conn, "provider_endpoints", "added_at", "INTEGER")?;

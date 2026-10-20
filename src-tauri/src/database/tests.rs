@@ -215,6 +215,43 @@ fn schema_migration_rejects_future_version() {
     );
 }
 
+/// 定制版新增的 `rate_limit_*` 列必须能落到「已经是 v18 的老库」上。
+///
+/// 这是升级路径的真实缺口：`apply_schema_migrations_on_conn` 只在
+/// `version < SCHEMA_VERSION` 时才执行迁移，而定制列是在 v18 之后加的。
+/// 所有从上游 v3.20.1 升上来的用户，user_version 已经是 18，
+/// 循环体一次都不会进 —— 如果补齐逻辑只写在某个 migrate_vN_to_vN+1 里，
+/// 这些用户的 proxy_config 就永远缺列，`get_proxy_config_for_app` 的
+/// SELECT 会直接报 "no such column"。
+#[test]
+fn custom_rate_limit_columns_reach_an_already_current_database() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create tables");
+
+    // 模拟上游 v3.20.1 的库：表结构已完整，但没有定制列
+    conn.execute_batch(
+        "ALTER TABLE proxy_config DROP COLUMN rate_limit_retry_enabled;
+         ALTER TABLE proxy_config DROP COLUMN rate_limit_max_wait_secs;",
+    )
+    .expect("drop custom columns to emulate upstream schema");
+    Database::set_user_version(&conn, SCHEMA_VERSION).expect("mark as current version");
+
+    assert!(
+        !Database::has_column(&conn, "proxy_config", "rate_limit_retry_enabled")
+            .expect("check column"),
+        "前置条件：定制列应已被移除"
+    );
+
+    Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
+
+    for column in ["rate_limit_retry_enabled", "rate_limit_max_wait_secs"] {
+        assert!(
+            Database::has_column(&conn, "proxy_config", column).expect("check column"),
+            "proxy_config.{column} 必须在已是当前版本的库上也被补齐"
+        );
+    }
+}
+
 #[test]
 fn schema_migration_adds_missing_columns_for_providers() {
     let conn = Connection::open_in_memory().expect("open memory db");
