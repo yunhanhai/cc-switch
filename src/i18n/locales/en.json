@@ -3017,10 +3017,15 @@
     },
     "resilience": {
       "todayFailovers": "Failovers today",
+      "todayFailoversHint": "Automatic provider switches today, counted per app",
       "rateLimitWaits": "429 waits",
+      "rateLimitWaitsHint": "Times this proxy waited for Retry-After after a 429 and retried, with the total time spent waiting",
       "avgLatency": "Avg latency",
+      "avgLatencyHint": "Average response time across reachable providers in the latest connectivity check",
       "slowest": "Slowest",
+      "slowestHint": "The reachable provider with the highest response time in the latest check",
       "unreachable": "Unreachable",
+      "unreachableHint": "Providers that could not be connected to in the latest check",
       "coolingDown": "Cooling down",
       "coolingDownHint": "Providers that returned 429 with a wait. They are still tried, but moved to the end of the queue during routing.",
       "noData": "—"

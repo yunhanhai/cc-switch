@@ -3017,10 +3017,15 @@
     },
     "resilience": {
       "todayFailovers": "今日转移",
+      "todayFailoversHint": "今天自动切换供应商的次数（按应用统计）",
       "rateLimitWaits": "429 等待",
+      "rateLimitWaitsHint": "本次代理运行期间，遇到 429 后等待 Retry-After 再重试的次数与累计等待时长",
       "avgLatency": "平均延迟",
+      "avgLatencyHint": "最近一轮连通性检测中，可达站点的平均响应时间",
       "slowest": "最慢站点",
+      "slowestHint": "最近一轮检测中响应最慢的可达站点",
       "unreachable": "不可达",
+      "unreachableHint": "最近一轮检测中无法建立连接的站点数",
       "coolingDown": "冷却中",
       "coolingDownHint": "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
       "noData": "—"

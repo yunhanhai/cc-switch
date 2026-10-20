@@ -377,12 +377,30 @@ impl Database {
     }
 
     pub fn delete_provider(&self, app_type: &str, id: &str) -> Result<(), AppError> {
-        let conn = lock_conn!(self.conn);
-        conn.execute(
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        tx.execute(
             "DELETE FROM providers WHERE id = ?1 AND app_type = ?2",
             params![id, app_type],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 级联清理该供应商的检测记录。
+        //
+        // 不清理的后果是这些行会永远留在表里：韧性摘要按「每个 provider 最近一次
+        // 检测结果」聚合，已删除的站点仍会出现在不可达计数与平均延迟里，而且
+        // 用户再也没有入口把它清掉（卡片已经不存在了）。只按 provider_id +
+        // app_type 精确删除，不动其他供应商的历史。
+        tx.execute(
+            "DELETE FROM stream_check_logs WHERE provider_id = ?1 AND app_type = ?2",
+            params![id, app_type],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
@@ -803,6 +821,86 @@ impl Database {
         self.save_provider(app_type_str, &provider)?;
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod delete_provider_tests {
+    use crate::database::Database;
+    use crate::provider::Provider;
+    use crate::services::stream_check::{HealthStatus, StreamCheckResult};
+    use serde_json::json;
+
+    fn check_result(success: bool) -> StreamCheckResult {
+        StreamCheckResult {
+            status: if success {
+                HealthStatus::Operational
+            } else {
+                HealthStatus::Failed
+            },
+            success,
+            message: if success { "ok" } else { "unreachable" }.to_string(),
+            response_time_ms: success.then_some(120),
+            http_status: success.then_some(200),
+            model_used: String::new(),
+            tested_at: 1_700_000_000,
+            retry_count: 0,
+            error_category: None,
+        }
+    }
+
+    fn provider(id: &str) -> Provider {
+        Provider::with_id(id.to_string(), format!("Provider {id}"), json!({}), None)
+    }
+
+    /// 删除供应商必须同时清掉它的检测记录。
+    ///
+    /// 否则这些行会永远留在 `stream_check_logs` 里，被韧性摘要当成"仍然存在的
+    /// 站点最近一次检测结果"，让不可达计数和平均延迟长期虚高；而且卡片已经
+    /// 消失，用户再没有任何入口能清掉它。
+    #[test]
+    fn deleting_a_provider_removes_its_stream_check_logs() {
+        let db = Database::memory().expect("memory db");
+        db.save_provider("claude", &provider("keep")).unwrap();
+        db.save_provider("claude", &provider("gone")).unwrap();
+
+        db.save_stream_check_log("keep", "Provider keep", "claude", &check_result(true))
+            .unwrap();
+        db.save_stream_check_log("gone", "Provider gone", "claude", &check_result(false))
+            .unwrap();
+
+        assert_eq!(db.get_latest_stream_checks("claude").unwrap().len(), 2);
+
+        db.delete_provider("claude", "gone").unwrap();
+
+        let remaining = db.get_latest_stream_checks("claude").unwrap();
+        assert_eq!(remaining.len(), 1, "被删供应商的检测记录必须一起清掉");
+        assert_eq!(remaining[0].provider_id, "keep");
+    }
+
+    /// 级联清理必须按 app_type 隔离，不能误删同名供应商在其它应用下的记录。
+    #[test]
+    fn deleting_a_provider_does_not_touch_other_apps_logs() {
+        let db = Database::memory().expect("memory db");
+        db.save_provider("claude", &provider("shared")).unwrap();
+        db.save_provider("codex", &provider("shared")).unwrap();
+
+        db.save_stream_check_log("shared", "Provider shared", "claude", &check_result(true))
+            .unwrap();
+        db.save_stream_check_log("shared", "Provider shared", "codex", &check_result(false))
+            .unwrap();
+
+        db.delete_provider("claude", "shared").unwrap();
+
+        assert!(
+            db.get_latest_stream_checks("claude").unwrap().is_empty(),
+            "claude 下的记录应被清理"
+        );
+        assert_eq!(
+            db.get_latest_stream_checks("codex").unwrap().len(),
+            1,
+            "codex 下的同名供应商记录必须保留"
+        );
     }
 }
 

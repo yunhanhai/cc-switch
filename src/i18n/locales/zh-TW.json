@@ -3018,10 +3018,15 @@
     },
     "resilience": {
       "todayFailovers": "今日轉移",
+      "todayFailoversHint": "今天自動切換供應商的次數（按應用統計）",
       "rateLimitWaits": "429 等待",
+      "rateLimitWaitsHint": "本次代理執行期間，遇到 429 後等待 Retry-After 再重試的次數與累計等待時長",
       "avgLatency": "平均延遲",
+      "avgLatencyHint": "最近一輪連通性檢測中，可達站點的平均回應時間",
       "slowest": "最慢站點",
+      "slowestHint": "最近一輪檢測中回應最慢的可達站點",
       "unreachable": "不可達",
+      "unreachableHint": "最近一輪檢測中無法建立連線的站點數",
       "coolingDown": "冷卻中",
       "coolingDownHint": "上游回傳 429 並要求等待的站點數。它們仍可被嘗試，但在選路時排到佇列末尾。",
       "noData": "—"

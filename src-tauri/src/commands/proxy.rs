@@ -425,6 +425,24 @@ pub async fn get_resilience_summary(
         .db
         .get_latest_stream_checks(&app_type)
         .map_err(|e| e.to_string())?;
+
+    // 只统计仍然存在的供应商。
+    //
+    // 删除供应商时已经会级联清理检测记录，但历史数据库里可能残留旧记录
+    // （清理逻辑上线前删掉的供应商）。这些行会让「不可达」「平均延迟」把
+    // 已经不存在的站点也算进去，而用户没有任何入口能发现或修正它。
+    let existing_provider_ids: std::collections::HashSet<String> = state
+        .db
+        .get_all_providers(&app_type)
+        .map(|providers| providers.into_keys().collect())
+        .unwrap_or_default();
+    let checks: Vec<_> = checks
+        .into_iter()
+        .filter(|check| {
+            existing_provider_ids.is_empty() || existing_provider_ids.contains(&check.provider_id)
+        })
+        .collect();
+
     let mut unreachable_count = 0u64;
     let mut latencies: Vec<(String, u64)> = Vec::new();
     for c in &checks {

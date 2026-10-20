@@ -3017,10 +3017,15 @@
     },
     "resilience": {
       "todayFailovers": "今日の切替",
+      "todayFailoversHint": "本日プロバイダーが自動で切り替わった回数（アプリ別に集計）",
       "rateLimitWaits": "429 待機",
+      "rateLimitWaitsHint": "今回のプロキシ実行中に 429 を受けて Retry-After を待って再試行した回数と、累計待機時間",
       "avgLatency": "平均レイテンシ",
+      "avgLatencyHint": "直近の接続チェックにおける、到達可能なプロバイダーの平均応答時間",
       "slowest": "最遅",
+      "slowestHint": "直近のチェックで最も応答が遅かった到達可能なプロバイダー",
       "unreachable": "到達不可",
+      "unreachableHint": "直近のチェックで接続を確立できなかったプロバイダー数",
       "coolingDown": "クールダウン中",
       "coolingDownHint": "上流が 429 と待機時間を返したプロバイダー数です。引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
       "noData": "—"
