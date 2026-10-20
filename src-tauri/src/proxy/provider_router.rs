@@ -266,10 +266,16 @@ impl ProviderRouter {
         }
     }
 
-    /// 重置指定供应商的熔断器
+    /// 重置指定供应商的全部「路由惩罚」状态：熔断器 + 限流冷却。
+    ///
+    /// 只重置熔断器是不够的：用户点「重置熔断」的意图是「这家现在可以用了」，
+    /// 但冷却表是独立的另一份状态，残留的冷却仍会在 `select_providers` 里
+    /// 把它排到队尾 —— 表现为「点了重置却还是不走这家」，而界面上熔断徽章
+    /// 已经消失，用户无从判断原因。
     pub async fn reset_provider_breaker(&self, provider_id: &str, app_type: &str) {
         let circuit_key = format!("{app_type}:{provider_id}");
         self.reset_circuit_breaker(&circuit_key).await;
+        self.rate_limit_cooldown.clear(app_type, provider_id).await;
     }
 
     /// 仅释放 HalfOpen permit，不影响健康统计（neutral 接口）
@@ -742,6 +748,75 @@ mod tests {
         assert!(snapshots
             .iter()
             .all(|snapshot| snapshot.app_type != "codex"));
+    }
+
+    /// 重置熔断必须同时清掉限流冷却。
+    ///
+    /// 两者是独立的「路由惩罚」状态：用户点「重置熔断」的意图是「这家现在
+    /// 可以用了」，只清熔断却留着冷却，会让该供应商继续被排到队尾，而界面
+    /// 上的熔断徽章已经消失 —— 用户看不到任何提示，只觉得"重置没生效"。
+    #[tokio::test]
+    #[serial]
+    async fn resetting_circuit_breaker_also_clears_rate_limit_cooldown() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        router
+            .note_rate_limited("provider-a", "claude", 120, Some(120))
+            .await;
+        assert!(
+            router
+                .rate_limit_cooldown_secs("provider-a", "claude")
+                .await
+                > 0,
+            "前置条件：应已登记冷却"
+        );
+
+        router.reset_provider_breaker("provider-a", "claude").await;
+
+        assert_eq!(
+            router
+                .rate_limit_cooldown_secs("provider-a", "claude")
+                .await,
+            0,
+            "重置熔断后冷却必须一起清掉"
+        );
+        assert!(
+            router.rate_limit_cooldown_snapshots().await.is_empty(),
+            "快照里也不应再出现该供应商"
+        );
+    }
+
+    /// 重置一个供应商不应波及其它供应商或其它应用的冷却。
+    #[tokio::test]
+    #[serial]
+    async fn resetting_one_provider_leaves_other_cooldowns_intact() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let router = ProviderRouter::new(db);
+
+        router
+            .note_rate_limited("target", "claude", 120, Some(120))
+            .await;
+        router
+            .note_rate_limited("bystander", "claude", 120, Some(120))
+            .await;
+        router
+            .note_rate_limited("target", "codex", 120, Some(120))
+            .await;
+
+        router.reset_provider_breaker("target", "claude").await;
+
+        assert_eq!(router.rate_limit_cooldown_secs("target", "claude").await, 0);
+        assert!(
+            router.rate_limit_cooldown_secs("bystander", "claude").await > 0,
+            "同应用其它供应商的冷却必须保留"
+        );
+        assert!(
+            router.rate_limit_cooldown_secs("target", "codex").await > 0,
+            "另一个应用下同名供应商的冷却必须保留"
+        );
     }
 
     #[tokio::test]

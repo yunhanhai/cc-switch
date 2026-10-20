@@ -2954,6 +2954,8 @@
       "addFailed": "添加失败",
       "removeSuccess": "已从故障转移队列移除",
       "removeFailed": "移除失败",
+      "cooldownBadge": "限流 {{seconds}}s",
+      "cooldownHint": "上游返回 429 并要求等待。该供应商仍会被尝试，但在选路时排到队列末尾。",
       "reorderSuccess": "队列顺序已更新",
       "reorderFailed": "更新顺序失败",
       "toggleFailed": "状态更新失败"

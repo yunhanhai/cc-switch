@@ -9,7 +9,14 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Trash2, Loader2, Info, AlertTriangle } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Loader2,
+  Info,
+  AlertTriangle,
+  Hourglass,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,6 +37,7 @@ import {
   useRemoveFromFailoverQueue,
   useAutoFailoverEnabled,
   useSetAutoFailoverEnabled,
+  useRateLimitCooldowns,
 } from "@/lib/query/failover";
 import { FailoverEventTimeline } from "@/components/proxy/FailoverEventTimeline";
 
@@ -57,6 +65,14 @@ export function FailoverQueueManager({
   } = useFailoverQueue(appType);
   const { data: availableProviders, isLoading: isProvidersLoading } =
     useAvailableProvidersForFailover(appType);
+
+  // 当前处于 429 冷却中的供应商：队列里标出来并显示剩余秒数。
+  // 这类供应商不会被剔除，只是选路时排到队尾 —— 不标出来用户会误以为
+  // 队列顺序失效（P1 明明在第一位，实际却优先走 P2），从而去反复调整排序。
+  const { data: cooldowns = [] } = useRateLimitCooldowns(appType);
+  const cooldownById = new Map(
+    cooldowns.map((cooldown) => [cooldown.providerId, cooldown.remainingSecs]),
+  );
 
   // Mutations
   const addToQueue = useAddToFailoverQueue();
@@ -234,6 +250,7 @@ export function FailoverQueueManager({
               disabled={disabled}
               onRemove={handleRemoveProvider}
               isRemoving={removeFromQueue.isPending}
+              cooldownSecs={cooldownById.get(item.providerId) ?? 0}
             />
           ))}
         </div>
@@ -261,6 +278,8 @@ interface QueueItemProps {
   disabled: boolean;
   onRemove: (providerId: string) => void;
   isRemoving: boolean;
+  /** 剩余 429 冷却秒数；0 表示未冷却 */
+  cooldownSecs: number;
 }
 
 function QueueItem({
@@ -269,13 +288,17 @@ function QueueItem({
   disabled,
   onRemove,
   isRemoving,
+  cooldownSecs,
 }: QueueItemProps) {
   const { t } = useTranslation();
+  const isCoolingDown = cooldownSecs > 0;
 
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-lg border bg-card p-3 transition-colors",
+        // 冷却中的条目标黄：它的实际优先级已被临时下移，与序号显示不一致
+        isCoolingDown && "border-amber-500/40 bg-amber-500/5",
       )}
     >
       {/* 序号 */}
@@ -294,6 +317,23 @@ function QueueItem({
           )}
         </span>
       </div>
+
+      {/* 429 冷却倒计时：解释「为什么排在前面的它没被优先使用」 */}
+      {isCoolingDown && (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-1 text-xs font-medium text-amber-700 tabular-nums dark:text-amber-400"
+          title={t("proxy.failoverQueue.cooldownHint", {
+            defaultValue:
+              "上游返回 429 并要求等待。该供应商仍会被尝试，但在选路时排到队列末尾。",
+          })}
+        >
+          <Hourglass className="h-3 w-3" />
+          {t("proxy.failoverQueue.cooldownBadge", {
+            seconds: cooldownSecs,
+            defaultValue: `限流 ${cooldownSecs}s`,
+          })}
+        </span>
+      )}
 
       {/* 删除按钮 */}
       <Button

@@ -2954,6 +2954,8 @@
       "addFailed": "追加に失敗しました",
       "removeSuccess": "フェイルオーバーキューから削除しました",
       "removeFailed": "削除に失敗しました",
+      "cooldownBadge": "レート制限 {{seconds}}秒",
+      "cooldownHint": "上流が 429 と待機時間を返しました。このプロバイダーは引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
       "reorderSuccess": "キュー順序を更新しました",
       "reorderFailed": "順序の更新に失敗しました",
       "toggleFailed": "状態の更新に失敗しました"

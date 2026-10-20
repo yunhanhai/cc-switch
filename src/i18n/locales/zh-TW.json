@@ -2955,6 +2955,8 @@
       "addFailed": "新增失敗",
       "removeSuccess": "已從故障轉移佇列移除",
       "removeFailed": "移除失敗",
+      "cooldownBadge": "限流 {{seconds}}s",
+      "cooldownHint": "上游回傳 429 並要求等待。該供應商仍會被嘗試，但在選路時排到佇列末尾。",
       "reorderSuccess": "佇列順序已更新",
       "reorderFailed": "更新順序失敗",
       "toggleFailed": "狀態更新失敗"

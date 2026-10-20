@@ -2954,6 +2954,8 @@
       "addFailed": "Failed to add",
       "removeSuccess": "Removed from failover queue",
       "removeFailed": "Failed to remove",
+      "cooldownBadge": "Rate limited {{seconds}}s",
+      "cooldownHint": "Upstream returned 429 with a wait. This provider is still tried, but moved to the end of the queue during routing.",
       "reorderSuccess": "Queue order updated",
       "reorderFailed": "Failed to update order",
       "toggleFailed": "Failed to update status"
