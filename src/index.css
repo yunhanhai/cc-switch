@@ -29,7 +29,7 @@
     --input: 195 12% 88%;
     --ring: 187 92% 38%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
   }
 
   .dark {
@@ -87,10 +87,10 @@
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .dark .glass {
@@ -99,10 +99,13 @@
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 4px 16px -4px rgba(15, 23, 42, 0.06);
 }
 
 .dark .glass-card {
@@ -111,8 +114,10 @@
     rgba(255, 255, 255, 0.05) 0%,
     rgba(255, 255, 255, 0.01) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
 .glass-card-active {
@@ -143,6 +148,28 @@
   background: hsl(var(--background));
   border: none;
   border-top: 2px solid hsl(var(--border));
+}
+
+/* 定制：主头部底部分割线——中间实、两端渐隐，比硬边框更精致 */
+.header-fade-divider {
+  position: relative;
+}
+
+.header-fade-divider::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    hsl(var(--border) / 0.9) 12%,
+    hsl(var(--border) / 0.9) 88%,
+    transparent
+  );
+  pointer-events: none;
 }
 
 [data-tauri-drag-region] {
@@ -279,6 +306,46 @@ html[data-window-active="false"] .status-heartbeat {
     padding-right: 0.5rem;
     margin-right: -0.5rem;
     overflow-x: hidden;
+  }
+
+  /* ===== 定制：形状与层次系统 ===== */
+
+  /* 卡片基础阴影：双层复合（近距锐影 + 远距柔影），让卡片"浮"起来 */
+  .card-elevated {
+    box-shadow:
+      0 1px 2px hsl(200 18% 7% / 0.05),
+      0 6px 24px -8px hsl(200 18% 7% / 0.08);
+  }
+
+  .dark .card-elevated {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.3),
+      0 8px 32px -8px rgba(0, 0, 0, 0.5);
+  }
+
+  /* 悬停上浮：transform 不引起布局偏移（skill 规范） */
+  .card-hover-lift {
+    transition:
+      transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 200ms ease;
+  }
+
+  .card-hover-lift:hover {
+    transform: translateY(-2px);
+  }
+
+  .dark .card-hover-lift:hover {
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.35),
+      0 12px 40px -8px rgba(0, 0, 0, 0.55);
+  }
+
+  /* 尊重减少动效偏好（skill 规范） */
+  @media (prefers-reduced-motion: reduce) {
+    .card-hover-lift:hover {
+      transform: none;
+    }
   }
 
   .border-default {

@@ -1274,7 +1274,7 @@ function App() {
       )}
 
       <header
-        className="fixed z-50 w-full transition-all duration-300 bg-background/80 backdrop-blur-md"
+        className="fixed z-50 w-full transition-all duration-300 bg-background/80 backdrop-blur-md header-fade-divider"
         {...DRAG_REGION_ATTR}
         style={
           {

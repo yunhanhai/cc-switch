@@ -377,14 +377,15 @@ export function ProviderCard({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border border-border p-4 transition-all duration-300",
-        "bg-card text-card-foreground group",
+        "relative overflow-hidden rounded-2xl border border-border p-4 transition-all duration-200",
+        "bg-card text-card-foreground group card-hover-lift",
         isAutoFailoverEnabled || isProxyTakeover
           ? "hover:border-emerald-500/50"
           : "hover:border-border-active",
         shouldUseGreen &&
           "border-emerald-500/60 shadow-sm shadow-emerald-500/10",
-        shouldUseBlue && "border-teal-500/60 shadow-md shadow-teal-500/20",
+        shouldUseBlue &&
+          "border-teal-500/60 shadow-md shadow-teal-500/20 card-elevated",
         !hasStateHighlight && "hover:shadow-sm",
         dragHandleProps?.isDragging &&
           "cursor-grabbing border-primary shadow-lg scale-105 z-10",
@@ -615,7 +616,7 @@ export function ProviderCard({
                     </span>
                     <button
                       type="button"
-                      className="shrink-0 text-sm font-medium text-primary hover:underline"
+                      className="shrink-0 cursor-pointer text-sm font-medium text-primary transition-colors duration-200 hover:underline"
                       onClick={() => onEdit(provider)}
                     >
                       {t("codex.chooseAccount", {
