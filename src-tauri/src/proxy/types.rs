@@ -90,6 +90,12 @@ pub struct ProxyStatus {
     pub last_error: Option<String>,
     /// Provider故障转移次数
     pub failover_count: u64,
+    /// 429 限流等待重试次数（本次代理运行期累计）
+    #[serde(default)]
+    pub rate_limit_wait_count: u64,
+    /// 429 等待重试累计等待秒数
+    #[serde(default)]
+    pub rate_limit_wait_total_secs: u64,
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,

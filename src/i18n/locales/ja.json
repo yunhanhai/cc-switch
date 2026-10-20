@@ -3009,6 +3009,14 @@
       "reasonRateLimit": "レート制限",
       "reasonFailed": "障害",
       "unknownSource": "不明"
+    },
+    "resilience": {
+      "todayFailovers": "今日の切替",
+      "rateLimitWaits": "429 待機",
+      "avgLatency": "平均レイテンシ",
+      "slowest": "最遅",
+      "unreachable": "到達不可",
+      "noData": "—"
     }
   },
   "streamCheck": {

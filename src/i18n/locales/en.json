@@ -3009,6 +3009,14 @@
       "reasonRateLimit": "rate limited",
       "reasonFailed": "failure",
       "unknownSource": "unknown"
+    },
+    "resilience": {
+      "todayFailovers": "Failovers today",
+      "rateLimitWaits": "429 waits",
+      "avgLatency": "Avg latency",
+      "slowest": "Slowest",
+      "unreachable": "Unreachable",
+      "noData": "—"
     }
   },
   "streamCheck": {

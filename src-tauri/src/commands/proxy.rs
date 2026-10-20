@@ -336,6 +336,102 @@ pub async fn get_provider_health(
 /// 重置后会检查是否应该切回队列中优先级更高的供应商：
 /// 1. 检查自动故障转移是否开启
 /// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
+/// 韧性健康摘要：今日转移次数 + 429 等待统计 + 最近检测延迟概况
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResilienceSummary {
+    pub app_type: String,
+    /// 今日故障转移次数
+    pub today_failover_count: u64,
+    /// 本次运行期 429 等待重试次数
+    pub rate_limit_wait_count: u64,
+    /// 本次运行期 429 累计等待秒数
+    pub rate_limit_wait_total_secs: u64,
+    /// 最近一轮检测的平均延迟（毫秒，无数据为 None）
+    pub avg_latency_ms: Option<u64>,
+    /// 最近一轮检测的最慢站点（名称 + 毫秒）
+    pub slowest_provider: Option<(String, u64)>,
+    /// 最近一轮检测不可达站点数
+    pub unreachable_count: u64,
+}
+
+#[tauri::command]
+pub async fn get_resilience_summary(
+    state: tauri::State<'_, crate::store::AppState>,
+    app_type: String,
+) -> Result<ResilienceSummary, String> {
+    use chrono::Utc;
+
+    // 今日转移次数
+    let today_start = Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .map(|dt| dt.and_utc().timestamp())
+        .unwrap_or(0);
+    let events = state
+        .db
+        .get_failover_events(&app_type, 200)
+        .map_err(|e| e.to_string())?;
+    let today_failover_count = events
+        .iter()
+        .filter(|e| e.created_at >= today_start)
+        .count() as u64;
+
+    // 429 统计来自运行中的代理状态
+    let (rl_count, rl_secs) = match state.proxy_service.get_status().await {
+        Ok(st) => (st.rate_limit_wait_count, st.rate_limit_wait_total_secs),
+        Err(_) => (0, 0),
+    };
+
+    // 最近一轮检测延迟概况
+    let checks = state
+        .db
+        .get_latest_stream_checks(&app_type)
+        .map_err(|e| e.to_string())?;
+    let mut unreachable_count = 0u64;
+    let mut latencies: Vec<(String, u64)> = Vec::new();
+    for c in &checks {
+        if !c.success {
+            unreachable_count += 1;
+        } else if let Some(ms) = c.response_time_ms {
+            latencies.push((String::new(), ms));
+        }
+    }
+    let avg_latency_ms = if latencies.is_empty() {
+        None
+    } else {
+        Some(latencies.iter().map(|(_, ms)| ms).sum::<u64>() / latencies.len() as u64)
+    };
+    // 最慢站点：需要 provider 名称，从 checks 里找 response_time_ms 最大的
+    let slowest = checks
+        .iter()
+        .filter(|c| c.success)
+        .filter_map(|c| c.response_time_ms.map(|ms| (c.provider_id.clone(), ms)))
+        .max_by_key(|(_, ms)| *ms);
+    let slowest_provider = match slowest {
+        Some((pid, ms)) => {
+            let name = state
+                .db
+                .get_all_providers(&app_type)
+                .ok()
+                .and_then(|ps| ps.get(&pid).map(|p| p.name.clone()))
+                .unwrap_or(pid);
+            Some((name, ms))
+        }
+        None => None,
+    };
+
+    Ok(ResilienceSummary {
+        app_type,
+        today_failover_count,
+        rate_limit_wait_count: rl_count,
+        rate_limit_wait_total_secs: rl_secs,
+        avg_latency_ms,
+        slowest_provider,
+        unreachable_count,
+    })
+}
+
 /// 查询最近的故障转移事件（前端时间线）
 #[tauri::command]
 pub fn get_failover_events(

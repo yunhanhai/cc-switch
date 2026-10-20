@@ -296,3 +296,11 @@ export function useFailoverEvents(appType: string, limit: number = 20) {
     refetchInterval: 15000,
   });
 }
+
+export function useResilienceSummary(appType: string) {
+  return useQuery({
+    queryKey: ["resilienceSummary", appType],
+    queryFn: () => failoverApi.getResilienceSummary(appType),
+    refetchInterval: 15000,
+  });
+}

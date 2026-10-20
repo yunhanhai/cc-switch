@@ -31,10 +31,24 @@ export interface FailoverEvent {
   createdAt: number;
 }
 
+export interface ResilienceSummary {
+  appType: string;
+  todayFailoverCount: number;
+  rateLimitWaitCount: number;
+  rateLimitWaitTotalSecs: number;
+  avgLatencyMs?: number | null;
+  slowestProvider?: [string, number] | null;
+  unreachableCount: number;
+}
+
 export const failoverApi = {
   // ========== 熔断器 API ==========
 
   // 获取供应商健康状态
+  async getResilienceSummary(appType: string): Promise<ResilienceSummary> {
+    return invoke("get_resilience_summary", { appType });
+  },
+
   async getFailoverEvents(
     appType: string,
     limit: number = 20,

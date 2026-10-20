@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { toast } from "sonner";
 import { useFailoverQueue } from "@/lib/query/failover";
+import { ResilienceSummaryBar } from "@/components/proxy/ResilienceSummaryBar";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
 import { useProviderHealth } from "@/lib/query/failover";
 import {
@@ -315,6 +316,18 @@ export function ProxyPanel({
         {/* Running state: service info + stats */}
         {isRunning && status ? (
           <div className="space-y-6">
+            {/* [3.5] 定制：韧性健康摘要（每个已接管应用一条） */}
+            {PROXY_APP_IDS.filter(
+              (appType) => takeoverStatus?.[appType] ?? false,
+            ).map((appType) => (
+              <div key={`resilience-${appType}`} className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {getAppLabel(appType)}
+                </p>
+                <ResilienceSummaryBar appType={appType} />
+              </div>
+            ))}
+
             {/* [4] Running info: address + current provider */}
             <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-4">
               <div>

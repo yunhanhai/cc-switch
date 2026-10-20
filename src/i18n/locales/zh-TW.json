@@ -3010,6 +3010,14 @@
       "reasonRateLimit": "限流",
       "reasonFailed": "故障",
       "unknownSource": "未知"
+    },
+    "resilience": {
+      "todayFailovers": "今日轉移",
+      "rateLimitWaits": "429 等待",
+      "avgLatency": "平均延遲",
+      "slowest": "最慢站點",
+      "unreachable": "不可達",
+      "noData": "—"
     }
   },
   "streamCheck": {

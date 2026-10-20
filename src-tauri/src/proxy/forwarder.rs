@@ -579,6 +579,12 @@ impl RequestForwarder {
                                     "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
                                     provider.name
                                 );
+                                // 韧性统计：记录 429 等待次数与累计等待时长
+                                {
+                                    let mut st = self.status.write().await;
+                                    st.rate_limit_wait_count += 1;
+                                    st.rate_limit_wait_total_secs += wait_secs;
+                                }
                                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
                                 continue;
                             }

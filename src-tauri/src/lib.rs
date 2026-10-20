@@ -1583,6 +1583,7 @@ pub fn run() {
             commands::get_provider_health,
             commands::reset_circuit_breaker,
             commands::get_failover_events,
+            commands::get_resilience_summary,
             commands::get_circuit_breaker_config,
             commands::update_circuit_breaker_config,
             commands::get_circuit_breaker_stats,
