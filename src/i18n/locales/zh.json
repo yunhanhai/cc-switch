@@ -3000,7 +3000,13 @@
     "timeout": "超时时间（秒）",
     "maxRetries": "最大重试次数",
     "degradedThreshold": "较慢阈值（毫秒）",
-    "error": "{{providerName}} 检查出错: {{error}}"
+    "error": "{{providerName}} 检查出错: {{error}}",
+    "batchCheckAll": "全部检测",
+    "batchRunning": "检测中...",
+    "batchAllReachable": "全部 {{count}} 个供应商可达",
+    "batchDegraded": "{{count}} 个供应商响应缓慢",
+    "batchFailed": "{{failed}}/{{total}} 个供应商不可达",
+    "batchError": "批量检测失败: {{error}}"
   },
   "proxyConfig": {
     "proxyEnabled": "路由总开关",

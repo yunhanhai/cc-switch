@@ -13,7 +13,7 @@ import {
   type CSSProperties,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, X } from "lucide-react";
+import { Activity, AlertTriangle, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -94,7 +94,8 @@ export function ProviderList({
   onSetAsDefault,
 }: ProviderListProps) {
   const { t } = useTranslation();
-  const { checkProvider, isChecking } = useStreamCheck(appId);
+  const { checkProvider, checkAllProviders, isChecking, checkingAll } =
+    useStreamCheck(appId);
   const { sortedProviders, sensors, handleDragEnd } = useDragSort(
     providers,
     appId,
@@ -229,6 +230,11 @@ export function ProviderList({
     },
     [checkProvider],
   );
+
+  // 批量连通性检查：一次探测全部供应商并汇总结果。
+  const handleCheckAll = useCallback(() => {
+    void checkAllProviders(false);
+  }, [checkAllProviders]);
 
   // Import current live config as default provider
   const queryClient = useQueryClient();
@@ -539,6 +545,27 @@ export function ProviderList({
           </ul>
         </div>
       )}
+      <div className="flex items-center justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          disabled={checkingAll || sortedProviders.length === 0}
+          onClick={handleCheckAll}
+        >
+          <Activity
+            className={checkingAll ? "h-4 w-4 animate-pulse" : "h-4 w-4"}
+          />
+          {checkingAll
+            ? t("streamCheck.batchRunning", {
+                defaultValue: "检测中...",
+              })
+            : t("streamCheck.batchCheckAll", {
+                defaultValue: "全部检测",
+              })}
+        </Button>
+      </div>
+
       <AnimatePresence>
         {isSearchOpen && (
           <motion.div

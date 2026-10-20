@@ -3000,7 +3000,13 @@
     "timeout": "タイムアウト（秒）",
     "maxRetries": "最大リトライ回数",
     "degradedThreshold": "低速判定しきい値（ミリ秒）",
-    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}"
+    "error": "{{providerName}} のチェックでエラーが発生しました: {{error}}",
+    "batchCheckAll": "すべてチェック",
+    "batchRunning": "チェック中...",
+    "batchAllReachable": "すべての {{count}} 個のプロバイダーが到達可能です",
+    "batchDegraded": "{{count}} 個のプロバイダーの応答が遅いです",
+    "batchFailed": "{{failed}}/{{total}} 個のプロバイダーが到達できません",
+    "batchError": "一括チェックに失敗しました: {{error}}"
   },
   "proxyConfig": {
     "proxyEnabled": "ルーティング総スイッチ",

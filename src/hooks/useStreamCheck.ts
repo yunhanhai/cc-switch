@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
+  streamCheckAllProviders,
   streamCheckProvider,
   type StreamCheckResult,
 } from "@/lib/api/connectivity-check";
@@ -17,6 +18,7 @@ import type { AppId } from "@/lib/api";
 export function useStreamCheck(appId: AppId) {
   const { t } = useTranslation();
   const [checkingIds, setCheckingIds] = useState<Set<string>>(new Set());
+  const [checkingAll, setCheckingAll] = useState(false);
 
   const checkProvider = useCallback(
     async (
@@ -90,5 +92,69 @@ export function useStreamCheck(appId: AppId) {
     [checkingIds],
   );
 
-  return { checkProvider, isChecking };
+  /**
+   * 批量连通性检查：一次探测当前应用下所有（或仅代理目标）供应商，
+   * 汇总可达/缓慢/不可达数量，并把不可达的以摘要形式提示。
+   */
+  const checkAllProviders = useCallback(
+    async (
+      proxyTargetsOnly: boolean = false,
+    ): Promise<Array<[string, StreamCheckResult]> | null> => {
+      setCheckingAll(true);
+      try {
+        const results = await streamCheckAllProviders(appId, proxyTargetsOnly);
+        const failed = results.filter(([, r]) => !r.success);
+        const degraded = results.filter(
+          ([, r]) => r.success && r.status === "degraded",
+        );
+
+        if (failed.length === 0 && degraded.length === 0) {
+          toast.success(
+            t("streamCheck.batchAllReachable", {
+              count: results.length,
+              defaultValue: `全部 ${results.length} 个供应商可达`,
+            }),
+          );
+        } else if (failed.length === 0) {
+          toast.warning(
+            t("streamCheck.batchDegraded", {
+              count: degraded.length,
+              defaultValue: `${degraded.length} 个供应商响应缓慢`,
+            }),
+          );
+        } else {
+          toast.error(
+            t("streamCheck.batchFailed", {
+              failed: failed.length,
+              total: results.length,
+              defaultValue: `${failed.length}/${results.length} 个供应商不可达`,
+            }),
+            {
+              description: failed
+                .map(([, r]) => r.message)
+                .filter(Boolean)
+                .slice(0, 3)
+                .join("\n"),
+              duration: 10000,
+              closeButton: true,
+            },
+          );
+        }
+        return results;
+      } catch (e) {
+        toast.error(
+          t("streamCheck.batchError", {
+            error: String(e),
+            defaultValue: `批量检测失败: ${String(e)}`,
+          }),
+        );
+        return null;
+      } finally {
+        setCheckingAll(false);
+      }
+    },
+    [appId, t],
+  );
+
+  return { checkProvider, checkAllProviders, isChecking, checkingAll };
 }

@@ -3000,7 +3000,13 @@
     "timeout": "Timeout (seconds)",
     "maxRetries": "Max Retries",
     "degradedThreshold": "Slow-response threshold (ms)",
-    "error": "{{providerName}} check error: {{error}}"
+    "error": "{{providerName}} check error: {{error}}",
+    "batchCheckAll": "Check all",
+    "batchRunning": "Checking...",
+    "batchAllReachable": "All {{count}} providers reachable",
+    "batchDegraded": "{{count}} providers responding slowly",
+    "batchFailed": "{{failed}}/{{total}} providers unreachable",
+    "batchError": "Batch check failed: {{error}}"
   },
   "proxyConfig": {
     "proxyEnabled": "Routing Master Switch",

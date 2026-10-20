@@ -3001,7 +3001,13 @@
     "timeout": "逾時時間（秒）",
     "maxRetries": "最大重試次數",
     "degradedThreshold": "緩慢閾值（毫秒）",
-    "error": "{{providerName}} 檢查出錯：{{error}}"
+    "error": "{{providerName}} 檢查出錯：{{error}}",
+    "batchCheckAll": "全部檢測",
+    "batchRunning": "檢測中...",
+    "batchAllReachable": "全部 {{count}} 個供應商可達",
+    "batchDegraded": "{{count}} 個供應商回應緩慢",
+    "batchFailed": "{{failed}}/{{total}} 個供應商不可達",
+    "batchError": "批次檢測失敗: {{error}}"
   },
   "proxyConfig": {
     "proxyEnabled": "路由總開關",

@@ -89,7 +89,9 @@ vi.mock("@dnd-kit/sortable", async () => {
 vi.mock("@/hooks/useStreamCheck", () => ({
   useStreamCheck: () => ({
     checkProvider: vi.fn(),
+    checkAllProviders: vi.fn(),
     isChecking: () => false,
+    checkingAll: false,
   }),
 }));
 
