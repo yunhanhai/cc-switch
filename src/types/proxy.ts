@@ -26,6 +26,15 @@ export interface ProxyStatus {
   last_request_at: string | null;
   last_error: string | null;
   failover_count: number;
+  /** 429 等待重试次数（全局累计，跨应用合并） */
+  rate_limit_wait_count?: number;
+  /** 429 累计等待秒数（全局累计） */
+  rate_limit_wait_total_secs?: number;
+  /** 按应用分桶的 429 等待统计；按应用展示时应读这里而非全局字段 */
+  rate_limit_waits_by_app?: Record<
+    string,
+    { count: number; totalSecs: number }
+  >;
   active_targets?: ActiveTarget[];
 }
 

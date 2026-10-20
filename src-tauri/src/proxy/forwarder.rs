@@ -587,8 +587,9 @@ impl RequestForwarder {
                                 // 韧性统计：记录 429 等待次数与累计等待时长
                                 {
                                     let mut st = self.status.write().await;
-                                    st.rate_limit_wait_count += 1;
-                                    st.rate_limit_wait_total_secs += wait_secs;
+                                    // 同时写全局累计与 per-app 分桶：韧性摘要按应用
+                                    // 展示，只写全局会让 claude 的等待数串到 codex 上。
+                                    st.record_rate_limit_wait(app_type_str, wait_secs);
                                 }
                                 // 共享冷却：让并发的其他请求别再来撞同一个限流窗口。
                                 // 只有「本请求决定等」时才登记——放弃等待走故障转移的

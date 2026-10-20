@@ -95,6 +95,25 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(deleted as u64)
     }
+
+    /// 统计指定应用自 `since` 起的故障转移事件数。
+    ///
+    /// 走 SQL `COUNT(*)` 而不是「取最近 N 条再在内存里过滤」：后者有两个问题 ——
+    /// 一是条数上限会把结果截断（今天转移 500 次却只显示 200），二是为了数一个
+    /// 数字要把整批事件行读出来再丢弃。COUNT 在 `(app_type, created_at)` 索引上
+    /// 直接出结果。
+    pub fn count_failover_events_since(&self, app_type: &str, since: i64) -> Result<u64, AppError> {
+        let conn = lock_conn!(self.conn);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM failover_events
+                 WHERE app_type = ?1 AND created_at >= ?2",
+                rusqlite::params![app_type, since],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(count.max(0) as u64)
+    }
 }
 
 #[cfg(test)]
@@ -165,5 +184,50 @@ mod tests {
             "应按时间倒序返回"
         );
         assert!(claude_events.iter().all(|event| event.app_type == "claude"));
+    }
+
+    /// 今日计数不能被「取最近 N 条」的上限截断。
+    ///
+    /// 之前摘要用 `get_failover_events(app, 200)` 再在内存里过滤，今天转移
+    /// 超过 200 次就会少报。COUNT 走 SQL 聚合，不受任何 limit 影响。
+    #[test]
+    fn count_since_is_not_capped_by_list_limit() {
+        let db = Database::memory().expect("memory db");
+        let now = Utc::now().timestamp();
+        // 窗口起点要早于所有"今日"事件：250 条分布在 now-0 .. now-249
+        let window_start = now - 1000;
+
+        // 今日 250 条（超过旧的 200 上限）
+        for offset in 0..250 {
+            insert_event_at(&db, "claude", now - offset);
+        }
+        // 窗口外的一条不应计入
+        insert_event_at(&db, "claude", window_start - 120);
+
+        let counted = db
+            .count_failover_events_since("claude", window_start)
+            .expect("count");
+
+        assert_eq!(counted, 250, "COUNT 不应被任何列表上限截断");
+    }
+
+    /// 计数按 app 隔离。
+    #[test]
+    fn count_since_is_app_scoped() {
+        let db = Database::memory().expect("memory db");
+        let now = Utc::now().timestamp();
+        let since = now - 3600;
+
+        insert_event_at(&db, "claude", now - 10);
+        insert_event_at(&db, "claude", now - 20);
+        insert_event_at(&db, "codex", now - 30);
+
+        assert_eq!(db.count_failover_events_since("claude", since).unwrap(), 2);
+        assert_eq!(db.count_failover_events_since("codex", since).unwrap(), 1);
+        assert_eq!(
+            db.count_failover_events_since("gemini", since).unwrap(),
+            0,
+            "没有任何事件的应用应为 0"
+        );
     }
 }

@@ -392,25 +392,25 @@ pub async fn get_resilience_summary(
 ) -> Result<ResilienceSummary, String> {
     use chrono::Utc;
 
-    // 今日转移次数
+    // 今日转移次数：直接 COUNT，避免被「取最近 N 条」的上限截断
     let today_start = Utc::now()
         .date_naive()
         .and_hms_opt(0, 0, 0)
         .map(|dt| dt.and_utc().timestamp())
         .unwrap_or(0);
-    let events = state
+    let today_failover_count = state
         .db
-        .get_failover_events(&app_type, 200)
+        .count_failover_events_since(&app_type, today_start)
         .map_err(|e| e.to_string())?;
-    let today_failover_count = events
-        .iter()
-        .filter(|e| e.created_at >= today_start)
-        .count() as u64;
 
-    // 429 统计来自运行中的代理状态
-    let (rl_count, rl_secs) = match state.proxy_service.get_status().await {
-        Ok(st) => (st.rate_limit_wait_count, st.rate_limit_wait_total_secs),
-        Err(_) => (0, 0),
+    // 429 统计来自运行中的代理状态。
+    //
+    // 必须读 per-app 分桶而不是全局累计：ProxyStatus 是代理服务的单例，
+    // 全局计数把所有应用的 429 等待混在一起，直接展示会让 claude 的限流
+    // 等待出现在 codex 的摘要里。
+    let app_rate_limit_waits = match state.proxy_service.get_status().await {
+        Ok(st) => st.rate_limit_waits_for(&app_type),
+        Err(_) => Default::default(),
     };
 
     // 当前仍处于冷却窗口的站点（429 Retry-After 驱动的进程内共享状态）
@@ -461,8 +461,8 @@ pub async fn get_resilience_summary(
     Ok(ResilienceSummary {
         app_type,
         today_failover_count,
-        rate_limit_wait_count: rl_count,
-        rate_limit_wait_total_secs: rl_secs,
+        rate_limit_wait_count: app_rate_limit_waits.count,
+        rate_limit_wait_total_secs: app_rate_limit_waits.total_secs,
         avg_latency_ms,
         slowest_provider,
         unreachable_count,

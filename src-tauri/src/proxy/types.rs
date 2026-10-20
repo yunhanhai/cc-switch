@@ -91,14 +91,60 @@ pub struct ProxyStatus {
     /// Provider故障转移次数
     pub failover_count: u64,
     /// 429 限流等待重试次数（本次代理运行期累计）
+    ///
+    /// 这是**全局**累计值，只适合在「代理服务总览」里展示。
+    /// 按应用区分的统计请读 `rate_limit_waits_by_app` —— 否则 claude 的
+    /// 限流等待会被算进 codex 的韧性摘要。
     #[serde(default)]
     pub rate_limit_wait_count: u64,
     /// 429 等待重试累计等待秒数
     #[serde(default)]
     pub rate_limit_wait_total_secs: u64,
+    /// 按应用类型分桶的 429 等待统计（本次代理运行期累计）
+    ///
+    /// key = app_type（"claude" / "codex" / ...），value = (次数, 累计等待秒数)。
+    /// 空 map 表示本次运行期尚未发生任何 429 等待。
+    #[serde(default)]
+    pub rate_limit_waits_by_app: std::collections::HashMap<String, AppRateLimitWaits>,
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,
+}
+
+/// 单个应用的 429 等待统计
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppRateLimitWaits {
+    /// 429 等待重试次数
+    pub count: u64,
+    /// 累计等待秒数
+    pub total_secs: u64,
+}
+
+impl ProxyStatus {
+    /// 读取指定应用的 429 等待统计；无记录时返回全零。
+    pub fn rate_limit_waits_for(&self, app_type: &str) -> AppRateLimitWaits {
+        self.rate_limit_waits_by_app
+            .get(app_type)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// 累加一次 429 等待：同时更新全局累计与 per-app 分桶。
+    ///
+    /// 两处都更新是为了让「总览」和「按应用」两个视图保持一致，
+    /// 避免调用方各自维护一份计数。
+    pub fn record_rate_limit_wait(&mut self, app_type: &str, wait_secs: u64) {
+        self.rate_limit_wait_count = self.rate_limit_wait_count.saturating_add(1);
+        self.rate_limit_wait_total_secs = self.rate_limit_wait_total_secs.saturating_add(wait_secs);
+
+        let bucket = self
+            .rate_limit_waits_by_app
+            .entry(app_type.to_string())
+            .or_default();
+        bucket.count = bucket.count.saturating_add(1);
+        bucket.total_secs = bucket.total_secs.saturating_add(wait_secs);
+    }
 }
 
 /// 活跃的代理目标信息
@@ -406,6 +452,56 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 429 等待必须按 app 分桶：韧性摘要按应用展示，只记全局会让
+    /// claude 的限流等待出现在 codex 的卡片上。
+    #[test]
+    fn rate_limit_waits_are_bucketed_per_app() {
+        let mut status = ProxyStatus::default();
+
+        status.record_rate_limit_wait("claude", 30);
+        status.record_rate_limit_wait("claude", 10);
+        status.record_rate_limit_wait("codex", 5);
+
+        let claude = status.rate_limit_waits_for("claude");
+        assert_eq!(claude.count, 2);
+        assert_eq!(claude.total_secs, 40);
+
+        let codex = status.rate_limit_waits_for("codex");
+        assert_eq!(codex.count, 1);
+        assert_eq!(codex.total_secs, 5);
+
+        // 未发生限流的应用读出来是全零，而不是别的应用的数字
+        let gemini = status.rate_limit_waits_for("gemini");
+        assert_eq!(gemini.count, 0);
+        assert_eq!(gemini.total_secs, 0);
+    }
+
+    /// 全局累计与 per-app 分桶必须同时更新且彼此自洽。
+    #[test]
+    fn global_and_per_app_rate_limit_totals_stay_consistent() {
+        let mut status = ProxyStatus::default();
+
+        status.record_rate_limit_wait("claude", 30);
+        status.record_rate_limit_wait("codex", 20);
+
+        // 全局 = 各应用之和
+        assert_eq!(status.rate_limit_wait_count, 2);
+        assert_eq!(status.rate_limit_wait_total_secs, 50);
+
+        let sum_count: u64 = status
+            .rate_limit_waits_by_app
+            .values()
+            .map(|waits| waits.count)
+            .sum();
+        let sum_secs: u64 = status
+            .rate_limit_waits_by_app
+            .values()
+            .map(|waits| waits.total_secs)
+            .sum();
+        assert_eq!(sum_count, status.rate_limit_wait_count);
+        assert_eq!(sum_secs, status.rate_limit_wait_total_secs);
+    }
 
     #[test]
     fn test_rectifier_config_default_enabled() {
