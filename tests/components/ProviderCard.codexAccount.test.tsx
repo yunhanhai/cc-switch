@@ -44,6 +44,7 @@ vi.mock("@/components/XaiOauthQuotaFooter", () => ({ default: () => null }));
 
 vi.mock("@/lib/query/failover", () => ({
   useProviderHealth: () => ({ data: undefined }),
+  useResetCircuitBreaker: () => ({ mutate: () => {}, isPending: false }),
 }));
 
 vi.mock("@/lib/query/queries", () => ({

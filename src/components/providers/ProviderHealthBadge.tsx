@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 interface ProviderHealthBadgeProps {
   consecutiveFailures: number;
   isHealthy?: boolean;
+  /** 最近一次失败原因，悬停时展示，便于排查为何熔断 */
+  lastError?: string | null;
   className?: string;
 }
 
@@ -15,6 +17,7 @@ interface ProviderHealthBadgeProps {
 export function ProviderHealthBadge({
   consecutiveFailures,
   isHealthy,
+  lastError,
   className,
 }: ProviderHealthBadgeProps) {
   const { t } = useTranslation();
@@ -65,10 +68,15 @@ export function ProviderHealthBadge({
         statusConfig.textColor,
         className,
       )}
-      title={t("health.consecutiveFailures", {
-        count: consecutiveFailures,
-        defaultValue: `连续失败 ${consecutiveFailures} 次`,
-      })}
+      title={[
+        t("health.consecutiveFailures", {
+          count: consecutiveFailures,
+          defaultValue: `连续失败 ${consecutiveFailures} 次`,
+        }),
+        lastError?.trim() || null,
+      ]
+        .filter(Boolean)
+        .join("\n")}
     >
       <div className={cn("w-2 h-2 rounded-full", statusConfig.color)} />
       <span>{label}</span>

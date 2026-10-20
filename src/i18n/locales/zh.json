@@ -2784,7 +2784,9 @@
     "degraded": "降级",
     "failed": "失败",
     "circuitOpen": "熔断",
-    "consecutiveFailures": "连续失败 {{count}} 次"
+    "consecutiveFailures": "连续失败 {{count}} 次",
+    "resetCircuit": "重置熔断",
+    "resetCircuitHint": "立即重置熔断并重新探测该供应商"
   },
   "failover": {
     "enabled": "{{app}} 故障转移已启用",

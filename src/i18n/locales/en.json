@@ -2784,7 +2784,9 @@
     "degraded": "Degraded",
     "failed": "Failed",
     "circuitOpen": "Circuit Open",
-    "consecutiveFailures": "{{count}} consecutive failures"
+    "consecutiveFailures": "{{count}} consecutive failures",
+    "resetCircuit": "Reset circuit",
+    "resetCircuitHint": "Reset the circuit now and probe this provider again"
   },
   "failover": {
     "enabled": "{{app}} failover enabled",

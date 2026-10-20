@@ -4,6 +4,7 @@ import {
   GripVertical,
   ChevronDown,
   ChevronUp,
+  RotateCcw,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -36,7 +37,10 @@ import {
   supportsOfficialProxyTakeover,
   providerNeedsRouting,
 } from "@/utils/providerCapabilities";
-import { useProviderHealth } from "@/lib/query/failover";
+import {
+  useProviderHealth,
+  useResetCircuitBreaker,
+} from "@/lib/query/failover";
 import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
 import { ProviderStatusBadge } from "@/components/providers/ProviderStatusBadge";
@@ -232,6 +236,7 @@ export function ProviderCard({
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
   const isAdditiveMode = (appId === "opencode" && !isAnyOmo) || appId === "pi";
 
+  const resetCircuitBreaker = useResetCircuitBreaker();
   const { data: health } = useProviderHealth(
     provider.id,
     appId,
@@ -486,10 +491,35 @@ export function ProviderCard({
                 !supportsOfficialRouting &&
                 isInFailoverQueue &&
                 health && (
-                  <ProviderHealthBadge
-                    consecutiveFailures={health.consecutive_failures}
-                    isHealthy={health.is_healthy}
-                  />
+                  <>
+                    <ProviderHealthBadge
+                      consecutiveFailures={health.consecutive_failures}
+                      isHealthy={health.is_healthy}
+                      lastError={health.last_error}
+                    />
+                    {!health.is_healthy && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title={t("health.resetCircuitHint", {
+                          defaultValue: "立即重置熔断并重新探测该供应商",
+                        })}
+                        disabled={resetCircuitBreaker.isPending}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          resetCircuitBreaker.mutate({
+                            providerId: provider.id,
+                            appType: appId,
+                          });
+                        }}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        {t("health.resetCircuit", {
+                          defaultValue: "重置熔断",
+                        })}
+                      </button>
+                    )}
+                  </>
                 )}
 
               {isAutoFailoverEnabled &&

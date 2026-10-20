@@ -99,6 +99,8 @@ vi.mock("@/lib/query/failover", () => ({
   useAddToFailoverQueue: () => ({ mutate: vi.fn() }),
   useRemoveFromFailoverQueue: () => ({ mutate: vi.fn() }),
   useReorderFailoverQueue: () => ({ mutate: vi.fn() }),
+  useProviderHealth: () => ({ data: undefined }),
+  useResetCircuitBreaker: () => ({ mutate: () => {}, isPending: false }),
 }));
 
 function createProvider(overrides: Partial<Provider> = {}): Provider {

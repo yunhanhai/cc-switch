@@ -2784,7 +2784,9 @@
     "degraded": "低下",
     "failed": "失敗",
     "circuitOpen": "サーキットオープン",
-    "consecutiveFailures": "{{count}} 回連続失敗"
+    "consecutiveFailures": "{{count}} 回連続失敗",
+    "resetCircuit": "サーキットをリセット",
+    "resetCircuitHint": "サーキットを即座にリセットし、このプロバイダーを再プローブします"
   },
   "failover": {
     "enabled": "{{app}} フェイルオーバーが有効になりました",
