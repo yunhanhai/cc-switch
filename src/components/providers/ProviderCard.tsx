@@ -384,7 +384,7 @@ export function ProviderCard({
           : "hover:border-border-active",
         shouldUseGreen &&
           "border-emerald-500/60 shadow-sm shadow-emerald-500/10",
-        shouldUseBlue && "border-blue-500/60 shadow-sm shadow-blue-500/10",
+        shouldUseBlue && "border-teal-500/60 shadow-md shadow-teal-500/20",
         !hasStateHighlight && "hover:shadow-sm",
         dragHandleProps?.isDragging &&
           "cursor-grabbing border-primary shadow-lg scale-105 z-10",
@@ -394,7 +394,7 @@ export function ProviderCard({
         className={cn(
           "absolute inset-0 bg-gradient-to-r to-transparent transition-opacity duration-500 pointer-events-none",
           shouldUseGreen && "from-emerald-500/10",
-          shouldUseBlue && "from-blue-500/10",
+          shouldUseBlue && "from-teal-500/10",
           !hasStateHighlight && "from-primary/10",
           hasStateHighlight ? "opacity-100" : "opacity-0",
         )}
