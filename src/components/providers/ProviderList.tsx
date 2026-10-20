@@ -40,10 +40,7 @@ import {
   useHermesModelConfig,
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
-import {
-  getLatestStreamChecks,
-  type LatestStreamCheck,
-} from "@/lib/api/connectivity-check";
+import { getLatestStreamChecks } from "@/lib/api/connectivity-check";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -223,8 +220,12 @@ export function ProviderList({
   // 定制：多选模式与已选集合
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // 定制：最近一次连通性检测结果（延迟/健康排序 + 选中不可达）
-  const [latestChecks, setLatestChecks] = useState<LatestStreamCheck[]>([]);
+  // 定制：最近一次连通性检测结果（延迟/健康排序 + 选中不可达 + 卡片延迟徽章）
+  // 常驻查询：进入页面即有数据，批量检测后失效刷新
+  const { data: latestChecks = [], refetch: refetchLatestChecks } = useQuery({
+    queryKey: ["latestStreamChecks", appId],
+    queryFn: () => getLatestStreamChecks(appId),
+  });
   const { data: claudeDesktopStatus } = useQuery({
     queryKey: ["claudeDesktopStatus"],
     queryFn: () => providersApi.getClaudeDesktopStatus(),
@@ -258,22 +259,15 @@ export function ProviderList({
   const handleCheckAll = useCallback(async () => {
     const results = await checkAllProviders(false);
     if (results) {
-      try {
-        setLatestChecks(await getLatestStreamChecks(appId));
-      } catch {
-        // 查询失败不阻断主流程，排序退回无数据状态
-      }
+      void refetchLatestChecks();
     }
-  }, [checkAllProviders, appId]);
+  }, [checkAllProviders, refetchLatestChecks]);
 
   // 进入多选模式时预取最近检测结果（用于"选中不可达"）
   const enterSelectMode = useCallback(() => {
     setSelectMode(true);
     setSelectedIds(new Set());
-    getLatestStreamChecks(appId)
-      .then(setLatestChecks)
-      .catch(() => {});
-  }, [appId]);
+  }, []);
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -661,6 +655,10 @@ export function ProviderList({
                 selectMode={selectMode}
                 isSelected={selectedIds.has(provider.id)}
                 onToggleSelect={toggleSelected}
+                lastLatencyMs={
+                  latestChecks.find((c) => c.providerId === provider.id)
+                    ?.responseTimeMs
+                }
               />
             );
           })}
@@ -901,6 +899,8 @@ interface SortableProviderCardProps {
   selectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (providerId: string) => void;
+  // 定制：最近检测延迟（毫秒），无数据为 undefined
+  lastLatencyMs?: number;
 }
 
 function SortableProviderCard({
@@ -936,6 +936,7 @@ function SortableProviderCard({
   selectMode,
   isSelected,
   onToggleSelect,
+  lastLatencyMs,
 }: SortableProviderCardProps) {
   const {
     setNodeRef,
@@ -1021,6 +1022,7 @@ function SortableProviderCard({
           isRemovalProtected={isRemovalProtected}
           isStateChangeProtected={isStateChangeProtected}
           onSetAsDefault={onSetAsDefault}
+          lastLatencyMs={lastLatencyMs}
         />
       </div>
     </div>

@@ -336,6 +336,19 @@ pub async fn get_provider_health(
 /// 重置后会检查是否应该切回队列中优先级更高的供应商：
 /// 1. 检查自动故障转移是否开启
 /// 2. 如果恢复的供应商在队列中优先级更高（queue_order 更小），则自动切换
+/// 查询最近的故障转移事件（前端时间线）
+#[tauri::command]
+pub fn get_failover_events(
+    state: tauri::State<'_, crate::store::AppState>,
+    app_type: String,
+    limit: Option<u32>,
+) -> Result<Vec<crate::database::FailoverEvent>, String> {
+    state
+        .db
+        .get_failover_events(&app_type, limit.unwrap_or(20).min(100))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn reset_circuit_breaker(
     app_handle: tauri::AppHandle,

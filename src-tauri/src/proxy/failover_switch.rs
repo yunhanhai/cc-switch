@@ -97,6 +97,19 @@ impl FailoverSwitchManager {
 
         log::info!("[FO-001] 切换: {app_type} → {provider_name}");
 
+        // 记录切换前的当前供应商，作为事件的 from 端
+        let from_provider = self.db.get_current_provider(app_type).ok().flatten();
+        let (from_id, from_name) = match &from_provider {
+            Some(id) => match self.db.get_all_providers(app_type) {
+                Ok(providers) => providers
+                    .get(id)
+                    .map(|p| (Some(p.id.clone()), Some(p.name.clone())))
+                    .unwrap_or((Some(id.clone()), None)),
+                Err(_) => (Some(id.clone()), None),
+            },
+            None => (None, None),
+        };
+
         let mut switched = false;
 
         if let Some(app) = app_handle {
@@ -132,6 +145,20 @@ impl FailoverSwitchManager {
             });
             if let Err(e) = app.emit("provider-switched", event_data) {
                 log::error!("[Failover] 发射事件失败: {e}");
+            }
+        }
+
+        // 持久化故障转移事件（前端时间线展示；失败不阻断切换主流程）
+        if switched {
+            if let Err(e) = self.db.save_failover_event(
+                app_type,
+                from_id.as_deref(),
+                from_name.as_deref(),
+                provider_id,
+                provider_name,
+                reason,
+            ) {
+                log::warn!("[Failover] save event failed: {e}");
             }
         }
 

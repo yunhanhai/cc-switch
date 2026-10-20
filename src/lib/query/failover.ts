@@ -288,3 +288,11 @@ export function useSetAutoFailoverEnabled() {
     },
   });
 }
+
+export function useFailoverEvents(appType: string, limit: number = 20) {
+  return useQuery({
+    queryKey: ["failoverEvents", appType, limit],
+    queryFn: () => failoverApi.getFailoverEvents(appType, limit),
+    refetchInterval: 15000,
+  });
+}

@@ -20,10 +20,28 @@ export interface Provider {
   iconColor?: string;
 }
 
+export interface FailoverEvent {
+  id: number;
+  appType: string;
+  fromProviderId?: string | null;
+  fromProviderName?: string | null;
+  toProviderId: string;
+  toProviderName: string;
+  reason?: string | null;
+  createdAt: number;
+}
+
 export const failoverApi = {
   // ========== 熔断器 API ==========
 
   // 获取供应商健康状态
+  async getFailoverEvents(
+    appType: string,
+    limit: number = 20,
+  ): Promise<FailoverEvent[]> {
+    return invoke("get_failover_events", { appType, limit });
+  },
+
   async getProviderHealth(
     providerId: string,
     appType: string,

@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
+  Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -83,7 +84,8 @@ interface ProviderCardProps {
   isDefaultModel?: boolean;
   isRemovalProtected?: boolean;
   isStateChangeProtected?: boolean;
-  onSetAsDefault?: (modelId?: string) => void;
+  onSetAsDefault?: (modelId?: string) => void; // 定制：最近检测延迟（毫秒），无数据为 undefined
+  lastLatencyMs?: number;
 }
 
 /** 判断是否为官方供应商（无自定义 base URL / API key，直连官方 API） */
@@ -201,6 +203,7 @@ export function ProviderCard({
   isRemovalProtected,
   isStateChangeProtected,
   onSetAsDefault,
+  lastLatencyMs,
 }: ProviderCardProps) {
   const { t } = useTranslation();
   const codexOfficialIdentity = resolveCodexOfficialIdentity(appId, provider);
@@ -492,11 +495,30 @@ export function ProviderCard({
                 isInFailoverQueue &&
                 health && (
                   <>
-                    <ProviderHealthBadge
-                      consecutiveFailures={health.consecutive_failures}
-                      isHealthy={health.is_healthy}
-                      lastError={health.last_error}
-                    />
+                    <>
+                      <ProviderHealthBadge
+                        consecutiveFailures={health.consecutive_failures}
+                        isHealthy={health.is_healthy}
+                        lastError={health.last_error}
+                      />
+                      {lastLatencyMs !== undefined && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium tabular-nums ${
+                            lastLatencyMs < 1000
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : lastLatencyMs < 3000
+                                ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400"
+                                : "bg-red-500/10 text-red-600 dark:text-red-400"
+                          }`}
+                          title={t("provider.latencyBadgeHint", {
+                            defaultValue: "最近一次连通性检测延迟",
+                          })}
+                        >
+                          <Zap className="h-3 w-3" />
+                          {lastLatencyMs}ms
+                        </span>
+                      )}
+                    </>
                     {!health.is_healthy && (
                       <button
                         type="button"

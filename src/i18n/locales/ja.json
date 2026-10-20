@@ -202,7 +202,8 @@
     "batchDeleting": "削除中...",
     "batchDeleteConfirm": "{{count}} 個のプロバイダーを削除しますか？\n{{names}}\nこの操作は元に戻せません。",
     "batchDeleteDone": "{{count}} 個のプロバイダーを削除しました",
-    "batchDeletePartial": "完了：{{ok}} 件削除、{{fail}} 件失敗"
+    "batchDeletePartial": "完了：{{ok}} 件削除、{{fail}} 件失敗",
+    "latencyBadgeHint": "最新の接続チェックのレイテンシ"
   },
   "claudeCode": {
     "needsRouting": "ルーティングが必要",
@@ -3000,7 +3001,15 @@
       "stopFailed": "ルーティングサービスの停止に失敗しました: {{detail}}"
     },
     "stoppedWithRestore": "ルーティングサービスが停止し、すべてのルーティング設定が復元されました",
-    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}"
+    "stopWithRestoreFailed": "停止に失敗しました: {{detail}}",
+    "failoverEvents": {
+      "title": "フェイルオーバー履歴",
+      "empty": "自動切り替えの記録はまだありません",
+      "reasonBilling": "利用枠切れ",
+      "reasonRateLimit": "レート制限",
+      "reasonFailed": "障害",
+      "unknownSource": "不明"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} は接続可能 ({{responseTimeMs}}ms)",

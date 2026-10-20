@@ -31,6 +31,7 @@ import {
   useAutoFailoverEnabled,
   useSetAutoFailoverEnabled,
 } from "@/lib/query/failover";
+import { FailoverEventTimeline } from "@/components/proxy/FailoverEventTimeline";
 
 interface FailoverQueueManagerProps {
   appType: ProxyAppId;
@@ -247,6 +248,9 @@ export function FailoverQueueManager({
           )}
         </p>
       )}
+
+      {/* 定制：故障转移事件时间线 */}
+      <FailoverEventTimeline appType={appType} />
     </div>
   );
 }

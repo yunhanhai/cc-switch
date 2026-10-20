@@ -202,7 +202,8 @@
     "batchDeleting": "Deleting...",
     "batchDeleteConfirm": "Delete {{count}} providers?\n{{names}}\nThis cannot be undone.",
     "batchDeleteDone": "Deleted {{count}} providers",
-    "batchDeletePartial": "Done: {{ok}} deleted, {{fail}} failed"
+    "batchDeletePartial": "Done: {{ok}} deleted, {{fail}} failed",
+    "latencyBadgeHint": "Latency from the latest connectivity check"
   },
   "claudeCode": {
     "needsRouting": "Needs Routing",
@@ -3000,7 +3001,15 @@
       "stopFailed": "Failed to stop routing service: {{detail}}"
     },
     "stoppedWithRestore": "Routing service stopped, all routing configs restored",
-    "stopWithRestoreFailed": "Stop failed: {{detail}}"
+    "stopWithRestoreFailed": "Stop failed: {{detail}}",
+    "failoverEvents": {
+      "title": "Failover Events",
+      "empty": "No automatic switches yet",
+      "reasonBilling": "quota exhausted",
+      "reasonRateLimit": "rate limited",
+      "reasonFailed": "failure",
+      "unknownSource": "unknown"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} is reachable ({{responseTimeMs}}ms)",

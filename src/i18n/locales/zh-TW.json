@@ -202,7 +202,8 @@
     "batchDeleting": "刪除中...",
     "batchDeleteConfirm": "確定刪除 {{count}} 個供應商嗎？\n{{names}}\n此操作不可撤銷。",
     "batchDeleteDone": "已刪除 {{count}} 個供應商",
-    "batchDeletePartial": "刪除完成：成功 {{ok}} 個，失敗 {{fail}} 個"
+    "batchDeletePartial": "刪除完成：成功 {{ok}} 個，失敗 {{fail}} 個",
+    "latencyBadgeHint": "最近一次連通性檢測延遲"
   },
   "claudeCode": {
     "needsRouting": "需要路由",
@@ -3001,7 +3002,15 @@
       "stopFailed": "停止路由服務失敗：{{detail}}"
     },
     "stoppedWithRestore": "路由服務已關閉，已還原所有路由設定",
-    "stopWithRestoreFailed": "停止失敗：{{detail}}"
+    "stopWithRestoreFailed": "停止失敗：{{detail}}",
+    "failoverEvents": {
+      "title": "轉移事件",
+      "empty": "暫無自動切換記錄",
+      "reasonBilling": "額度耗盡",
+      "reasonRateLimit": "限流",
+      "reasonFailed": "故障",
+      "unknownSource": "未知"
+    }
   },
   "streamCheck": {
     "reachable": "{{providerName}} 連通正常 ({{responseTimeMs}}ms)",

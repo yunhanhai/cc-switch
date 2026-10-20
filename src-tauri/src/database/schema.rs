@@ -219,6 +219,29 @@ impl Database {
             FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
         )", []).map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 故障转移事件日志（定制：记录每次自动切换的来源/目标/原因）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS failover_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_type TEXT NOT NULL,
+                from_provider_id TEXT,
+                from_provider_name TEXT,
+                to_provider_id TEXT NOT NULL,
+                to_provider_name TEXT NOT NULL,
+                reason TEXT,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_failover_events_app
+             ON failover_events(app_type, created_at DESC)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
         // 10. Proxy Request Logs 表
         // pricing_model = 写入时实际用于计价的模型名（pricing_model_source 解析结果），
         // 回填按它重算；NULL 表示 v11 之前的历史行，'' 表示未计价的错误行。
