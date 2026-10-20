@@ -77,6 +77,8 @@ interface ProviderListProps {
   onCreate?: () => void;
   isLoading?: boolean;
   isProxyRunning?: boolean; // 代理服务运行状态
+  /** 代理进程是否在运行；与 isProxyRunning 的区别见 SortableProviderCard 的同名 prop */
+  isProxyServiceRunning?: boolean;
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider, modelId?: string) => void; // OpenClaw: set as default model
@@ -99,6 +101,7 @@ export function ProviderList({
   onCreate,
   isLoading = false,
   isProxyRunning = false,
+  isProxyServiceRunning = false,
   isProxyTakeover = false,
   activeProviderId,
   onSetAsDefault,
@@ -618,6 +621,7 @@ export function ProviderList({
                 onTest={handleTest}
                 isTesting={isChecking(provider.id)}
                 isProxyRunning={supportsFailover && isProxyRunning}
+                isProxyServiceRunning={isProxyServiceRunning}
                 isProxyTakeover={supportsFailover && isProxyTakeover}
                 isAutoFailoverEnabled={isFailoverModeActive}
                 failoverPriority={getFailoverPriority(provider.id)}
@@ -885,6 +889,8 @@ interface SortableProviderCardProps {
   isTesting: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
+  /** 代理进程是否在运行（未经 supportsFailover 短路，供健康轮询判断） */
+  isProxyServiceRunning?: boolean;
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
@@ -923,6 +929,7 @@ function SortableProviderCard({
   onTest,
   isTesting,
   isProxyRunning,
+  isProxyServiceRunning,
   isProxyTakeover,
   isAutoFailoverEnabled,
   failoverPriority,
@@ -1006,6 +1013,7 @@ function SortableProviderCard({
           onTest={onTest}
           isTesting={isTesting}
           isProxyRunning={isProxyRunning}
+          isProxyServiceRunning={isProxyServiceRunning}
           isProxyTakeover={isProxyTakeover}
           dragHandleProps={{
             attributes,

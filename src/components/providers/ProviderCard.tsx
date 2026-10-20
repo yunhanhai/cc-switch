@@ -72,6 +72,15 @@ interface ProviderCardProps {
   onTest?: (provider: Provider) => void;
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
+  /**
+   * 代理进程是否在运行（用于决定健康状态是否值得持续轮询）。
+   *
+   * 注意与 `isProxyRunning` 区分：后者在 ProviderList 里被写成
+   * `supportsFailover && isProxyRunning`，对不支持故障转移的供应商恒为 false，
+   * 只用于控制"故障转移相关 UI 是否显示"。把它当成代理进程状态会导致
+   * 这些卡片的健康数据停止刷新。
+   */
+  isProxyServiceRunning?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管，切换为热切换）
   dragHandleProps?: DragHandleProps;
@@ -190,6 +199,7 @@ export function ProviderCard({
   onTest,
   onOpenTerminal,
   isTesting,
+  isProxyServiceRunning,
   isProxyRunning,
   isProxyTakeover = false,
   dragHandleProps,
@@ -242,11 +252,14 @@ export function ProviderCard({
   const resetCircuitBreaker = useResetCircuitBreaker();
   // 熔断倒计时/限流冷却只在代理运行时才有意义；代理关着时仍取一次
   // （拿到持久化的连续失败计数），但不再 5 秒轮询，避免每张卡片空转 IPC。
+  // 注意用 isProxyServiceRunning 而不是 isProxyRunning：后者被
+  // `supportsFailover &&` 短路，对非故障转移供应商恒为 false。
+  // 未显式传入时保持默认轮询（保守行为：宁可多轮询，也不要静默停掉刷新）。
   const { data: health } = useProviderHealth(
     provider.id,
     appId,
     isProxyAppId(appId),
-    isProxyRunning,
+    isProxyServiceRunning ?? true,
   );
 
   const fallbackUrlText = t("provider.notConfigured", {

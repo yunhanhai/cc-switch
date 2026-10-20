@@ -1122,6 +1122,9 @@ function App() {
                       appId={activeApp}
                       isLoading={isLoading}
                       isProxyRunning={currentAppUsesProxy && isProxyRunning}
+                      // 健康轮询只关心代理进程本身，不要被 currentAppUsesProxy
+                      // 短路：否则非代理应用的卡片永远拿不到实时熔断/冷却状态。
+                      isProxyServiceRunning={isProxyRunning}
                       isProxyTakeover={
                         isProxyRunning && isCurrentAppTakeoverActive
                       }

@@ -38,6 +38,18 @@ describe("ProviderCard layout", () => {
     expect(source).not.toContain("extractPiModelSummaryItems");
   });
 
+  // 健康轮询的开关必须来自"代理进程是否在运行"，而不是 ProviderList 里
+  // 那个被 `supportsFailover &&` 短路过的 isProxyRunning —— 后者对不支持
+  // 故障转移的供应商恒为 false，会静默停掉这些卡片的健康刷新。
+  it("drives health polling from the proxy process state, not the failover-gated flag", () => {
+    expect(source).toContain("isProxyServiceRunning");
+    expect(source).toContain("isProxyServiceRunning ?? true");
+    // 不允许把 isProxyRunning 直接当作轮询开关
+    expect(source).not.toMatch(
+      /useProviderHealth\([\s\S]{0,200}isProxyRunning,/,
+    );
+  });
+
   it("keeps Pi provider cards independent from routing capability state", () => {
     const listSource = fs.readFileSync(PROVIDER_LIST_TSX, "utf8");
 
