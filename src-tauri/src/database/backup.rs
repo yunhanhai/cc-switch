@@ -87,6 +87,7 @@ const SYNC_SKIP_TABLES: &[&str] = &[
     "proxy_request_logs",
     "stream_check_logs",
     "provider_health",
+    "failover_events",
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
@@ -98,6 +99,7 @@ const SYNC_SKIP_TABLES: &[&str] = &[
 const SYNC_PRESERVE_TABLES: &[&str] = &[
     "proxy_request_logs",
     "stream_check_logs",
+    "failover_events",
     "proxy_live_backup",
     "usage_daily_rollups",
     "session_log_sync",
@@ -2158,6 +2160,23 @@ mod tests {
                 "本地保留表 {table} 也必须从远端 payload 中排除"
             );
         }
+    }
+
+    /// 故障转移事件是「本机发生过什么」的运行时记录，不是用户配置。
+    ///
+    /// 不同步的理由：它是每台机器独立的故障历史，推给别的设备会让时间线
+    /// 出现从未在本机发生过的转移；导入时覆盖对方记录则会直接丢掉对端的
+    /// 真实历史。这和 provider_health / proxy_request_logs 是同一类数据。
+    #[test]
+    fn failover_events_stay_device_local_across_sync() {
+        assert!(
+            super::SYNC_SKIP_TABLES.contains(&"failover_events"),
+            "failover_events 必须从远端 payload 中排除"
+        );
+        assert!(
+            super::SYNC_PRESERVE_TABLES.contains(&"failover_events"),
+            "同步导入时必须保留本机的 failover_events，不能用对端的覆盖"
+        );
     }
 
     #[test]
