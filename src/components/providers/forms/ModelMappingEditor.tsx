@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useModelPricing } from "@/lib/query/usage";
+import { ModelCatalogPicker } from "./ModelCatalogPanel";
 
 export interface ModelMappingRuleDraft {
   source: string;
@@ -16,6 +17,11 @@ export interface ModelMappingRuleDraft {
 interface ModelMappingEditorProps {
   value: string;
   onChange: (value: string) => void;
+  /** 动态目录：供"目标模型"下拉/筛选使用（厂商拉取 + models.dev 兜底）。 */
+  catalogModels?: string[];
+  /** 是否仅显示目录中的可用模型（筛选模式）。 */
+  catalogFilterEnabled?: boolean;
+  onCatalogFilterEnabledChange?: (enabled: boolean) => void;
 }
 
 const parseConfig = (value: string): Record<string, unknown> => {
@@ -56,6 +62,9 @@ const parseRules = (
 export function ModelMappingEditor({
   value,
   onChange,
+  catalogModels,
+  catalogFilterEnabled,
+  onCatalogFilterEnabledChange,
 }: ModelMappingEditorProps) {
   const { t } = useTranslation();
   const config = useMemo(() => parseConfig(value), [value]);
@@ -116,6 +125,14 @@ export function ModelMappingEditor({
           {t("provider.modelMapping.add")}
         </Button>
       </div>
+
+      {catalogModels && catalogModels.length > 0 ? (
+        <ModelCatalogPicker
+          models={catalogModels}
+          filterEnabled={catalogFilterEnabled}
+          onFilterEnabledChange={onCatalogFilterEnabledChange}
+        />
+      ) : null}
 
       {unpricedTargets.length > 0 && (
         <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">

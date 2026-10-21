@@ -4,12 +4,92 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   getModelCatalog,
   refreshModelCatalog,
   type CatalogModel,
   type ModelCatalogSnapshot,
 } from "@/lib/api/model-fetch";
+
+/** 轻量"仅显示可用模型"开关，供 ModelMappingEditor 复用。 */
+export function ModelCatalogPicker({
+  models,
+  filterEnabled,
+  onFilterEnabledChange,
+}: {
+  models: string[];
+  filterEnabled?: boolean;
+  onFilterEnabledChange?: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return models;
+    return models.filter((m) => m.toLowerCase().includes(query));
+  }, [models, q]);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/40 bg-background/40 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          {t("provider.modelCatalog.pickerTitle", {
+            defaultValue: "可用模型",
+          })}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="catalog-filter"
+            checked={!!filterEnabled}
+            onCheckedChange={(checked) =>
+              onFilterEnabledChange?.(checked === true)
+            }
+          />
+          <Label htmlFor="catalog-filter" className="text-xs font-normal">
+            {t("provider.modelCatalog.filterAvailable", {
+              defaultValue: "仅可用模型",
+            })}
+          </Label>
+        </div>
+      </div>
+      <Input
+        placeholder={t("provider.modelCatalog.filterPlaceholder", {
+          defaultValue: "筛选模型...",
+        })}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        className="h-7 text-xs"
+      />
+      <div className="flex flex-wrap gap-1.5">
+        {filtered.length === 0 ? (
+          <span className="text-xs text-muted-foreground">
+            {t("provider.modelCatalog.empty", { defaultValue: "暂无模型" })}
+          </span>
+        ) : (
+          filtered.slice(0, 80).map((model) => (
+            <Badge
+              key={model}
+              variant="outline"
+              className="font-mono text-[11px]"
+            >
+              {model}
+            </Badge>
+          ))
+        )}
+      </div>
+      {filtered.length > 80 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {t("provider.modelCatalog.more", {
+            defaultValue: "还有 {{count}} 个",
+            count: filtered.length - 80,
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 interface ModelCatalogPanelProps {
   baseUrl: string;
@@ -54,12 +134,26 @@ export function ModelCatalogPanel({
     setLoading(true);
     try {
       const data = force
-        ? await refreshModelCatalog(baseUrl, apiKey, isFullUrl, modelsUrl, undefined, {
-            apiFormat,
-          })
-        : await getModelCatalog(baseUrl, apiKey, isFullUrl, modelsUrl, undefined, {
-            apiFormat,
-          });
+        ? await refreshModelCatalog(
+            baseUrl,
+            apiKey,
+            isFullUrl,
+            modelsUrl,
+            undefined,
+            {
+              apiFormat,
+            },
+          )
+        : await getModelCatalog(
+            baseUrl,
+            apiKey,
+            isFullUrl,
+            modelsUrl,
+            undefined,
+            {
+              apiFormat,
+            },
+          );
       setSnapshot(data);
     } catch (e) {
       // 错误已在 snapshot.vendorError 中体现；静默失败仅用于离线场景
@@ -174,4 +268,3 @@ export function ModelCatalogPanel({
     </div>
   );
 }
-
