@@ -3383,6 +3383,12 @@
     "effectiveHint": "有効なグループを連結、P1 が優先",
     "effectiveEmptyNoGroup": "有効なグループがありません — 旧キューにフォールバックします",
     "effectiveEmptyNoMembers": "有効なグループにメンバーがありません — メンバーを追加してください",
-    "effectiveCopied": "有効ルートをコピーしました"
+    "effectiveCopied": "有効ルートをコピーしました",
+    "effectiveCopiedJson": "JSON 配列をコピーしました",
+    "copyText": "テキストをコピー",
+    "copyJson": "JSON をコピー",
+    "collapse": "折りたたむ",
+    "expand": "展開",
+    "memberCount": "{{count}} メンバー"
   }
 }

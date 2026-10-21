@@ -3383,6 +3383,12 @@
     "effectiveHint": "已启用分组按顺序拼接，P1 优先",
     "effectiveEmptyNoGroup": "暂无已启用分组，将回退到旧故障转移队列",
     "effectiveEmptyNoMembers": "已启用分组均无成员，请先添加成员",
-    "effectiveCopied": "已复制生效路由"
+    "effectiveCopied": "已复制生效路由",
+    "effectiveCopiedJson": "已复制 JSON 数组",
+    "copyText": "复制文本",
+    "copyJson": "复制 JSON",
+    "collapse": "收起",
+    "expand": "展开",
+    "memberCount": "{{count}} 个成员"
   }
 }

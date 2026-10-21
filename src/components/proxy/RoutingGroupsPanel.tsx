@@ -14,6 +14,8 @@ import {
   X,
   GripVertical,
   Copy,
+  ChevronDown,
+  Braces,
 } from "lucide-react";
 import {
   DndContext,
@@ -97,10 +99,19 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [memberPickOpen, setMemberPickOpen] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const openPick = (groupId: string, current: string[]) => {
     setPicked(new Set(current));
     setMemberPickOpen(groupId);
+  };
+  const toggleCollapsed = (groupId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   };
 
   if (isLoading) {
@@ -199,12 +210,12 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                 </div>
               ));
             })()}
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-1">
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6"
-                title={t("common.copy", { defaultValue: "复制" })}
+                title={t("routingGroups.copyText", { defaultValue: "复制文本" })}
                 onClick={async () => {
                   const text = effectiveRoute.providerIds.join(", ");
                   try {
@@ -222,6 +233,29 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                 }}
               >
                 <Copy className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                title={t("routingGroups.copyJson", { defaultValue: "复制 JSON" })}
+                onClick={async () => {
+                  const text = JSON.stringify(effectiveRoute.providerIds, null, 2);
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    toast.success(
+                      t("routingGroups.effectiveCopiedJson", {
+                        defaultValue: "已复制 JSON 数组",
+                      }),
+                    );
+                  } catch {
+                    toast.error(
+                      t("common.copyFailed", { defaultValue: "复制失败" }),
+                    );
+                  }
+                }}
+              >
+                <Braces className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
@@ -312,6 +346,11 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
             >
               {groups.map(({ group, members }) => {
                 const isP1Group = group.id === effectiveFirstGroupId;
+                const isCollapsed = collapsed.has(group.id);
+                const memberCountLabel = t("routingGroups.memberCount", {
+                  count: members.length,
+                  defaultValue: `${members.length} 个成员`,
+                });
                 return (
                   <SortableGroupRow
                     key={group.id}
@@ -325,6 +364,9 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                     update={update}
                     setConfirmId={setConfirmId}
                     isP1Group={isP1Group}
+                    isCollapsed={isCollapsed}
+                    onToggleCollapsed={() => toggleCollapsed(group.id)}
+                    memberCountLabel={memberCountLabel}
                   >
                     <SortableContext
                       items={members.map(
@@ -483,6 +525,9 @@ function SortableGroupRow({
   update,
   setConfirmId,
   isP1Group,
+  isCollapsed,
+  onToggleCollapsed,
+  memberCountLabel,
   children,
 }: {
   groupId: string;
@@ -495,6 +540,9 @@ function SortableGroupRow({
   update: ReturnType<typeof useUpdateRoutingGroup>;
   setConfirmId: (v: string | null) => void;
   isP1Group: boolean;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  memberCountLabel: string;
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
@@ -524,6 +572,21 @@ function SortableGroupRow({
           {...listeners}
         >
           <GripVertical className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title={
+            isCollapsed
+              ? t("routingGroups.expand", { defaultValue: "展开" })
+              : t("routingGroups.collapse", { defaultValue: "收起" })
+          }
+          aria-label={isCollapsed ? "expand" : "collapse"}
+        >
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : "rotate-0"}`}
+          />
         </button>
         {isEditing ? (
           <>
@@ -575,6 +638,9 @@ function SortableGroupRow({
                 </span>
               )}
             </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {memberCountLabel}
+            </span>
             <Badge
               variant={group.enabled ? "secondary" : "outline"}
               className="text-[10px] font-normal"
@@ -615,7 +681,7 @@ function SortableGroupRow({
           </>
         )}
       </div>
-      {children}
+      {!isCollapsed && children}
     </div>
   );
 }

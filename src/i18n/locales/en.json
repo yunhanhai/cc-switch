@@ -3383,6 +3383,12 @@
     "effectiveHint": "Enabled groups concatenated, P1 first",
     "effectiveEmptyNoGroup": "No enabled groups — falls back to legacy failover queue",
     "effectiveEmptyNoMembers": "Enabled groups have no members — add members first",
-    "effectiveCopied": "Effective route copied"
+    "effectiveCopied": "Effective route copied",
+    "effectiveCopiedJson": "JSON array copied",
+    "copyText": "Copy text",
+    "copyJson": "Copy JSON",
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "memberCount": "{{count}} members"
   }
 }
