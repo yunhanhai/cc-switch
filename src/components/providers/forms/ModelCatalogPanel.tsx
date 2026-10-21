@@ -18,10 +18,13 @@ export function ModelCatalogPicker({
   models,
   filterEnabled,
   onFilterEnabledChange,
+  onSelect,
 }: {
   models: string[];
   filterEnabled?: boolean;
   onFilterEnabledChange?: (enabled: boolean) => void;
+  /** 点击某条可用模型时回填到调用方的输入框（用于映射目标列） */
+  onSelect?: (modelId: string) => void;
 }) {
   const { t } = useTranslation();
   const [q, setQ] = useState("");
@@ -72,7 +75,31 @@ export function ModelCatalogPicker({
             <Badge
               key={model}
               variant="outline"
-              className="font-mono text-[11px]"
+              className={
+                onSelect
+                  ? "cursor-pointer font-mono text-[11px] hover:bg-accent hover:text-accent-foreground"
+                  : "font-mono text-[11px]"
+              }
+              role={onSelect ? "button" : undefined}
+              tabIndex={onSelect ? 0 : undefined}
+              title={
+                onSelect
+                  ? t("provider.modelCatalog.pickHint", {
+                      defaultValue: "点击填入目标模型",
+                    })
+                  : undefined
+              }
+              onClick={onSelect ? () => onSelect(model) : undefined}
+              onKeyDown={
+                onSelect
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelect(model);
+                      }
+                    }
+                  : undefined
+              }
             >
               {model}
             </Badge>

@@ -22,6 +22,8 @@ interface ModelMappingEditorProps {
   /** 是否仅显示目录中的可用模型（筛选模式）。 */
   catalogFilterEnabled?: boolean;
   onCatalogFilterEnabledChange?: (enabled: boolean) => void;
+  /** 选中目录中的模型时回填到哪条规则的目标列；缺省为最后一条空 target */
+  onCatalogSelect?: (modelId: string) => void;
 }
 
 const parseConfig = (value: string): Record<string, unknown> => {
@@ -65,6 +67,7 @@ export function ModelMappingEditor({
   catalogModels,
   catalogFilterEnabled,
   onCatalogFilterEnabledChange,
+  onCatalogSelect,
 }: ModelMappingEditorProps) {
   const { t } = useTranslation();
   const config = useMemo(() => parseConfig(value), [value]);
@@ -104,6 +107,28 @@ export function ModelMappingEditor({
     onChange(JSON.stringify(nextConfig, null, 2));
   };
 
+  const handleCatalogSelect = (modelId: string) => {
+    if (onCatalogSelect) {
+      onCatalogSelect(modelId);
+      return;
+    }
+    // 默认策略：优先填到最后一条空 target 的规则，否则追加一条
+    let targetIndex = -1;
+    for (let i = rules.length - 1; i >= 0; i -= 1) {
+      if (!rules[i]!.target.trim()) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex >= 0) {
+      const next = [...rules];
+      next[targetIndex] = { ...next[targetIndex]!, target: modelId };
+      updateRules(next);
+    } else {
+      updateRules([...rules, { source: "", target: modelId, enabled: true }]);
+    }
+  };
+
   return (
     <section className="space-y-3 rounded-lg border border-border/50 bg-muted/20 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -131,6 +156,7 @@ export function ModelMappingEditor({
           models={catalogModels}
           filterEnabled={catalogFilterEnabled}
           onFilterEnabledChange={onCatalogFilterEnabledChange}
+          onSelect={handleCatalogSelect}
         />
       ) : null}
 
