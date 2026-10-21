@@ -3064,6 +3064,7 @@
       "coolingDown": "Cooling down",
       "coolingDownHint": "Providers that returned 429 with a wait. They are still tried, but moved to the end of the queue during routing.",
       "rateLimitWaiting": "Waiting",
+      "coolingDownHintWithRoute": "Rate-limited providers ({{routeSize}} in effective route) that will be tried last in routing.",
       "rateLimitWaitingHint": "{{providerName}} is waiting {{waitSecs}}s for rate-limit retry (#{{attempt}}); stale failures are hidden during the wait",
       "rateLimitWaitingIdleHint": "No request is currently waiting for a 429 retry",
       "noData": "—"

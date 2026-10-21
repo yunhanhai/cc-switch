@@ -3063,6 +3063,7 @@
       "unreachableHint": "直近のチェックで接続を確立できなかったプロバイダー数",
       "coolingDown": "クールダウン中",
       "coolingDownHint": "上流が 429 と待機時間を返したプロバイダー数です。引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
+      "coolingDownHintWithRoute": "レート制限中のプロバイダー数（有効ルート {{routeSize}} 件）。冷却中でも試行されますが、ルーティングでは末尾に回されます。",
       "rateLimitWaiting": "待機中",
       "rateLimitWaitingHint": "{{providerName}} がレート制限で {{waitSecs}} 秒待機中（{{attempt}} 回目）— 待機中は古い失敗表示を隠します",
       "rateLimitWaitingIdleHint": "現在 429 の再試行待機中のリクエストはありません",
@@ -3399,8 +3400,8 @@
     "dragGroupHandle": "グループをドラッグで並べ替え",
     "dragGroupHint": "ドラッグまたはキーボードでグループを並べ替え",
     "dragMemberHint": "ドラッグまたはキーボードでメンバーを並べ替え",
-    "dragStartHint": "{{id}} のドラッグを開始",
-    "dragEndHint": "{{activeId}} を {{overId}} の位置に移動",
+    "dragStartHint": "{{id}} のドラッグを開始しました",
+    "dragEndHint": "{{activeId}} を {{overId}} に移動しました",
     "dragCancelHint": "ドラッグをキャンセル"
   }
 }

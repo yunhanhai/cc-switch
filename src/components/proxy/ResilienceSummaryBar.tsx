@@ -14,18 +14,35 @@ import {
   Timer,
   TrendingUp,
   WifiOff,
+  HelpCircle,
 } from "lucide-react";
 import { useResilienceSummary } from "@/lib/query/failover";
 import { useProxyStatusQuery } from "@/lib/query/proxy";
+import { useRoutingGroups } from "@/lib/query/routing-groups";
 
 interface ResilienceSummaryBarProps {
   appType: string;
+  /** 生效路由条数：用于冷却/等待一致性提示（与下方生效路由同屏联动） */
+  effectiveRouteSize?: number;
 }
 
-export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
+export function ResilienceSummaryBar({
+  appType,
+  effectiveRouteSize,
+}: ResilienceSummaryBarProps) {
   const { t } = useTranslation();
   const { data: summary } = useResilienceSummary(appType);
   const { data: proxyStatus } = useProxyStatusQuery();
+  const shouldFetchGroups = effectiveRouteSize == null;
+  const { data: routingGroups = [] } = useRoutingGroups(
+    appType,
+    shouldFetchGroups,
+  );
+  const derivedRouteSize =
+    effectiveRouteSize ??
+    routingGroups
+      .filter((entry) => entry.group.enabled)
+      .flatMap((entry) => entry.members).length;
   // 仅当等待态与当前 appType 一致时展示，避免 claude 的等待误显示到 codex 卡片。
   const waiting =
     proxyStatus?.rate_limit_waiting?.appType === appType
@@ -33,6 +50,17 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
       : null;
 
   if (!summary) return null;
+  const coolingHint =
+    derivedRouteSize != null
+      ? t("proxy.resilience.coolingDownHintWithRoute", {
+          defaultValue:
+            "上游返回 429 并要求等待的站点数（生效路由 {{routeSize}} 个）。冷却站点仍可被尝试，但在选路时排到队列末尾。",
+          routeSize: derivedRouteSize,
+        })
+      : t("proxy.resilience.coolingDownHint", {
+          defaultValue:
+            "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
+        });
 
   /**
    * 摘要指标。
@@ -151,10 +179,7 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
         summary.coolingDownCount > 0
           ? "text-amber-600 dark:text-amber-400"
           : "text-emerald-600 dark:text-emerald-400",
-      hint: t("proxy.resilience.coolingDownHint", {
-        defaultValue:
-          "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
-      }),
+      hint: coolingHint,
     },
   ];
 
@@ -171,6 +196,11 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
               className={`h-3 w-3 ${item.label === t("proxy.resilience.rateLimitWaiting", { defaultValue: "等待中" }) && waiting ? "animate-spin" : ""}`}
             />
             {item.label}
+            {item.hint ? (
+              <span className="inline-flex" aria-hidden>
+                <HelpCircle className="h-3 w-3 opacity-60" />
+              </span>
+            ) : null}
           </span>
           <span
             className={`truncate text-sm font-semibold tabular-nums ${item.tone}`}

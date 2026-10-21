@@ -736,4 +736,76 @@ mod tests {
         assert_eq!(db.list_routing_groups("claude")?.len(), 1);
         Ok(())
     }
+
+    #[test]
+    fn test_reorder_groups_and_members_syncs_failover_queue() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2", "p3", "p4"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let fast = db.create_routing_group("claude", "fast", None)?;
+        let slow = db.create_routing_group("claude", "slow", None)?;
+        db.set_routing_group_members(&fast.id, &["p1".to_string(), "p2".to_string()])?;
+        db.set_routing_group_members(&slow.id, &["p3".to_string()])?;
+
+        // 启用分组聚合写入 in_failover_queue：此时 enabled 聚合为 p1,p2,p3
+        let queue = db.get_failover_queue("claude")?;
+        let ids: Vec<_> = queue.into_iter().map(|item| item.provider_id).collect();
+        assert!(ids.contains(&"p1".to_string()));
+        assert!(ids.contains(&"p2".to_string()));
+        assert!(ids.contains(&"p3".to_string()));
+        assert!(!ids.contains(&"p4".to_string()));
+
+        // 组间重排：slow 提到最前，生效路由仍为 3 个成员，队列语义不变
+        db.reorder_routing_groups("claude", &[slow.id.clone(), fast.id.clone()])?;
+        let enabled_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        assert_eq!(enabled_ids, vec!["p3", "p1", "p2"]);
+        // 组内重排：fast 内 p2 提到 p1 前
+        db.reorder_routing_group_members(&fast.id, &["p2".to_string(), "p1".to_string()])?;
+        let enabled_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        assert_eq!(enabled_ids, vec!["p3", "p2", "p1"]);
+
+        // 成员重排会触发 enabled 聚合反向同步，in_failover_queue 仍与聚合一致
+        let queue = db.get_failover_queue("claude")?;
+        let ids: std::collections::HashSet<_> =
+            queue.into_iter().map(|item| item.provider_id).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains("p1"));
+        assert!(ids.contains("p2"));
+        assert!(ids.contains("p3"));
+
+        // 禁用 fast 分组后，仅 slow 成员保留在队列
+        db.update_routing_group(&fast.id, None, Some(false), None)?;
+        let queue = db.get_failover_queue("claude")?;
+        let ids: Vec<_> = queue.into_iter().map(|item| item.provider_id).collect();
+        assert_eq!(ids, vec!["p3"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_reorder_validation() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        db.save_provider("claude", &provider("p1", "P1"))?;
+        db.save_provider("claude", &provider("p2", "P2"))?;
+        let g = db.create_routing_group("claude", "g1", None)?;
+        db.set_routing_group_members(&g.id, &["p1".to_string(), "p2".to_string()])?;
+        // 非成员重排
+        let err = db
+            .reorder_routing_group_members(&g.id, &["p1".to_string(), "p9".to_string()])
+            .unwrap_err();
+        assert!(err.to_string().contains("不在分组"), "{err:?}");
+        // 长度不一致（去重缺漏）
+        let err = db
+            .reorder_routing_group_members(&g.id, &["p1".to_string()])
+            .unwrap_err();
+        assert!(err.to_string().contains("全量成员"), "{err:?}");
+        // 跨 app 分组 id
+        db.save_provider("codex", &provider("px", "PX"))?;
+        let other = db.create_routing_group("codex", "other", None)?;
+        let err = db
+            .reorder_routing_groups("claude", &[other.id.clone()])
+            .unwrap_err();
+        assert!(err.to_string().contains("不属于"), "{err:?}");
+        Ok(())
+    }
 }
