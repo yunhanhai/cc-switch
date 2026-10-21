@@ -2,6 +2,8 @@
  
  統一ゲートウェイの smart グループ抽象。`app` ごとの有効なグループは `sort_order / created_at / id`、メンバーは `sort_index / added_at / provider_id` でソートし、有効ルート `P1 -> Pn` として連結します。同一 `app` 内では 1 プロバイダー 1 グループの帰属制で、二重課金とヘルス分散を防止します。
  
+ > 索引: [routing-groups.index.md](./routing-groups.index.md) | zh [routing-groups.md](./routing-groups.md) | en [routing-groups.en.md](./routing-groups.en.md) | zh-TW [routing-groups.zh-TW.md](./routing-groups.zh-TW.md)
+ 
  ## データモデル
  
  - `routing_groups(id, app_type, name, sort_order, enabled, created_at, updated_at)`：`app` ごとに複数グループ、`id` は `rg_<uuid>`、デフォルトは `rg_default_<app>`。

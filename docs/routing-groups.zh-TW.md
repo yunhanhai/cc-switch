@@ -2,6 +2,8 @@
  
  統一閘道的 smart 分組抽象：每 `app` 的已啟用分組依 `sort_order / created_at / id` 排序，成員依 `sort_index / added_at / provider_id` 排序，拼接為生效路由 `P1 -> Pn`。同 `app` 單供應商僅歸屬一組，避免重複計費與健康漂移。
  
+ > 索引：[routing-groups.index.md](./routing-groups.index.md) | zh [routing-groups.md](./routing-groups.md) | en [routing-groups.en.md](./routing-groups.en.md) | ja [routing-groups.ja.md](./routing-groups.ja.md)
+ 
  ## 資料模型
  
  - `routing_groups(id, app_type, name, sort_order, enabled, created_at, updated_at)`：每 `app` 可多組；`id` 形如 `rg_<uuid>`，預設 `rg_default_<app>`。

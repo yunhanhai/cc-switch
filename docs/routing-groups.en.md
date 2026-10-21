@@ -2,6 +2,8 @@
  
  Smart grouping for the unified gateway. Enabled groups per `app` are ordered by `sort_order / created_at / id`, members by `sort_index / added_at / provider_id`, and concatenated as the effective route `P1 -> Pn`. One-provider-one-group per `app` prevents double billing and health drift.
  
+ > Index: [routing-groups.index.md](./routing-groups.index.md) | zh [routing-groups.md](./routing-groups.md) | ja [routing-groups.ja.md](./routing-groups.ja.md) | zh-TW [routing-groups.zh-TW.md](./routing-groups.zh-TW.md)
+ 
  ## Data Model
  
  - `routing_groups(id, app_type, name, sort_order, enabled, created_at, updated_at)`: multiple groups per `app`; `id` like `rg_<uuid>`, default `rg_default_<app>`.

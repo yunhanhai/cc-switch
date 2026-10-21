@@ -2,6 +2,8 @@
 
 定制版统一网关的 smart 分组抽象：每 `app` 的已启用分组按 `sort_order / created_at / id` 排序，组内成员按 `sort_index / added_at / provider_id` 排序，拼接为数据面的真实生效路由 `P1 -> Pn`。多分组归属制避免同 `app` 下重复计费与健康漂移。
 
+ > 索引：[routing-groups.index.md](./routing-groups.index.md) ｜ EN [routing-groups.en.md](./routing-groups.en.md) ｜ JA [routing-groups.ja.md](./routing-groups.ja.md) ｜ ZH-TW [routing-groups.zh-TW.md](./routing-groups.zh-TW.md)
+ 
  > EN: Smart grouping for the unified gateway — enabled groups per `app` are ordered by `sort_order / created_at / id`; members by `sort_index / added_at / provider_id`; concatenated as the effective route `P1 -> Pn`. One-provider-one-group per app prevents double billing and health drift.  
  > JA: 統一ゲートウェイの smart グループ抽象 — 有効なグループは `sort_order / created_at / id`、メンバーは `sort_index / added_at / provider_id` で整列し、有効ルート `P1 -> Pn` として連結。同一 `app` 内では 1 プロバイダー 1 グループで二重課金とヘルス分散を防止。  
  > ZH-TW: 統一閘道的 smart 分組抽象：每 `app` 已啟用分組依 `sort_order / created_at / id` 排序，成員依 `sort_index / added_at / provider_id` 排序，拼接為生效路由 `P1 -> Pn`。同 `app` 單供應商僅歸屬一組，避免重複計費與健康漂移。

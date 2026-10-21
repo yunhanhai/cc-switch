@@ -979,4 +979,96 @@ mod tests {
         assert!(default_len <= 1 || all_ids.contains(&"p3".to_string()));
         Ok(())
     }
+
+    #[test]
+    fn test_thread_level_sync_from_enabled_is_consistent() -> Result<(), AppError> {
+        use std::sync::Arc;
+        let db = Arc::new(Database::memory()?);
+        for id in ["p1", "p2", "p3", "p4"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let primary = db.create_routing_group("claude", "primary", None)?;
+        let secondary = db.create_routing_group("claude", "secondary", None)?;
+        db.set_routing_group_members(&primary.id, &["p1".to_string(), "p2".to_string()])?;
+        db.set_routing_group_members(&secondary.id, &["p3".to_string()])?;
+
+        let thread_count = 8;
+        let rounds = 20;
+        let handles: Vec<_> = (0..thread_count)
+            .map(|thread_idx| {
+                let db_cloned = Arc::clone(&db);
+                let primary_id = primary.id.clone();
+                let secondary_id = secondary.id.clone();
+                std::thread::spawn(move || -> Result<(), AppError> {
+                    for round in 0..rounds {
+                        let enabled = (thread_idx + round) % 2 == 0;
+                        // 经由 update 的启用态翻转触发同步（与 setMembers 同锁路径）
+                        let _ = db_cloned.update_routing_group(&secondary_id, None, Some(enabled), None);
+                        // 经由成员覆写触发同步，交替写入 p3 与空
+                        if round % 3 == 0 {
+                            let _ = db_cloned.set_routing_group_members(
+                                &primary_id,
+                                &["p1".to_string(), "p2".to_string()],
+                            );
+                        } else if round % 3 == 1 {
+                            let _ = db_cloned.set_routing_group_members(
+                                &primary_id,
+                                &["p2".to_string(), "p1".to_string()],
+                            );
+                        }
+                    }
+                    Ok(())
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("thread panicked")?;
+        }
+
+        // 并发结束后，镜像必须与已启用分组的真实聚合完全一致，不多不少
+        let enabled_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        let enabled_set: std::collections::HashSet<_> = enabled_ids.iter().cloned().collect();
+        let queue_ids: std::collections::HashSet<_> = db
+            .get_failover_queue("claude")?
+            .into_iter()
+            .map(|item| item.provider_id)
+            .collect();
+        assert_eq!(
+            queue_ids, enabled_set,
+            "并发写入后 in_failover_queue 必须与 enabled 聚合一致，\n enabled={enabled_ids:?} queue={queue_ids:?}"
+        );
+        // 互斥锁下无死锁且无重复：所有 id 均来自真实 provider，且无幽灵 id
+        for id in &queue_ids {
+            assert!(["p1", "p2", "p3", "p4"].contains(&id.as_str()), "幽灵 provider {id}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_failover_queue_double_write_is_idempotent() -> Result<(), AppError> {
+        use std::sync::Arc;
+        let db = Arc::new(Database::memory()?);
+        for id in ["p1", "p2"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let other = db.create_routing_group("claude", "other", None)?;
+        db.set_routing_group_members(&other.id, &["p1".to_string()])?;
+
+        let handles: Vec<_> = (0..12)
+            .map(|_| {
+                let db_cloned = Arc::clone(&db);
+                std::thread::spawn(move || {
+                    let _ = db_cloned.add_to_failover_queue("claude", "p2");
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().expect("thread panicked");
+        }
+        let all_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        assert_eq!(all_ids.iter().filter(|item| *item == "p2").count(), 1);
+        assert!(all_ids.contains(&"p1".to_string()));
+        Ok(())
+    }
 }
