@@ -205,7 +205,15 @@
       "pickHint": "Click to fill target",
       "autoFetchHint": "Key detected, fetching available models...",
       "sourceInputHint": "Common display models — pick from the dropdown",
-      "targetInputHint": "Catalog ready — pick from the dropdown or click a badge above"
+      "targetInputHint": "Catalog ready — pick from the dropdown or click a badge above",
+      "retry": "Retry",
+      "copyError": "Copy error",
+      "copied": "Copied",
+      "copyFailed": "Copy failed",
+      "clearFilter": "Clear filter",
+      "emptyHint": "Not loaded yet — click Load to fetch models",
+      "emptyWithError": "Fetch failed — no models available",
+      "filterEmpty": "No matching models — adjust your filter"
     },
     "sortBy": "Sort by",
     "sortManual": "Manual order",

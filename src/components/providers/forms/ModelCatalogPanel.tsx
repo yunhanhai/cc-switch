@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
+import { AlertTriangle, Copy, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   getModelCatalog,
   refreshModelCatalog,
@@ -218,6 +220,26 @@ export function ModelCatalogPanel({
     [doFetch],
   );
 
+  const handleCopyError = useCallback(async () => {
+    const errorText = snapshot?.vendorError ?? "";
+    if (!errorText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(errorText);
+      toast.success(
+        t("provider.modelCatalog.copied", { defaultValue: "已复制" }),
+      );
+    } catch {
+      toast.error(
+        t("provider.modelCatalog.copyFailed", { defaultValue: "复制失败" }),
+      );
+    }
+  }, [snapshot?.vendorError, t]);
+
+  const handleClearFilter = useCallback(() => {
+    setFilter("");
+    setShowVendorOnly(false);
+  }, []);
+
   // 单字段添加：预设已填好 baseUrl，粘贴 Key 后自动拉目录（防抖 600ms，同一 key 不重复触发）
   useEffect(() => {
     if (!autoFetch) return;
@@ -247,6 +269,12 @@ export function ModelCatalogPanel({
     onSnapshotChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseUrl, isFullUrl, modelsUrl, apiFormat]);
+
+  const hasActiveFilter = filter.trim().length > 0 || showVendorOnly;
+  const isEmptyFiltered =
+    filtered.length === 0 &&
+    (snapshot?.models.length ?? 0) > 0 &&
+    hasActiveFilter;
 
   return (
     <div className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-3">
@@ -307,15 +335,96 @@ export function ModelCatalogPanel({
         </label>
       </div>
       {snapshot?.vendorError ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          {snapshot.vendorError}
-        </p>
+        <div className="flex flex-col gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p className="flex-1 break-all text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+              {snapshot.vendorError}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={loading}
+              onClick={() => fetchCatalog(false)}
+            >
+              <RefreshCw
+                className={cn("mr-1 h-3 w-3", loading && "animate-spin")}
+              />
+              {t("provider.modelCatalog.retry", { defaultValue: "重试" })}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={handleCopyError}
+            >
+              <Copy className="mr-1 h-3 w-3" />
+              {t("provider.modelCatalog.copyError", {
+                defaultValue: "复制错误",
+              })}
+            </Button>
+            {hasActiveFilter ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleClearFilter}
+              >
+                {t("provider.modelCatalog.clearFilter", {
+                  defaultValue: "清除筛选",
+                })}
+              </Button>
+            ) : null}
+          </div>
+        </div>
       ) : null}
       <div className="max-h-64 space-y-1 overflow-auto pr-1">
         {filtered.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">
-            {t("provider.modelCatalog.empty", { defaultValue: "暂无模型" })}
-          </p>
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <p className="text-xs text-muted-foreground">
+              {!snapshot
+                ? t("provider.modelCatalog.emptyHint", {
+                    defaultValue: "尚未加载，点击上方加载获取模型列表",
+                  })
+                : snapshot.vendorError && snapshot.models.length === 0
+                  ? t("provider.modelCatalog.emptyWithError", {
+                      defaultValue: "拉取失败，暂无可用模型",
+                    })
+                  : isEmptyFiltered
+                    ? t("provider.modelCatalog.filterEmpty", {
+                        defaultValue: "无匹配模型，尝试调整筛选条件",
+                      })
+                    : t("provider.modelCatalog.empty", {
+                        defaultValue: "暂无模型",
+                      })}
+            </p>
+            {isEmptyFiltered ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleClearFilter}
+              >
+                {t("provider.modelCatalog.clearFilter", {
+                  defaultValue: "清除筛选",
+                })}
+              </Button>
+            ) : null}
+            {!snapshot && !loading ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!baseUrl.trim() || !apiKey.trim()}
+                onClick={() => fetchCatalog(false)}
+              >
+                {t("provider.modelCatalog.load", { defaultValue: "加载" })}
+              </Button>
+            ) : null}
+          </div>
         ) : (
           filtered.map((model) => (
             <div

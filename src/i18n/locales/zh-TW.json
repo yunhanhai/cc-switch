@@ -205,7 +205,15 @@
       "pickHint": "點擊填入目標模型",
       "autoFetchHint": "已偵測到金鑰，正在自動拉取可用模型…",
       "sourceInputHint": "常用顯示模型可選，下拉直接填入",
-      "targetInputHint": "已接入目錄，可直接下拉選擇或點擊上方徽章填入"
+      "targetInputHint": "已接入目錄，可直接下拉選擇或點擊上方徽章填入",
+      "retry": "重試",
+      "copyError": "複製錯誤",
+      "copied": "已複製",
+      "copyFailed": "複製失敗",
+      "clearFilter": "清除篩選",
+      "emptyHint": "尚未載入，點擊上方載入取得模型清單",
+      "emptyWithError": "拉取失敗，暫無可用模型",
+      "filterEmpty": "無符合模型，請調整篩選條件"
     },
     "sortBy": "排序方式",
     "sortManual": "手動排序",

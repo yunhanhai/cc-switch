@@ -205,7 +205,15 @@
       "pickHint": "クリックでターゲットに反映",
       "autoFetchHint": "キーを検出しました、利用可能なモデルを取得中…",
       "sourceInputHint": "よく使う表示モデル — ドロップダウンから選択",
-      "targetInputHint": "カタログ準備完了 — ドロップダウンから選ぶか上のバッジをクリック"
+      "targetInputHint": "カタログ準備完了 — ドロップダウンから選ぶか上のバッジをクリック",
+      "retry": "再試行",
+      "copyError": "エラーをコピー",
+      "copied": "コピーしました",
+      "copyFailed": "コピーに失敗しました",
+      "clearFilter": "フィルターをクリア",
+      "emptyHint": "未取得です — 読み込みをクリックしてモデルを取得",
+      "emptyWithError": "取得に失敗しました — 利用可能なモデルがありません",
+      "filterEmpty": "一致するモデルがありません — フィルターを調整してください"
     },
     "sortBy": "並び替え",
     "sortManual": "手動順",
