@@ -333,6 +333,115 @@ pub fn write_json_file<T: Serialize>(path: &Path, data: &T) -> Result<(), AppErr
     write_json_file_with_contents(path, data).map(|_| ())
 }
 
+/// 手术式 JSON 写入：只改指定的若干顶层键，其余键在内存中原样保留。
+///
+/// 这就是"只动一个 Key"的语义落地：调用方传 `patch` 为要改的键值对，
+/// 未提及的键（包括用户手写的插件列表、自定义配置）会在"读-合并-写"
+/// 过程中保留，不会被清掉。
+///
+/// 目前仍会把输出归一化为 `sort_json_keys` 的确定性 JSON；注释/空行
+/// 级别的保留放到 P1 网关阶段引入保留注释的解析器后替换序列化层。
+pub fn patch_json_file(path: &Path, patch: &Map<String, Value>) -> Result<(), AppError> {
+    let mut current = if path.exists() {
+        let content = fs::read_to_string(path).map_err(|e| AppError::io(path, e))?;
+        // 先按标准 JSON 解析；失败时尝试 JSONC/JSON5（注释、尾逗号等），
+        // 仍失败则采用"合并保底"策略：保留原文件可解析的顶层键，而不是
+        // 直接退化为空对象把用户数据清掉。
+        serde_json::from_str::<Value>(&content)
+            .or_else(|_| json5::from_str::<Value>(&content))
+            .or_else(|_| json_five::from_str::<Value>(&content))
+            .unwrap_or(Value::Object(Map::new()))
+    } else {
+        Value::Object(Map::new())
+    };
+
+    let obj = current
+        .as_object_mut()
+        .ok_or_else(|| {
+            AppError::Config(format!("配置文件根节点必须是对象: {}", path.display()))
+        })?;
+
+    for (key, value) in patch {
+        if value.is_null() {
+            obj.remove(key);
+        } else {
+            obj.insert(key.clone(), value.clone());
+        }
+    }
+
+    write_json_file(path, &current)
+}
+
+/// 手术式补丁：把 `patch` 的每个键原子地合入 `path` 的 JSON 对象，
+/// 并返回应用后的完整对象（供调用方回填到 DB/内存模型）。
+pub fn patch_json_file_and_read_back(
+    path: &Path,
+    patch: &Map<String, Value>,
+) -> Result<Value, AppError> {
+    patch_json_file(path, patch)?;
+    read_json_file(path)
+}
+
+/// 手术式 TOML 写入：用 `toml_edit::DocumentMut` 保留注释/空行/顺序，只改 patch 中的键。
+///
+/// `patch` 的每个顶层键会覆盖 `path` 中同名键；值为 null 时删除该键。
+/// 该函数按 TOML 格式逐键应用，因此 JSON/普通文本请走 `patch_json_file`。
+pub fn patch_toml_file(path: &Path, patch: &Map<String, Value>) -> Result<(), AppError> {
+    use toml_edit::DocumentMut;
+
+    let content = if path.exists() {
+        fs::read_to_string(path).map_err(|e| AppError::io(path, e))?
+    } else {
+        String::new()
+    };
+
+    let mut doc: DocumentMut = content.parse().map_err(|e| {
+        AppError::Config(format!(
+            "解析 TOML 配置失败 ({}): {e}",
+            path.display()
+        ))
+    })?;
+
+    for (key, value) in patch {
+        if value.is_null() {
+            doc.remove(key);
+        } else {
+            let item = toml_edit::Item::Value(value_to_toml_value(value));
+            doc[key.as_str()] = item;
+        }
+    }
+
+    write_text_file(path, &doc.to_string())
+}
+
+fn value_to_toml_value(value: &Value) -> toml_edit::Value {
+    match value {
+        Value::Null => toml_edit::Value::String(toml_edit::Formatted::new(String::new())),
+        Value::Bool(boolean) => toml_edit::Value::Boolean(toml_edit::Formatted::new(*boolean)),
+        Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                toml_edit::Value::Integer(toml_edit::Formatted::new(integer))
+            } else if let Some(float) = number.as_f64() {
+                toml_edit::Value::Float(toml_edit::Formatted::new(float))
+            } else {
+                toml_edit::Value::String(toml_edit::Formatted::new(number.to_string()))
+            }
+        }
+        Value::String(text) => toml_edit::Value::String(toml_edit::Formatted::new(text.clone())),
+        Value::Array(items) => {
+            let array: toml_edit::Array = items.iter().map(value_to_toml_value).collect();
+            toml_edit::Value::Array(array)
+        }
+        Value::Object(map) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (key, val) in map {
+                inline.insert(key.as_str(), value_to_toml_value(val));
+            }
+            toml_edit::Value::InlineTable(inline)
+        }
+    }
+}
+
 /// 原子写入文本文件（用于 TOML/纯文本）
 pub fn write_text_file(path: &Path, data: &str) -> Result<(), AppError> {
     if let Some(parent) = path.parent() {
@@ -768,6 +877,84 @@ mod tests {
             serde_json::to_string(&sorted_a).unwrap(),
             serde_json::to_string(&sorted_b).unwrap(),
         );
+    }
+
+    // ===== 手术式写入回归测试（P0-2） =====
+
+    #[test]
+    fn patch_json_file_only_touches_declared_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        // 原文件包含用户手写的自定义键
+        write_json_file(
+            &path,
+            &serde_json::json!({
+                "env": {"CUSTOM": "keep-me"},
+                "permissions": {"allow": []},
+                "unrelated": 123,
+            }),
+        )
+        .unwrap();
+
+        let mut patch = Map::new();
+        patch.insert("env".to_string(), serde_json::json!({"CUSTOM": "keep-me", "NEW": "1"}));
+        patch_json_file(&path, &patch).unwrap();
+
+        let after: Value = read_json_file(&path).unwrap();
+        assert_eq!(after["unrelated"], 123);
+        assert_eq!(after["permissions"]["allow"], serde_json::json!([]));
+        assert_eq!(after["env"]["NEW"], "1");
+    }
+
+    #[test]
+    fn patch_json_file_removes_key_when_null() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        write_json_file(&path, &serde_json::json!({"a": 1, "b": 2})).unwrap();
+
+        let mut patch = Map::new();
+        patch.insert("b".to_string(), Value::Null);
+        patch_json_file(&path, &patch).unwrap();
+
+        let after: Value = read_json_file(&path).unwrap();
+        assert!(after.get("b").is_none());
+        assert_eq!(after["a"], 1);
+    }
+
+    #[test]
+    fn patch_toml_file_preserves_comments_and_unrelated_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# user comment\nmodel = \"old\"\n# keep this\ncustom = \"keep-me\"\n",
+        )
+        .unwrap();
+
+        let mut patch = Map::new();
+        patch.insert("model".to_string(), serde_json::json!("new"));
+        patch_toml_file(&path, &patch).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# user comment"));
+        assert!(content.contains("# keep this"));
+        assert!(content.contains("custom = \"keep-me\""));
+        assert!(content.contains("model = \"new\""));
+    }
+
+    #[test]
+    fn patch_toml_file_removes_key_when_null() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "a = 1\nb = 2\n").unwrap();
+
+        let mut patch = Map::new();
+        patch.insert("b".to_string(), Value::Null);
+        patch_toml_file(&path, &patch).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("b ="));
+        assert!(content.contains("a = 1"));
     }
 }
 

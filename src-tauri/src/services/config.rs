@@ -218,7 +218,7 @@ impl ConfigService {
         provider_id: &str,
         provider: &Provider,
     ) -> Result<(), AppError> {
-        use crate::config::{read_json_file, write_json_file};
+        use crate::config::{patch_json_file_and_read_back, read_json_file};
 
         let settings_path = crate::config::get_claude_settings_path();
         if let Some(parent) = settings_path.parent() {
@@ -226,9 +226,13 @@ impl ConfigService {
         }
 
         let settings = sanitize_claude_settings_for_live(&provider.settings_config);
-        write_json_file(&settings_path, &settings)?;
-
-        let live_after = read_json_file::<serde_json::Value>(&settings_path)?;
+        let patch = settings.as_object().cloned().unwrap_or_default();
+        let live_after = if settings_path.exists() {
+            patch_json_file_and_read_back(&settings_path, &patch)?
+        } else {
+            crate::config::write_json_file(&settings_path, &settings)?;
+            read_json_file::<serde_json::Value>(&settings_path)?
+        };
         if let Some(manager) = config.get_manager_mut(&AppType::Claude) {
             if let Some(target) = manager.providers.get_mut(provider_id) {
                 target.settings_config = live_after;
