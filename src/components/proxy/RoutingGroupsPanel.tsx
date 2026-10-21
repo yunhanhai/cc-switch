@@ -19,6 +19,7 @@ import {
   DndContext,
   closestCenter,
   PointerSensor,
+  KeyboardSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -26,6 +27,7 @@ import {
   SortableContext,
   useSortable,
   verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -71,6 +73,10 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
       enabledGroups,
     };
   }, [groups]);
+  const effectiveFirstProviderId =
+    effectiveRoute.enabledGroups[0]?.members[0]?.providerId ?? null;
+  const effectiveFirstGroupId =
+    effectiveRoute.enabledGroups[0]?.group.id ?? null;
 
   const create = useCreateRoutingGroup();
   const update = useUpdateRoutingGroup();
@@ -79,6 +85,9 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
   const reorderMembers = useReorderRoutingGroupMembers();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
   const setMembers = useSetRoutingGroupMembers();
 
@@ -140,53 +149,81 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                 })}
           </p>
         ) : (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {effectiveRoute.providerIds.map((providerId, idx) => {
-              const name =
-                providers.find(
-                  (p) =>
-                    String((p as unknown as { id: string }).id) === providerId,
-                )?.name ?? providerId;
-              return (
-                <span
-                  key={`${providerId}-${idx}`}
-                  className="inline-flex items-center gap-1"
+          <div className="mt-2 space-y-1.5">
+            {(() => {
+              let globalIdx = 0;
+              return effectiveRoute.enabledGroups.map((entry) => (
+                <div
+                  key={entry.group.id}
+                  className="flex flex-wrap items-center gap-1.5"
                 >
-                  {idx > 0 && (
-                    <span className="text-[11px] text-muted-foreground">→</span>
-                  )}
-                  <span className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-xs font-medium">
-                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-bold text-primary">
-                      P{idx + 1}
-                    </span>
-                    <span className="max-w-[14ch] truncate">{name}</span>
+                  <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                    {entry.group.name}
                   </span>
-                </span>
-              );
-            })}
-            <Button
-              size="icon"
-              variant="ghost"
-              className="ml-auto h-6 w-6"
-              title={t("common.copy", { defaultValue: "复制" })}
-              onClick={async () => {
-                const text = effectiveRoute.providerIds.join(", ");
-                try {
-                  await navigator.clipboard.writeText(text);
-                  toast.success(
-                    t("routingGroups.effectiveCopied", {
-                      defaultValue: "已复制生效路由",
-                    }),
-                  );
-                } catch {
-                  toast.error(
-                    t("common.copyFailed", { defaultValue: "复制失败" }),
-                  );
-                }
-              }}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
+                  {entry.members.map((m) => {
+                    globalIdx += 1;
+                    const idx = globalIdx;
+                    const name =
+                      providers.find(
+                        (p) =>
+                          String((p as unknown as { id: string }).id) ===
+                          m.providerId,
+                      )?.name ?? m.providerId;
+                    const isP1 = idx === 1;
+                    return (
+                      <span
+                        key={`${m.providerId}-${idx}`}
+                        className="inline-flex items-center gap-1"
+                      >
+                        <span
+                          className={
+                            isP1
+                              ? "inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground shadow-sm"
+                              : "inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-xs font-medium"
+                          }
+                        >
+                          <span
+                            className={
+                              isP1
+                                ? "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-foreground/20 px-1 text-[10px] font-bold"
+                                : "inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-bold text-primary"
+                            }
+                          >
+                            P{idx}
+                          </span>
+                          <span className="max-w-[14ch] truncate">{name}</span>
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+              ));
+            })()}
+            <div className="flex justify-end">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6"
+                title={t("common.copy", { defaultValue: "复制" })}
+                onClick={async () => {
+                  const text = effectiveRoute.providerIds.join(", ");
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    toast.success(
+                      t("routingGroups.effectiveCopied", {
+                        defaultValue: "已复制生效路由",
+                      }),
+                    );
+                  } catch {
+                    toast.error(
+                      t("common.copyFailed", { defaultValue: "复制失败" }),
+                    );
+                  }
+                }}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -273,69 +310,74 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
               items={groups.map((g) => `group:${g.group.id}`)}
               strategy={verticalListSortingStrategy}
             >
-              {groups.map(({ group, members }) => (
-                <SortableGroupRow
-                  key={group.id}
-                  groupId={group.id}
-                  appType={appType}
-                  group={group}
-                  editingId={editingId}
-                  editingName={editingName}
-                  setEditingId={setEditingId}
-                  setEditingName={setEditingName}
-                  update={update}
-                  setConfirmId={setConfirmId}
-                >
-                  <SortableContext
-                    items={members.map(
-                      (m) => `member:${group.id}:${m.providerId}`,
-                    )}
-                    strategy={verticalListSortingStrategy}
+              {groups.map(({ group, members }) => {
+                const isP1Group = group.id === effectiveFirstGroupId;
+                return (
+                  <SortableGroupRow
+                    key={group.id}
+                    groupId={group.id}
+                    appType={appType}
+                    group={group}
+                    editingId={editingId}
+                    editingName={editingName}
+                    setEditingId={setEditingId}
+                    setEditingName={setEditingName}
+                    update={update}
+                    setConfirmId={setConfirmId}
+                    isP1Group={isP1Group}
                   >
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {members.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">
-                          {t("routingGroups.noMembers", {
-                            defaultValue: "暂无成员",
-                          })}
-                        </span>
-                      ) : (
-                        members.map((m) => (
-                          <SortableMemberBadge
-                            key={m.providerId}
-                            id={`member:${group.id}:${m.providerId}`}
-                            label={
-                              providers.find(
-                                (p) =>
-                                  String(
-                                    (p as unknown as { id: string }).id,
-                                  ) === m.providerId,
-                              )?.name ?? m.providerId
-                            }
-                          />
-                        ))
+                    <SortableContext
+                      items={members.map(
+                        (m) => `member:${group.id}:${m.providerId}`,
                       )}
-                    </div>
-                  </SortableContext>
-                  <div className="mt-2 flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() =>
-                        openPick(
-                          group.id,
-                          members.map((m) => m.providerId),
-                        )
-                      }
+                      strategy={verticalListSortingStrategy}
                     >
-                      {t("routingGroups.editMembers", {
-                        defaultValue: "编辑成员",
-                      })}
-                    </Button>
-                  </div>
-                </SortableGroupRow>
-              ))}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {members.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">
+                            {t("routingGroups.noMembers", {
+                              defaultValue: "暂无成员",
+                            })}
+                          </span>
+                        ) : (
+                          members.map((m) => (
+                            <SortableMemberBadge
+                              key={m.providerId}
+                              id={`member:${group.id}:${m.providerId}`}
+                              label={
+                                providers.find(
+                                  (p) =>
+                                    String(
+                                      (p as unknown as { id: string }).id,
+                                    ) === m.providerId,
+                                )?.name ?? m.providerId
+                              }
+                              isP1={effectiveFirstProviderId === m.providerId}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </SortableContext>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() =>
+                          openPick(
+                            group.id,
+                            members.map((m) => m.providerId),
+                          )
+                        }
+                      >
+                        {t("routingGroups.editMembers", {
+                          defaultValue: "编辑成员",
+                        })}
+                      </Button>
+                    </div>
+                  </SortableGroupRow>
+                );
+              })}
             </SortableContext>
           </DndContext>
         </div>
@@ -440,6 +482,7 @@ function SortableGroupRow({
   setEditingName,
   update,
   setConfirmId,
+  isP1Group,
   children,
 }: {
   groupId: string;
@@ -451,6 +494,7 @@ function SortableGroupRow({
   setEditingName: (v: string) => void;
   update: ReturnType<typeof useUpdateRoutingGroup>;
   setConfirmId: (v: string | null) => void;
+  isP1Group: boolean;
   children: React.ReactNode;
 }) {
   const { t } = useTranslation();
@@ -465,7 +509,11 @@ function SortableGroupRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="rounded-lg border border-border/60 bg-card/40 p-3"
+      className={
+        isP1Group
+          ? "rounded-lg border border-primary/30 bg-primary/5 p-3 shadow-sm"
+          : "rounded-lg border border-border/60 bg-card/40 p-3"
+      }
     >
       <div className="flex items-center gap-2">
         <button
@@ -519,8 +567,13 @@ function SortableGroupRow({
           </>
         ) : (
           <>
-            <span className="flex-1 truncate text-sm font-medium">
-              {group.name}
+            <span className="flex flex-1 items-center gap-1.5 truncate text-sm font-medium">
+              <span className="truncate">{group.name}</span>
+              {isP1Group && (
+                <span className="shrink-0 rounded bg-primary px-1 py-0.5 text-[10px] font-bold leading-none text-primary-foreground">
+                  P1
+                </span>
+              )}
             </span>
             <Badge
               variant={group.enabled ? "secondary" : "outline"}
@@ -567,7 +620,15 @@ function SortableGroupRow({
   );
 }
 
-function SortableMemberBadge({ id, label }: { id: string; label: string }) {
+function SortableMemberBadge({
+  id,
+  label,
+  isP1,
+}: {
+  id: string;
+  label: string;
+  isP1: boolean;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id });
   const style = {
@@ -578,11 +639,21 @@ function SortableMemberBadge({ id, label }: { id: string; label: string }) {
     <span
       ref={setNodeRef}
       style={style}
-      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-mono"
+      className={
+        isP1
+          ? "inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground shadow-sm"
+          : "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-mono"
+      }
       {...attributes}
       {...listeners}
     >
-      <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <GripVertical
+        className={
+          isP1
+            ? "h-3 w-3 shrink-0 text-primary-foreground/70"
+            : "h-3 w-3 shrink-0 text-muted-foreground"
+        }
+      />
       {label}
     </span>
   );
