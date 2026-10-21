@@ -3389,6 +3389,18 @@
     "copyJson": "Copy JSON",
     "collapse": "Collapse",
     "expand": "Expand",
-    "memberCount": "{{count}} members"
+    "memberCount": "{{count}} members",
+    "addMembers": "Add members",
+    "renameEmpty": "Group name must not be empty",
+    "renameDuplicate": "Group name already exists: {{name}}",
+    "healthWaiting": "This provider is waiting to retry after 429",
+    "healthCooldown": "Rate-limited, {{seconds}}s remaining",
+    "healthCircuitOpen": "Circuit open ({{state}})",
+    "dragGroupHandle": "Drag to reorder groups",
+    "dragGroupHint": "Drag or use keyboard to reorder groups",
+    "dragMemberHint": "Drag or use keyboard to reorder members",
+    "dragStartHint": "Started dragging {{id}}",
+    "dragEndHint": "Moved {{activeId}} to {{overId}}",
+    "dragCancelHint": "Drag cancelled"
   }
 }

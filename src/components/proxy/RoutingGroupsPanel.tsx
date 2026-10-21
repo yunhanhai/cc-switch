@@ -33,6 +33,8 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useQueries } from "@tanstack/react-query";
+import { failoverApi } from "@/lib/api/failover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -46,6 +48,8 @@ import {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import { useProvidersQuery } from "@/lib/query";
+import { useRateLimitCooldowns } from "@/lib/query/failover";
+import { useProxyStatusQuery } from "@/lib/query/proxy";
 import {
   useCreateRoutingGroup,
   useDeleteRoutingGroup,
@@ -65,6 +69,16 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
     () => Object.values(providersData?.providers ?? {}),
     [providersData],
   );
+  const { data: cooldowns = [] } = useRateLimitCooldowns(appType);
+  const cooldownMap = useMemo(
+    () => new Map(cooldowns.map((c) => [c.providerId, c.remainingSecs])),
+    [cooldowns],
+  );
+  const { data: proxyStatus } = useProxyStatusQuery();
+  const waitingProviderId =
+    proxyStatus?.rate_limit_waiting?.appType === appType
+      ? (proxyStatus.rate_limit_waiting.providerId as string)
+      : null;
   const effectiveRoute = useMemo(() => {
     const enabledGroups = groups.filter((g) => g.group.enabled);
     const providerIds = enabledGroups.flatMap((g) =>
@@ -79,6 +93,23 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
     effectiveRoute.enabledGroups[0]?.members[0]?.providerId ?? null;
   const effectiveFirstGroupId =
     effectiveRoute.enabledGroups[0]?.group.id ?? null;
+  const healthQueries = useQueries({
+    queries: effectiveRoute.providerIds.map((providerId) => ({
+      queryKey: ["providerHealth", providerId, appType] as const,
+      queryFn: () => failoverApi.getProviderHealth(providerId, appType),
+      enabled: !!providerId && !!appType,
+      refetchInterval: 5000,
+      retry: false as const,
+    })),
+  });
+  const providerHealthMap = useMemo(() => {
+    const map = new Map<string, (typeof healthQueries)[number]["data"]>();
+    effectiveRoute.providerIds.forEach((providerId, index) => {
+      const entry = healthQueries[index]?.data;
+      if (entry) map.set(providerId, entry);
+    });
+    return map;
+  }, [effectiveRoute.providerIds, healthQueries]);
 
   const create = useCreateRoutingGroup();
   const update = useUpdateRoutingGroup();
@@ -112,6 +143,32 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
       else next.add(groupId);
       return next;
     });
+  };
+  const handleCreateGroup = () => {
+    const trimmedName = createName.trim();
+    if (!trimmedName) {
+      toast.error(
+        t("routingGroups.renameEmpty", { defaultValue: "分组名称不能为空" }),
+      );
+      return;
+    }
+    const duplicated = groups.some(
+      (entry) =>
+        entry.group.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (duplicated) {
+      toast.error(
+        t("routingGroups.renameDuplicate", {
+          defaultValue: "分组名称已存在",
+          name: trimmedName,
+        }),
+      );
+      return;
+    }
+    create.mutate(
+      { appType, name: trimmedName },
+      { onSuccess: () => setCreateName("") },
+    );
   };
 
   if (isLoading) {
@@ -181,6 +238,12 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                           m.providerId,
                       )?.name ?? m.providerId;
                     const isP1 = idx === 1;
+                    const cooldownSecs = cooldownMap.get(m.providerId) ?? 0;
+                    const isWaiting = waitingProviderId === m.providerId;
+                    const health = providerHealthMap.get(m.providerId);
+                    const isUnhealthy =
+                      health != null && health.is_healthy === false;
+                    const circuitState = health?.circuit_state ?? null;
                     return (
                       <span
                         key={`${m.providerId}-${idx}`}
@@ -191,6 +254,25 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                             isP1
                               ? "inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground shadow-sm"
                               : "inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-xs font-medium"
+                          }
+                          title={
+                            isWaiting
+                              ? t("routingGroups.healthWaiting", {
+                                  defaultValue:
+                                    "该供应商正处在 429 等待重试循环中",
+                                })
+                              : cooldownSecs > 0
+                                ? t("routingGroups.healthCooldown", {
+                                    seconds: cooldownSecs,
+                                    defaultValue: `限流冷却中，剩余 ${cooldownSecs}s`,
+                                  })
+                                : isUnhealthy
+                                  ? (health?.last_error?.trim() ??
+                                    t("routingGroups.healthCircuitOpen", {
+                                      state: circuitState ?? "open",
+                                      defaultValue: `熔断中 (${circuitState ?? "open"})`,
+                                    }))
+                                  : undefined
                           }
                         >
                           <span
@@ -203,6 +285,19 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                             P{idx}
                           </span>
                           <span className="max-w-[14ch] truncate">{name}</span>
+                          {isWaiting ? (
+                            <span className="inline-flex h-3 w-3 items-center justify-center rounded-full bg-teal-500/20">
+                              <span className="h-2 w-2 animate-pulse rounded-full bg-teal-500" />
+                            </span>
+                          ) : cooldownSecs > 0 ? (
+                            <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium tabular-nums leading-none text-amber-600 dark:text-amber-400">
+                              {cooldownSecs}s
+                            </span>
+                          ) : isUnhealthy ? (
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${circuitState === "half_open" ? "bg-amber-500 animate-pulse" : "bg-red-500"}`}
+                            />
+                          ) : null}
                         </span>
                       </span>
                     );
@@ -215,7 +310,9 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6"
-                title={t("routingGroups.copyText", { defaultValue: "复制文本" })}
+                title={t("routingGroups.copyText", {
+                  defaultValue: "复制文本",
+                })}
                 onClick={async () => {
                   const text = effectiveRoute.providerIds.join(", ");
                   try {
@@ -238,9 +335,15 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                 size="icon"
                 variant="ghost"
                 className="h-6 w-6"
-                title={t("routingGroups.copyJson", { defaultValue: "复制 JSON" })}
+                title={t("routingGroups.copyJson", {
+                  defaultValue: "复制 JSON",
+                })}
                 onClick={async () => {
-                  const text = JSON.stringify(effectiveRoute.providerIds, null, 2);
+                  const text = JSON.stringify(
+                    effectiveRoute.providerIds,
+                    null,
+                    2,
+                  );
                   try {
                     await navigator.clipboard.writeText(text);
                     toast.success(
@@ -271,23 +374,13 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
           onChange={(e) => setCreateName(e.target.value)}
           className="h-8"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && createName.trim()) {
-              create.mutate(
-                { appType, name: createName.trim() },
-                { onSuccess: () => setCreateName("") },
-              );
-            }
+            if (e.key === "Enter") handleCreateGroup();
           }}
         />
         <Button
           size="sm"
           disabled={!createName.trim() || create.isPending}
-          onClick={() =>
-            create.mutate(
-              { appType, name: createName.trim() },
-              { onSuccess: () => setCreateName("") },
-            )
-          }
+          onClick={handleCreateGroup}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />
           {t("common.add", { defaultValue: "添加" })}
@@ -305,6 +398,30 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
+            accessibility={{
+              announcements: {
+                onDragStart: ({ active }) =>
+                  t("routingGroups.dragStartHint", {
+                    id: String(active.id),
+                    defaultValue: `开始拖拽 ${String(active.id)}`,
+                  }),
+                onDragOver: () => "",
+                onDragCancel: () =>
+                  t("routingGroups.dragCancelHint", {
+                    defaultValue: "拖拽已取消",
+                  }),
+                onDragEnd: ({ active, over }) =>
+                  over
+                    ? t("routingGroups.dragEndHint", {
+                        activeId: String(active.id),
+                        overId: String(over.id),
+                        defaultValue: `已将 ${String(active.id)} 移动到 ${String(over.id)} 位置`,
+                      })
+                    : t("routingGroups.dragCancelHint", {
+                        defaultValue: "拖拽已取消",
+                      }),
+              },
+            }}
             onDragEnd={(event) => {
               const { active, over } = event;
               if (!over || active.id === over.id) return;
@@ -357,6 +474,7 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                     groupId={group.id}
                     appType={appType}
                     group={group}
+                    allGroups={groups.map((entry) => entry.group)}
                     editingId={editingId}
                     editingName={editingName}
                     setEditingId={setEditingId}
@@ -376,11 +494,24 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                     >
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {members.length === 0 ? (
-                          <span className="text-xs text-muted-foreground">
-                            {t("routingGroups.noMembers", {
-                              defaultValue: "暂无成员",
-                            })}
-                          </span>
+                          <div className="flex w-full items-center justify-between gap-2 rounded-md border border-dashed px-2 py-1.5">
+                            <span className="text-xs text-muted-foreground">
+                              {t("routingGroups.noMembers", {
+                                defaultValue: "暂无成员",
+                              })}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-xs"
+                              onClick={() => openPick(group.id, [])}
+                            >
+                              <Plus className="mr-1 h-3 w-3" />
+                              {t("routingGroups.addMembers", {
+                                defaultValue: "添加成员",
+                              })}
+                            </Button>
+                          </div>
                         ) : (
                           members.map((m) => (
                             <SortableMemberBadge
@@ -395,6 +526,11 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
                                 )?.name ?? m.providerId
                               }
                               isP1={effectiveFirstProviderId === m.providerId}
+                              cooldownSecs={cooldownMap.get(m.providerId) ?? 0}
+                              isWaiting={waitingProviderId === m.providerId}
+                              health={
+                                providerHealthMap.get(m.providerId) ?? null
+                              }
                             />
                           ))
                         )}
@@ -518,6 +654,7 @@ function SortableGroupRow({
   groupId,
   group,
   appType,
+  allGroups,
   editingId,
   editingName,
   setEditingId,
@@ -533,6 +670,7 @@ function SortableGroupRow({
   groupId: string;
   group: { id: string; name: string; enabled: boolean };
   appType: string;
+  allGroups: Array<{ id: string; name: string }>;
   editingId: string | null;
   editingName: string;
   setEditingId: (v: string | null) => void;
@@ -553,6 +691,33 @@ function SortableGroupRow({
     transition,
   } as React.CSSProperties;
   const isEditing = editingId === groupId;
+  const handleSubmitRename = () => {
+    const trimmedName = editingName.trim();
+    if (!trimmedName) {
+      toast.error(
+        t("routingGroups.renameEmpty", { defaultValue: "分组名称不能为空" }),
+      );
+      return;
+    }
+    const duplicated = allGroups.some(
+      (entry) =>
+        entry.id !== groupId &&
+        entry.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (duplicated) {
+      toast.error(
+        t("routingGroups.renameDuplicate", {
+          defaultValue: "分组名称已存在",
+          name: trimmedName,
+        }),
+      );
+      return;
+    }
+    update.mutate(
+      { id: groupId, appType, name: trimmedName },
+      { onSuccess: () => setEditingId(null) },
+    );
+  };
   return (
     <div
       ref={setNodeRef}
@@ -567,7 +732,12 @@ function SortableGroupRow({
         <button
           type="button"
           className="cursor-grab touch-none p-0.5 text-muted-foreground hover:text-foreground"
-          aria-label="drag handle"
+          aria-label={t("routingGroups.dragGroupHandle", {
+            defaultValue: "拖拽排序分组",
+          })}
+          title={t("routingGroups.dragGroupHint", {
+            defaultValue: "拖拽或用键盘移动以调整分组顺序",
+          })}
           {...attributes}
           {...listeners}
         >
@@ -596,12 +766,7 @@ function SortableGroupRow({
               className="h-7 flex-1"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  update.mutate(
-                    { id: groupId, appType, name: editingName.trim() },
-                    { onSuccess: () => setEditingId(null) },
-                  );
-                }
+                if (e.key === "Enter") handleSubmitRename();
                 if (e.key === "Escape") setEditingId(null);
               }}
             />
@@ -609,12 +774,7 @@ function SortableGroupRow({
               size="icon"
               variant="ghost"
               className="h-7 w-7"
-              onClick={() =>
-                update.mutate(
-                  { id: groupId, appType, name: editingName.trim() },
-                  { onSuccess: () => setEditingId(null) },
-                )
-              }
+              onClick={handleSubmitRename}
               disabled={!editingName.trim() || update.isPending}
             >
               <Check className="h-3.5 w-3.5" />
@@ -690,17 +850,47 @@ function SortableMemberBadge({
   id,
   label,
   isP1,
+  cooldownSecs,
+  isWaiting,
+  health,
 }: {
   id: string;
   label: string;
   isP1: boolean;
+  cooldownSecs: number;
+  isWaiting: boolean;
+  health: {
+    is_healthy: boolean;
+    circuit_state?: string | null;
+    last_error?: string | null;
+  } | null;
 }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   } as React.CSSProperties;
+  const isUnhealthy = health != null && health.is_healthy === false;
+  const badgeTitle = isWaiting
+    ? t("routingGroups.healthWaiting", {
+        defaultValue: "该供应商正处在 429 等待重试循环中",
+      })
+    : cooldownSecs > 0
+      ? t("routingGroups.healthCooldown", {
+          seconds: cooldownSecs,
+          defaultValue: `限流冷却中，剩余 ${cooldownSecs}s`,
+        })
+      : isUnhealthy
+        ? (health?.last_error?.trim() ??
+          t("routingGroups.healthCircuitOpen", {
+            state: health?.circuit_state ?? "open",
+            defaultValue: `熔断中 (${health?.circuit_state ?? "open"})`,
+          }))
+        : t("routingGroups.dragMemberHint", {
+            defaultValue: "拖拽或用键盘移动以调整成员顺序",
+          });
   return (
     <span
       ref={setNodeRef}
@@ -710,6 +900,7 @@ function SortableMemberBadge({
           ? "inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary px-2 py-0.5 text-[11px] font-semibold text-primary-foreground shadow-sm"
           : "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-mono"
       }
+      title={badgeTitle}
       {...attributes}
       {...listeners}
     >
@@ -721,6 +912,19 @@ function SortableMemberBadge({
         }
       />
       {label}
+      {isWaiting ? (
+        <span className="inline-flex h-2.5 w-2.5 items-center justify-center">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-teal-500" />
+        </span>
+      ) : cooldownSecs > 0 ? (
+        <span className="rounded bg-amber-500/20 px-1 py-0.5 text-[10px] leading-none text-amber-700 dark:text-amber-300">
+          {cooldownSecs}s
+        </span>
+      ) : isUnhealthy ? (
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${health?.circuit_state === "half_open" ? "bg-amber-500 animate-pulse" : "bg-red-500"}`}
+        />
+      ) : null}
     </span>
   );
 }

@@ -3389,6 +3389,18 @@
     "copyJson": "JSON をコピー",
     "collapse": "折りたたむ",
     "expand": "展開",
-    "memberCount": "{{count}} メンバー"
+    "memberCount": "{{count}} メンバー",
+    "addMembers": "メンバーを追加",
+    "renameEmpty": "グループ名を入力してください",
+    "renameDuplicate": "グループ名は既に存在します: {{name}}",
+    "healthWaiting": "このプロバイダーは 429 待機中の再試行ループです",
+    "healthCooldown": "レート制限クールダウン中、残り {{seconds}} 秒",
+    "healthCircuitOpen": "サーキットブレーカー作動中 ({{state}})",
+    "dragGroupHandle": "グループをドラッグで並べ替え",
+    "dragGroupHint": "ドラッグまたはキーボードでグループを並べ替え",
+    "dragMemberHint": "ドラッグまたはキーボードでメンバーを並べ替え",
+    "dragStartHint": "{{id}} のドラッグを開始",
+    "dragEndHint": "{{activeId}} を {{overId}} の位置に移動",
+    "dragCancelHint": "ドラッグをキャンセル"
   }
 }

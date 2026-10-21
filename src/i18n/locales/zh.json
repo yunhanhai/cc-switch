@@ -3389,6 +3389,18 @@
     "copyJson": "复制 JSON",
     "collapse": "收起",
     "expand": "展开",
-    "memberCount": "{{count}} 个成员"
+    "memberCount": "{{count}} 个成员",
+    "addMembers": "添加成员",
+    "renameEmpty": "分组名称不能为空",
+    "renameDuplicate": "分组名称已存在：{{name}}",
+    "healthWaiting": "该供应商正处在 429 等待重试循环中",
+    "healthCooldown": "限流冷却中，剩余 {{seconds}}s",
+    "healthCircuitOpen": "熔断中（{{state}}）",
+    "dragGroupHandle": "拖拽排序分组",
+    "dragGroupHint": "拖拽或用键盘移动以调整分组顺序",
+    "dragMemberHint": "拖拽或用键盘移动以调整成员顺序",
+    "dragStartHint": "开始拖拽 {{id}}",
+    "dragEndHint": "已将 {{activeId}} 移动到 {{overId}} 位置",
+    "dragCancelHint": "拖拽已取消"
   }
 }
