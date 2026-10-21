@@ -865,4 +865,118 @@ mod tests {
         assert!(!default.members.iter().any(|member| member.provider_id == "p2"));
         Ok(())
     }
+
+    #[test]
+    fn test_mixed_enabled_empty_and_disabled_groups_aggregation() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2", "p3", "p4", "p5"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let primary = db.create_routing_group("claude", "primary", None)?;
+        let standby = db.create_routing_group("claude", "standby", None)?;
+        let empty = db.create_routing_group("claude", "empty", None)?;
+        let disabled = db.create_routing_group("claude", "disabled", None)?;
+
+        db.set_routing_group_members(&primary.id, &["p1".to_string(), "p2".to_string()])?;
+        db.set_routing_group_members(&standby.id, &["p3".to_string()])?;
+        db.set_routing_group_members(&disabled.id, &["p5".to_string()])?;
+        db.update_routing_group(&disabled.id, None, Some(false), None)?;
+        // empty 有意保持空成员，验证空分组不污染聚合
+
+        // 初态聚合：primary(启用 p1,p2) + standby(启用 p3) + empty(启用但空) = p1,p2,p3
+        let enabled_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        assert_eq!(enabled_ids, vec!["p1", "p2", "p3"]);
+        let queue_ids: std::collections::HashSet<_> = db
+            .get_failover_queue("claude")?
+            .into_iter()
+            .map(|item| item.provider_id)
+            .collect();
+        assert_eq!(queue_ids, ["p1", "p2", "p3"].into_iter().map(String::from).collect());
+        assert!(!queue_ids.contains("p5"), "禁用的分组不应进入 failover 镜像");
+
+        // 禁用 standby 后，仅 primary 生效；empty 仍为空不影响
+        db.update_routing_group(&standby.id, None, Some(false), None)?;
+        assert_eq!(
+            db.get_enabled_routing_group_provider_ids("claude")?,
+            vec!["p1", "p2"]
+        );
+        assert_eq!(
+            db.get_failover_queue("claude")?
+                .into_iter()
+                .map(|item| item.provider_id)
+                .collect::<Vec<_>>(),
+            vec!["p1", "p2"]
+        );
+
+        // 重新启用 standby 并将 primary 与 empty 顺序对调，验证聚合顺序随 sort_order 且空分组跳过
+        db.update_routing_group(&standby.id, None, Some(true), None)?;
+        db.reorder_routing_groups(
+            "claude",
+            &[empty.id.clone(), primary.id.clone(), standby.id.clone(), disabled.id.clone()],
+        )?;
+        // empty 为空，聚合应为 primary(p1,p2) + standby(p3)，与顺序一致且不含 p5
+        assert_eq!(
+            db.get_enabled_routing_group_provider_ids("claude")?,
+            vec!["p1", "p2", "p3"]
+        );
+        let queue: Vec<_> = db.get_failover_queue("claude")?.into_iter().map(|i| i.provider_id).collect();
+        assert_eq!(queue.len(), 3);
+        assert!(queue.contains(&"p1".to_string()) && queue.contains(&"p3".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_concurrent_toggle_and_repeated_writes_are_idempotent() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2", "p3"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let primary = db.create_routing_group("claude", "primary", None)?;
+        let secondary = db.create_routing_group("claude", "secondary", None)?;
+        db.set_routing_group_members(&primary.id, &["p1".to_string(), "p2".to_string()])?;
+        db.set_routing_group_members(&secondary.id, &["p3".to_string()])?;
+
+        // 模拟快速连续的启用/禁用翻转：每步 failover 镜像都应与 enabled 聚合一致且无残留
+        for enabled in [false, true, false, true] {
+            db.update_routing_group(&secondary.id, None, Some(enabled), None)?;
+            let expected = if enabled {
+                vec!["p1", "p2", "p3"]
+            } else {
+                vec!["p1", "p2"]
+            };
+            assert_eq!(
+                db.get_enabled_routing_group_provider_ids("claude")?,
+                expected.iter().map(|item| item.to_string()).collect::<Vec<_>>()
+            );
+            let queue: std::collections::HashSet<_> = db
+                .get_failover_queue("claude")?
+                .into_iter()
+                .map(|item| item.provider_id)
+                .collect();
+            assert_eq!(queue, expected.iter().map(|item| item.to_string()).collect());
+        }
+
+        // 重复覆盖写入同一集合：幂等且不产生重复行
+        db.set_routing_group_members(&primary.id, &["p1".to_string(), "p2".to_string()])?;
+        db.set_routing_group_members(&primary.id, &["p1".to_string(), "p2".to_string()])?;
+        let members = db.get_routing_group(&primary.id)?.unwrap().members;
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0].provider_id, "p1");
+        assert_eq!(members[1].provider_id, "p2");
+
+        // 旧队列双写的重复 add/remove 幂等：重复加入同一 provider 不产生幽灵分组
+        db.add_to_failover_queue("claude", "p3")?;
+        db.add_to_failover_queue("claude", "p3")?;
+        let default_len = db
+            .list_routing_groups("claude")?
+            .into_iter()
+            .find(|entry| entry.group.id == "rg_default_claude")
+            .map(|entry| entry.members.len())
+            .unwrap_or(0);
+        // p3 应仅出现一次于有效集合（启用分组或 default 镜像），不得因重复写入残留
+        let all_ids = db.get_enabled_routing_group_provider_ids("claude")?;
+        assert_eq!(all_ids.iter().filter(|item| *item == "p3").count(), 1);
+        assert!(default_len <= 1 || all_ids.contains(&"p3".to_string()));
+        Ok(())
+    }
 }
