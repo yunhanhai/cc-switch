@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,8 @@ interface ModelCatalogPanelProps {
   isFullUrl?: boolean;
   modelsUrl?: string;
   apiFormat?: string;
+  /** 选预设后粘贴 Key 即自动拉目录（对齐单字段添加体验）。默认开启。 */
+  autoFetch?: boolean;
   onSnapshotChange?: (snapshot: ModelCatalogSnapshot | null) => void;
 }
 
@@ -106,6 +108,7 @@ export function ModelCatalogPanel({
   isFullUrl,
   modelsUrl,
   apiFormat,
+  autoFetch = true,
   onSnapshotChange,
 }: ModelCatalogPanelProps) {
   const { t } = useTranslation();
@@ -113,6 +116,7 @@ export function ModelCatalogPanel({
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [showVendorOnly, setShowVendorOnly] = useState(false);
+  const lastAutoFetchKeyRef = useRef<string | null>(null);
 
   const filtered = useMemo(() => {
     const models: CatalogModel[] = snapshot?.models ?? [];
@@ -131,50 +135,102 @@ export function ModelCatalogPanel({
     return list;
   }, [snapshot, filter, showVendorOnly]);
 
-  const fetchCatalog = async (force: boolean) => {
-    if (!baseUrl.trim() || !apiKey.trim()) return;
-    setLoading(true);
-    try {
-      const data = force
-        ? await refreshModelCatalog(
-            baseUrl,
-            apiKey,
-            isFullUrl,
-            modelsUrl,
-            undefined,
-            {
-              apiFormat,
-            },
-          )
-        : await getModelCatalog(
-            baseUrl,
-            apiKey,
-            isFullUrl,
-            modelsUrl,
-            undefined,
-            {
-              apiFormat,
-            },
-          );
-      setSnapshot(data);
-      onSnapshotChange?.(data);
-    } catch (e) {
-      // 错误已在 snapshot.vendorError 中体现；静默失败仅用于离线场景
-      const fallback = snapshot
-        ? { ...snapshot, vendorError: String(e) }
-        : {
-            version: 1,
-            fetchedAtSecs: Math.floor(Date.now() / 1000),
-            providerKey: baseUrl,
-            models: [],
-            vendorError: String(e),
-          };
-      setSnapshot(fallback as ModelCatalogSnapshot);
-      onSnapshotChange?.(fallback as ModelCatalogSnapshot);
-    } finally {
-      setLoading(false);
+  const doFetch = useCallback(
+    async (force: boolean) => {
+      if (!baseUrl.trim() || !apiKey.trim()) return null;
+      setLoading(true);
+      try {
+        const data = force
+          ? await refreshModelCatalog(
+              baseUrl,
+              apiKey,
+              isFullUrl,
+              modelsUrl,
+              undefined,
+              { apiFormat },
+            )
+          : await getModelCatalog(
+              baseUrl,
+              apiKey,
+              isFullUrl,
+              modelsUrl,
+              undefined,
+              { apiFormat },
+            );
+        setSnapshot(data);
+        onSnapshotChange?.(data);
+        return data;
+      } catch (e) {
+        const fallback: ModelCatalogSnapshot = snapshot
+          ? { ...snapshot, vendorError: String(e) }
+          : {
+              version: 1,
+              fetchedAtSecs: Math.floor(Date.now() / 1000),
+              providerKey: baseUrl,
+              models: [],
+              vendorError: String(e),
+            };
+        setSnapshot(fallback);
+        onSnapshotChange?.(fallback);
+        return fallback;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      baseUrl,
+      apiKey,
+      isFullUrl,
+      modelsUrl,
+      apiFormat,
+      onSnapshotChange,
+      snapshot,
+    ],
+  );
+  const fetchCatalog = useCallback(
+    async (force: boolean) => {
+      await doFetch(force);
+    },
+    [doFetch],
+  );
+
+  // 单字段添加：预设已填好 baseUrl，粘贴 Key 后自动拉目录（防抖 600ms，同一 key 不重复触发）
+  useEffect(() => {
+    if (!autoFetch) return;
+    const keyTrimmed = apiKey.trim();
+    if (!baseUrl.trim() || !keyTrimmed) return;
+    if (keyTrimmed.length < 8) return;
+    const fetchKey = `${baseUrl}::${isFullUrl ? "1" : "0"}::${apiFormat ?? ""}::${modelsUrl ?? ""}::${keyTrimmed.slice(0, 16)}`;
+    if (lastAutoFetchKeyRef.current === fetchKey) return;
+    if (snapshot && snapshot.models.length > 0 && !snapshot.vendorError) {
+      lastAutoFetchKeyRef.current = fetchKey;
+      return;
     }
-  };
+    const timer = window.setTimeout(() => {
+      // 先占位防并发抖动期间重复进队
+      if (lastAutoFetchKeyRef.current === fetchKey) return;
+      lastAutoFetchKeyRef.current = fetchKey;
+      void doFetch(false);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [
+    autoFetch,
+    baseUrl,
+    apiKey,
+    isFullUrl,
+    modelsUrl,
+    apiFormat,
+    snapshot,
+    doFetch,
+  ]);
+
+  // 切换预设/端点时重置自动拉取记忆，允许对新 baseUrl 再次自动拉取
+  useEffect(() => {
+    lastAutoFetchKeyRef.current = null;
+    setSnapshot(null);
+    onSnapshotChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseUrl, isFullUrl, modelsUrl, apiFormat]);
 
   return (
     <div className="space-y-3 rounded-xl border border-border/60 bg-card/40 p-3">
@@ -207,6 +263,13 @@ export function ModelCatalogPanel({
           </Button>
         </div>
       </div>
+      {autoFetch && !snapshot && baseUrl.trim() && apiKey.trim().length >= 8 ? (
+        <p className="text-[11px] text-muted-foreground">
+          {t("provider.modelCatalog.autoFetchHint", {
+            defaultValue: "已检测到密钥，正在自动拉取可用模型…",
+          })}
+        </p>
+      ) : null}
       <div className="flex items-center gap-2">
         <Input
           placeholder={t("provider.modelCatalog.filterPlaceholder", {
