@@ -97,6 +97,7 @@ interface ModelCatalogPanelProps {
   isFullUrl?: boolean;
   modelsUrl?: string;
   apiFormat?: string;
+  onSnapshotChange?: (snapshot: ModelCatalogSnapshot | null) => void;
 }
 
 export function ModelCatalogPanel({
@@ -105,6 +106,7 @@ export function ModelCatalogPanel({
   isFullUrl,
   modelsUrl,
   apiFormat,
+  onSnapshotChange,
 }: ModelCatalogPanelProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<ModelCatalogSnapshot | null>(null);
@@ -155,19 +157,20 @@ export function ModelCatalogPanel({
             },
           );
       setSnapshot(data);
+      onSnapshotChange?.(data);
     } catch (e) {
       // 错误已在 snapshot.vendorError 中体现；静默失败仅用于离线场景
-      setSnapshot((prev) =>
-        prev
-          ? { ...prev, vendorError: String(e) }
-          : {
-              version: 1,
-              fetchedAtSecs: Math.floor(Date.now() / 1000),
-              providerKey: baseUrl,
-              models: [],
-              vendorError: String(e),
-            },
-      );
+      const fallback = snapshot
+        ? { ...snapshot, vendorError: String(e) }
+        : {
+            version: 1,
+            fetchedAtSecs: Math.floor(Date.now() / 1000),
+            providerKey: baseUrl,
+            models: [],
+            vendorError: String(e),
+          };
+      setSnapshot(fallback as ModelCatalogSnapshot);
+      onSnapshotChange?.(fallback as ModelCatalogSnapshot);
     } finally {
       setLoading(false);
     }

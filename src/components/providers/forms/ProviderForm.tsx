@@ -131,6 +131,8 @@ import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
 import { resolveCodexOfficialIdentity } from "@/utils/providerCapabilities";
 import { ModelMappingEditor } from "./ModelMappingEditor";
+import { ModelCatalogPanel } from "./ModelCatalogPanel";
+import type { ModelCatalogSnapshot } from "@/lib/api/model-fetch";
 
 type PresetEntry = {
   id: string;
@@ -1108,6 +1110,26 @@ function ProviderFormFull({
   ]);
 
   const [isCommonConfigModalOpen, setIsCommonConfigModalOpen] = useState(false);
+
+  // 动态目录：Claude/Codex 新建非官方供应商时，粘贴 key+端点 后一键拉取可用模型，回填到本地 state 与映射编辑器。
+  const [claudeCatalogSnapshot, setClaudeCatalogSnapshot] =
+    useState<ModelCatalogSnapshot | null>(null);
+  const [catalogFilterEnabled, setCatalogFilterEnabled] = useState(false);
+  const claudeCatalogModels = useMemo(
+    () => (claudeCatalogSnapshot?.models ?? []).map((m) => m.id),
+    [claudeCatalogSnapshot],
+  );
+  const claudeVendorOnlyModels = useMemo(
+    () =>
+      (claudeCatalogSnapshot?.models ?? [])
+        .filter((m) => m.source === "vendor" || m.source === "both")
+        .map((m) => m.id),
+    [claudeCatalogSnapshot],
+  );
+  const codexCatalogPickerModels = useMemo(
+    () => codexCatalogModels.map((m) => m.model),
+    [codexCatalogModels],
+  );
 
   const shouldApplyLocalProxyRequestOverrides =
     (appId === "claude" || appId === "codex") && category !== "official";
@@ -2384,82 +2406,115 @@ function ProviderFormFull({
           />
 
           {appId === "claude" && (
-            <ClaudeFormFields
-              providerId={providerId}
-              shouldShowApiKey={
-                (category !== "cloud_provider" ||
-                  hasApiKeyField(form.getValues("settingsConfig"), "claude")) &&
-                shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
-              }
-              apiKey={apiKey}
-              onApiKeyChange={handleApiKeyChange}
-              category={category}
-              shouldShowApiKeyLink={shouldShowClaudeApiKeyLink}
-              websiteUrl={claudeWebsiteUrl}
-              isPartner={isClaudePartner}
-              partnerPromotionKey={claudePartnerPromotionKey}
-              isCopilotPreset={isCopilotProvider}
-              isCodexOauthPreset={isClaudeCodexOauthProvider}
-              isXaiOauthPreset={isXaiOauthProvider}
-              usesOAuth={
-                templatePreset?.requiresOAuth === true ||
-                isCopilotProvider ||
-                isClaudeCodexOauthProvider ||
-                isXaiOauthProvider
-              }
-              isCopilotAuthenticated={isCopilotAuthenticated}
-              selectedGitHubAccountId={selectedGitHubAccountId}
-              onGitHubAccountSelect={setSelectedGitHubAccountId}
-              onManageAuthAccounts={onManageAuthAccounts}
-              isCodexOauthAuthenticated={isCodexOauthAuthenticated}
-              selectedCodexAccountId={selectedCodexAccountId}
-              onCodexAccountSelect={setSelectedCodexAccountId}
-              codexFastMode={codexFastMode}
-              onCodexFastModeChange={setCodexFastMode}
-              isXaiOauthAuthenticated={isXaiOauthAuthenticated}
-              selectedXaiAccountId={selectedXaiAccountId}
-              onXaiAccountSelect={setSelectedXaiAccountId}
-              templateValueEntries={templateValueEntries}
-              templateValues={templateValues}
-              templatePresetName={templatePreset?.name || ""}
-              onTemplateValueChange={handleTemplateValueChange}
-              shouldShowSpeedTest={shouldShowSpeedTest}
-              baseUrl={baseUrl}
-              onBaseUrlChange={handleClaudeBaseUrlChange}
-              isEndpointModalOpen={isEndpointModalOpen}
-              onEndpointModalToggle={setIsEndpointModalOpen}
-              onCustomEndpointsChange={
-                isEditMode ? undefined : setDraftCustomEndpoints
-              }
-              autoSelect={endpointAutoSelect}
-              onAutoSelectChange={setEndpointAutoSelect}
-              showEndpointTools
-              shouldShowModelSelector={category !== "official"}
-              claudeModel={claudeModel}
-              defaultHaikuModel={defaultHaikuModel}
-              defaultHaikuModelName={defaultHaikuModelName}
-              defaultSonnetModel={defaultSonnetModel}
-              defaultSonnetModelName={defaultSonnetModelName}
-              defaultOpusModel={defaultOpusModel}
-              defaultOpusModelName={defaultOpusModelName}
-              defaultFableModel={defaultFableModel}
-              defaultFableModelName={defaultFableModelName}
-              subagentModel={subagentModel}
-              onModelChange={handleModelChange}
-              speedTestEndpoints={speedTestEndpoints}
-              apiFormat={localApiFormat}
-              onApiFormatChange={handleApiFormatChange}
-              apiKeyField={localApiKeyField}
-              onApiKeyFieldChange={handleApiKeyFieldChange}
-              isFullUrl={localIsFullUrl}
-              onFullUrlChange={setLocalIsFullUrl}
-              customUserAgent={customUserAgent}
-              onCustomUserAgentChange={setCustomUserAgent}
-              localProxyHeadersOverride={localProxyHeadersOverride}
-              onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
-              localProxyBodyOverride={localProxyBodyOverride}
-              onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
-            />
+            <>
+              <ClaudeFormFields
+                providerId={providerId}
+                shouldShowApiKey={
+                  (category !== "cloud_provider" ||
+                    hasApiKeyField(
+                      form.getValues("settingsConfig"),
+                      "claude",
+                    )) &&
+                  shouldShowApiKey(form.getValues("settingsConfig"), isEditMode)
+                }
+                apiKey={apiKey}
+                onApiKeyChange={handleApiKeyChange}
+                category={category}
+                shouldShowApiKeyLink={shouldShowClaudeApiKeyLink}
+                websiteUrl={claudeWebsiteUrl}
+                isPartner={isClaudePartner}
+                partnerPromotionKey={claudePartnerPromotionKey}
+                isCopilotPreset={isCopilotProvider}
+                isCodexOauthPreset={isClaudeCodexOauthProvider}
+                isXaiOauthPreset={isXaiOauthProvider}
+                usesOAuth={
+                  templatePreset?.requiresOAuth === true ||
+                  isCopilotProvider ||
+                  isClaudeCodexOauthProvider ||
+                  isXaiOauthProvider
+                }
+                isCopilotAuthenticated={isCopilotAuthenticated}
+                selectedGitHubAccountId={selectedGitHubAccountId}
+                onGitHubAccountSelect={setSelectedGitHubAccountId}
+                onManageAuthAccounts={onManageAuthAccounts}
+                isCodexOauthAuthenticated={isCodexOauthAuthenticated}
+                selectedCodexAccountId={selectedCodexAccountId}
+                onCodexAccountSelect={setSelectedCodexAccountId}
+                codexFastMode={codexFastMode}
+                onCodexFastModeChange={setCodexFastMode}
+                isXaiOauthAuthenticated={isXaiOauthAuthenticated}
+                selectedXaiAccountId={selectedXaiAccountId}
+                onXaiAccountSelect={setSelectedXaiAccountId}
+                templateValueEntries={templateValueEntries}
+                templateValues={templateValues}
+                templatePresetName={templatePreset?.name || ""}
+                onTemplateValueChange={handleTemplateValueChange}
+                shouldShowSpeedTest={shouldShowSpeedTest}
+                baseUrl={baseUrl}
+                onBaseUrlChange={handleClaudeBaseUrlChange}
+                isEndpointModalOpen={isEndpointModalOpen}
+                onEndpointModalToggle={setIsEndpointModalOpen}
+                onCustomEndpointsChange={
+                  isEditMode ? undefined : setDraftCustomEndpoints
+                }
+                autoSelect={endpointAutoSelect}
+                onAutoSelectChange={setEndpointAutoSelect}
+                showEndpointTools
+                shouldShowModelSelector={category !== "official"}
+                claudeModel={claudeModel}
+                defaultHaikuModel={defaultHaikuModel}
+                defaultHaikuModelName={defaultHaikuModelName}
+                defaultSonnetModel={defaultSonnetModel}
+                defaultSonnetModelName={defaultSonnetModelName}
+                defaultOpusModel={defaultOpusModel}
+                defaultOpusModelName={defaultOpusModelName}
+                defaultFableModel={defaultFableModel}
+                defaultFableModelName={defaultFableModelName}
+                subagentModel={subagentModel}
+                onModelChange={handleModelChange}
+                speedTestEndpoints={speedTestEndpoints}
+                apiFormat={localApiFormat}
+                onApiFormatChange={handleApiFormatChange}
+                apiKeyField={localApiKeyField}
+                onApiKeyFieldChange={handleApiKeyFieldChange}
+                isFullUrl={localIsFullUrl}
+                onFullUrlChange={setLocalIsFullUrl}
+                customUserAgent={customUserAgent}
+                onCustomUserAgentChange={setCustomUserAgent}
+                localProxyHeadersOverride={localProxyHeadersOverride}
+                onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
+                localProxyBodyOverride={localProxyBodyOverride}
+                onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              />
+              {category !== "official" && (
+                <>
+                  <ModelCatalogPanel
+                    baseUrl={baseUrl}
+                    apiKey={apiKey}
+                    isFullUrl={localIsFullUrl}
+                    apiFormat={localApiFormat}
+                    onSnapshotChange={setClaudeCatalogSnapshot}
+                  />
+                  <ModelMappingEditor
+                    value={form.watch("settingsConfig")}
+                    onChange={handleSettingsConfigChange}
+                    catalogModels={
+                      catalogFilterEnabled
+                        ? claudeVendorOnlyModels.length > 0
+                          ? claudeVendorOnlyModels
+                          : claudeCatalogModels.length > 0
+                            ? claudeCatalogModels
+                            : undefined
+                        : claudeCatalogModels.length > 0
+                          ? claudeCatalogModels
+                          : undefined
+                    }
+                    catalogFilterEnabled={catalogFilterEnabled}
+                    onCatalogFilterEnabledChange={setCatalogFilterEnabled}
+                  />
+                </>
+              )}
+            </>
           )}
 
           {appId === "codex" && (
@@ -2542,6 +2597,30 @@ function ProviderFormFull({
                 <ModelMappingEditor
                   value={form.watch("settingsConfig")}
                   onChange={handleSettingsConfigChange}
+                  catalogModels={
+                    codexCatalogPickerModels.length > 0
+                      ? codexCatalogPickerModels
+                      : undefined
+                  }
+                  catalogFilterEnabled={catalogFilterEnabled}
+                  onCatalogFilterEnabledChange={setCatalogFilterEnabled}
+                />
+              )}
+              {category !== "official" && (
+                <ModelCatalogPanel
+                  baseUrl={codexBaseUrl}
+                  apiKey={codexApiKey}
+                  isFullUrl={localIsFullUrl}
+                  apiFormat={localCodexApiFormat}
+                  onSnapshotChange={(snap) => {
+                    if (!snap) return;
+                    // 目录拉回后同步到 Codex 的 modelCatalog 目录（用于生成 model-catalogs.json 与路由 fallback）
+                    const nextCatalog = snap.models.map((m) => ({
+                      model: m.id,
+                      displayName: m.displayName || m.id,
+                    }));
+                    setCodexCatalogModels(nextCatalog as CodexCatalogModel[]);
+                  }}
                 />
               )}
             </>
