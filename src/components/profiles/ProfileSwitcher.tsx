@@ -40,13 +40,23 @@ import {
   useProfilesQuery,
 } from "@/lib/query/profiles";
 import { ProfileManageDialog } from "./ProfileManageDialog";
-import { APP_PROFILE_SCOPE, hasScopeSnapshot } from "./scope";
+import {
+  APP_PROFILE_SCOPE,
+  hasScopeSnapshot,
+  getScopesWithSnapshot,
+} from "./scope";
 import type { CurrentProfileIds, ProfileScope } from "@/lib/api/profiles";
 
 const CURRENT_ID_KEY: Record<ProfileScope, keyof CurrentProfileIds> = {
   claude: "claude",
   "claude-desktop": "claudeDesktop",
   codex: "codex",
+};
+
+const SCOPE_I18N_SHORT: Record<ProfileScope, string> = {
+  claude: "Claude",
+  "claude-desktop": "Desktop",
+  codex: "Codex",
 };
 
 interface ProfileSwitcherProps {
@@ -128,7 +138,7 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
           side="bottom"
           align="start"
           sideOffset={6}
-          className="z-[100] w-64 p-0"
+          className="z-[100] w-72 p-0"
         >
           <Command label={t("profiles.searchPlaceholder")}>
             <CommandInput placeholder={t("profiles.searchPlaceholder")} />
@@ -136,29 +146,60 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
               <CommandEmpty>{t("profiles.empty")}</CommandEmpty>
               {profiles.length > 0 && (
                 <CommandGroup>
-                  {profiles.map((profile) => (
-                    <CommandItem
-                      key={profile.id}
-                      value={profile.id}
-                      keywords={[profile.name]}
-                      onSelect={() => handleApply(profile.id)}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4 shrink-0",
-                          currentId === profile.id
-                            ? "opacity-100"
-                            : "opacity-0",
-                        )}
-                      />
-                      <span className="truncate">{profile.name}</span>
-                      {!hasScopeSnapshot(profile, scope) && (
-                        <span className="ml-auto shrink-0 pl-2 text-xs text-muted-foreground">
-                          {t("profiles.noSnapshotForScope")}
+                  {profiles.map((profile) => {
+                    const hasSnapshot = hasScopeSnapshot(profile, scope);
+                    const capturedScopes = getScopesWithSnapshot(profile);
+                    const missingHint = !hasSnapshot
+                      ? t("profiles.noSnapshotHint", {
+                          defaultValue:
+                            "本侧尚未保存，切换时不改动配置，只标记为当前项目",
+                        })
+                      : undefined;
+                    return (
+                      <CommandItem
+                        key={profile.id}
+                        value={profile.id}
+                        keywords={[profile.name]}
+                        title={missingHint}
+                        onSelect={() => handleApply(profile.id)}
+                        className="gap-0 py-2"
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4 shrink-0",
+                            currentId === profile.id
+                              ? "opacity-100"
+                              : "opacity-0",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {profile.name}
                         </span>
-                      )}
-                    </CommandItem>
-                  ))}
+                        {!hasSnapshot ? (
+                          <span
+                            className="ml-2 max-w-[7.5rem] shrink-0 truncate text-right text-xs text-amber-600 dark:text-amber-400"
+                            title={missingHint}
+                          >
+                            {t("profiles.noSnapshotForScope")}
+                          </span>
+                        ) : capturedScopes.length < 3 ? (
+                          <span
+                            className="ml-2 shrink-0 text-[10px] text-muted-foreground"
+                            title={t("profiles.capturedScopesHint", {
+                              defaultValue: "已拍快照的分组",
+                              scopes: capturedScopes
+                                .map((s) => SCOPE_I18N_SHORT[s])
+                                .join(" · "),
+                            })}
+                          >
+                            {capturedScopes
+                              .map((s) => SCOPE_I18N_SHORT[s])
+                              .join(" · ")}
+                          </span>
+                        ) : null}
+                      </CommandItem>
+                    );
+                  })}
                 </CommandGroup>
               )}
               <div className="mx-1 my-1 h-px bg-border" />
@@ -216,7 +257,15 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
           <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
             <DialogTitle>{t("profiles.createFromCurrent")}</DialogTitle>
             <DialogDescription>
-              {t(`profiles.createDescription.${scope}`)}
+              <span>{t(`profiles.createDescription.${scope}`)}</span>
+              {profiles.length > 0 && (
+                <span className="mt-2 block text-xs text-muted-foreground">
+                  {t("profiles.createScopeHint", {
+                    defaultValue:
+                      "仅保存当前分组的配置，其余分组保持原样；已有同名项目将在重命名时提示。",
+                  })}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="px-6 pt-3">
@@ -229,6 +278,17 @@ export function ProfileSwitcher({ activeApp }: ProfileSwitcherProps) {
                 if (e.key === "Enter") handleCreate();
               }}
             />
+            {profiles.some(
+              (p) =>
+                p.name.trim().toLowerCase() === newName.trim().toLowerCase() &&
+                newName.trim(),
+            ) && (
+              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                {t("profiles.duplicateNameHint", {
+                  defaultValue: "已存在同名项目，创建后请注意区分。",
+                })}
+              </p>
+            )}
           </div>
           <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
             <Button variant="outline" onClick={closeCreateDialog}>

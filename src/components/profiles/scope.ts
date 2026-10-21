@@ -19,6 +19,13 @@ const SCOPE_SLOT_KEYS: Record<ProfileScope, (keyof PerApp<unknown>)[]> = {
   codex: ["codex"],
 };
 
+/** 所有分组（与后端 ProfileScope::ALL 同步） */
+export const ALL_PROFILE_SCOPES: readonly ProfileScope[] = [
+  "claude",
+  "claude-desktop",
+  "codex",
+] as const;
+
 /**
  * 项目在某分组是否拍过快照（任一槽位非 null 即视为拍过）
  *
@@ -33,4 +40,11 @@ export function hasScopeSnapshot(profile: Profile, scope: ProfileScope) {
       skills[app] !== null ||
       prompts[app] !== null,
   );
+}
+
+/**
+ * 项目已拍过快照的所有分组
+ */
+export function getScopesWithSnapshot(profile: Profile): ProfileScope[] {
+  return ALL_PROFILE_SCOPES.filter((scope) => hasScopeSnapshot(profile, scope));
 }

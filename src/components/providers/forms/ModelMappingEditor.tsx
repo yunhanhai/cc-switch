@@ -7,6 +7,29 @@ import { Switch } from "@/components/ui/switch";
 import { useModelPricing } from "@/lib/query/usage";
 import { ModelCatalogPicker } from "./ModelCatalogPanel";
 
+/** 常见"显示模型"名，用于 source 列的输入联想，降低手输成本。 */
+const COMMON_DISPLAY_MODELS: readonly string[] = [
+  "gpt-5.6-sol",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "o1",
+  "o1-mini",
+  "o3-mini",
+  "claude-opus-4-6",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5",
+  "claude-3-5-sonnet-20241022",
+  "claude-3-5-haiku-20241022",
+  "gemini-2.0-flash",
+  "gemini-2.0-pro",
+  "glm-5.3",
+  "glm-4.7",
+  "deepseek-chat",
+  "deepseek-reasoner",
+  "qwen3-max",
+  "qwen2.5-coder-32b",
+] as const;
+
 export interface ModelMappingRuleDraft {
   source: string;
   target: string;
@@ -71,6 +94,7 @@ export function ModelMappingEditor({
 }: ModelMappingEditorProps) {
   const { t } = useTranslation();
   const catalogListId = useId();
+  const sourceListId = useId();
   const config = useMemo(() => parseConfig(value), [value]);
   const rules = useMemo(() => parseRules(config), [config]);
 
@@ -195,6 +219,11 @@ export function ModelMappingEditor({
           </span>
         </div>
       )}
+      <datalist id={sourceListId}>
+        {COMMON_DISPLAY_MODELS.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
       {catalogModels && catalogModels.length > 0 ? (
         <datalist id={catalogListId}>
           {catalogModels.slice(0, 200).map((m) => (
@@ -225,6 +254,10 @@ export function ModelMappingEditor({
               />
               <Input
                 value={rule.source}
+                list={sourceListId}
+                title={t("provider.modelCatalog.sourceInputHint", {
+                  defaultValue: "常用显示模型可选，下拉直接填入",
+                })}
                 placeholder="gpt-5.6-sol"
                 aria-label={t("provider.modelMapping.source")}
                 onChange={(event) => {
