@@ -2920,6 +2920,7 @@ impl RequestForwarder {
     /// - Retry-After 明确且 ≤ max_wait → 等待该时长
     /// - Retry-After 缺失/非法 → 指数退避兜底（attempt 从 1 起：1s, 2s, 4s... 封顶 30s）
     /// - Retry-After 超过 max_wait → 不等待（等待太久不如切备用）
+    /// - Retry-After 为 0 → 视为缺失，走指数退避（见下方注释）
     ///
     /// 返回 `Some(等待秒数)` 表示可重试，`None` 表示放弃等待、走故障转移。
     fn rate_limit_wait_secs(
@@ -2937,9 +2938,13 @@ impl RequestForwarder {
         }
 
         match retry_after_secs {
-            Some(secs) if secs <= self.rate_limit_max_wait_secs => Some(secs),
-            Some(_) => None,
-            None => {
+            // `Retry-After: 0` 与缺失同义：上游说"立刻可重试"，但立刻重试只会
+            // 在同一个限流窗口上再撞一次。若上游持续这么回，10 次尝试会在毫秒级
+            // 全部阵亡 —— 等于对已经在限流的上游做了一轮请求轰炸，与"等待重试
+            // 是为了尊重限流"的初衷相反。按缺失处理，走指数退避。
+            Some(secs) if secs > 0 && secs <= self.rate_limit_max_wait_secs => Some(secs),
+            Some(secs) if secs > self.rate_limit_max_wait_secs => None,
+            _ => {
                 // 无 Retry-After：指数退避 2^(n-1)，封顶 30s
                 let backoff = 1u64
                     .checked_shl(rate_limit_attempt.saturating_sub(1).min(5))
@@ -5227,6 +5232,29 @@ mod tests {
         let fwd = forwarder_with_rate_limit_retry(true, 120);
         assert_eq!(fwd.rate_limit_wait_secs(Some(600), 1), None);
         assert_eq!(fwd.rate_limit_wait_secs(Some(121), 1), None);
+    }
+
+    /// `Retry-After: 0` 必须走退避，不能立即重试。
+    ///
+    /// 上游若持续返回 0，立即重试会在毫秒级把 10 次尝试全部打完 —— 对已经在
+    /// 限流的上游做了一轮请求轰炸，正好与"等待重试是为了尊重限流"相反。
+    #[test]
+    fn rate_limit_wait_treats_retry_after_zero_as_missing() {
+        let fwd = forwarder_with_rate_limit_retry(true, 120);
+
+        // 0 秒不能原样返回，要退化成指数退避的第 1 档
+        assert_eq!(fwd.rate_limit_wait_secs(Some(0), 1), Some(1));
+        assert_eq!(fwd.rate_limit_wait_secs(Some(0), 2), Some(2));
+        assert_eq!(fwd.rate_limit_wait_secs(Some(0), 3), Some(4));
+
+        // 与"缺失"完全同义
+        for attempt in 1..=6 {
+            assert_eq!(
+                fwd.rate_limit_wait_secs(Some(0), attempt),
+                fwd.rate_limit_wait_secs(None, attempt),
+                "attempt={attempt} 时 0 与缺失应给出相同退避"
+            );
+        }
     }
 
     #[test]
