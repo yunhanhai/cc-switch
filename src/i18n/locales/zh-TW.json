@@ -2806,6 +2806,8 @@
     "fatalCircuitHint": "由額度耗盡觸發：恢復視窗內直接快速失敗，不再打上游",
     "rateLimitedCooldown": "限流 {{seconds}}s",
     "rateLimitedCooldownHint": "上游回傳 429 並要求等待。該供應商仍會被嘗試，但在路由選擇時排到佇列末尾。",
+    "halfOpenProbeLeaked": "探測卡住",
+    "halfOpenProbeLeakedHint": "半開探測名額未釋放：該供應商目前會拒絕所有請求，且無法自動恢復。請手動「重置熔斷」。",
     "resetCircuit": "重置熔斷",
     "resetCircuitHint": "立即重置熔斷並重新探測該供應商"
   },

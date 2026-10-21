@@ -347,6 +347,7 @@ pub async fn get_provider_health(
         health.circuit_state = Some(stats.state.to_string());
         health.recovery_remaining_secs = stats.recovery_remaining_secs;
         health.fatal = stats.fatal;
+        health.half_open_probes = stats.half_open_probes;
     }
 
     // 点查而非拉全表：这个命令被每个 provider 卡片独立轮询（5s 一次），
@@ -669,6 +670,11 @@ pub async fn update_circuit_breaker_config(
 }
 
 /// 获取熔断器统计信息（仅当代理服务器运行时）
+///
+/// 这是熔断器的**完整**内存视图，比 `get_provider_health` 暴露的合成视图更细：
+/// 额外提供 `half_open_probes`（半开探测名额占用）与请求计数。
+/// 健康轮询走 `get_provider_health`（每 5 秒、按 provider），本命令留给
+/// 需要完整熔断细节的排查场景。
 #[tauri::command]
 pub async fn get_circuit_breaker_stats(
     state: tauri::State<'_, AppState>,

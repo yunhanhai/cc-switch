@@ -97,6 +97,9 @@ export function useProxyStatus() {
       queryClient.removeQueries({ queryKey: ["providerHealth"] });
       // 彻底删除所有熔断器统计缓存（代理停止后熔断器状态已重置）
       queryClient.removeQueries({ queryKey: ["circuitBreakerStats"] });
+      // 限流冷却同样是代理进程内的状态，服务停止后栈内冷却表已随之释放。
+      // 不清理会让 UI 继续展示实际上已经不存在的倒计时。
+      queryClient.removeQueries({ queryKey: ["rateLimitCooldowns"] });
       // 注意：故障转移队列和开关状态会保留，不需要刷新
     },
     onError: (error: Error) => {

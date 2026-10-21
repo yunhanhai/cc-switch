@@ -78,6 +78,14 @@ export interface ProviderHealth {
   rate_limit_cooldown_secs?: number;
   /** 本次熔断是否由额度耗尽触发 */
   fatal?: boolean;
+  /**
+   * 半开状态下已占用的探测名额。
+   *
+   * 半开只允许 1 个探测请求；若某条路径忘了释放名额，该供应商会永久卡在
+   * 「半开但拒绝所有请求」—— 状态显示 half_open、倒计时归零却始终不放行。
+   * 这是唯一能观测到该泄漏的信号。
+   */
+  half_open_probes?: number;
 }
 
 // 熔断器相关类型

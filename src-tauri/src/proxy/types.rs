@@ -200,6 +200,14 @@ pub struct ProviderHealth {
     /// 本次熔断是否由额度耗尽（致命失败）触发
     #[serde(default)]
     pub fatal: bool,
+    /// 半开状态下已占用的探测名额。
+    ///
+    /// 半开只允许 1 个探测请求（见 `allow_half_open_probe`）。若某条请求路径
+    /// 忘了在结束时释放名额，该 Provider 会永久卡在「半开但拒绝所有请求」——
+    /// 熔断器状态显示 half_open、恢复倒计时归零、却永远不放行。这个字段是
+    /// 唯一能在 UI 上观测到该泄漏的信号。
+    #[serde(default)]
+    pub half_open_probes: u32,
 }
 
 /// Live 配置备份记录

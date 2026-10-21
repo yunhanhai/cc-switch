@@ -522,6 +522,8 @@ export function ProviderCard({
                         }
                         cooldownSecs={health.rate_limit_cooldown_secs ?? 0}
                         fatal={health.fatal ?? false}
+                        halfOpenProbes={health.half_open_probes ?? 0}
+                        circuitState={health.circuit_state}
                       />
                       {lastLatencyMs !== undefined && (
                         <span

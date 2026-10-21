@@ -573,6 +573,7 @@ impl Database {
                         recovery_remaining_secs: 0,
                         rate_limit_cooldown_secs: 0,
                         fatal: false,
+                        half_open_probes: 0,
                     })
                 },
             )
@@ -594,6 +595,7 @@ impl Database {
                 recovery_remaining_secs: 0,
                 rate_limit_cooldown_secs: 0,
                 fatal: false,
+                half_open_probes: 0,
             }),
             Err(e) => Err(AppError::Database(e.to_string())),
         }

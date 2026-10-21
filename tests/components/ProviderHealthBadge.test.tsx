@@ -78,4 +78,58 @@ describe("ProviderHealthBadge", () => {
     expect(badge.title).toContain("health.fatalCircuitHint");
     expect(badge.title).toContain("health.recoveryCountdownHint(seconds=60)");
   });
+
+  // 半开只发 1 个探测名额；名额没释放时该供应商会永久拒绝所有请求，
+  // 且倒计时为 0、看起来"应该已经恢复"。这是必须显式提示的异常态。
+  it("flags a leaked half-open probe permit", () => {
+    const { container } = render(
+      <ProviderHealthBadge
+        consecutiveFailures={0}
+        isHealthy
+        circuitState="half_open"
+        halfOpenProbes={1}
+      />,
+    );
+
+    expect(screen.getByText("health.halfOpenProbeLeaked")).toBeInTheDocument();
+    const badge = container.firstElementChild as HTMLElement;
+    expect(badge.title).toContain("health.halfOpenProbeLeakedHint");
+    // 泄漏期间不应显示"正常"——那会掩盖问题
+    expect(screen.queryByText("health.operational")).not.toBeInTheDocument();
+  });
+
+  // 名额占用是瞬态的：请求进行中 probes=1 属于正常，不能误报。
+  it("does not flag probe usage outside the half-open state", () => {
+    render(
+      <ProviderHealthBadge
+        consecutiveFailures={0}
+        isHealthy
+        circuitState="closed"
+        halfOpenProbes={1}
+      />,
+    );
+
+    expect(
+      screen.queryByText("health.halfOpenProbeLeaked"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("health.operational")).toBeInTheDocument();
+  });
+
+  // 泄漏提示优先级高于限流冷却：前者会让供应商彻底不可用，必须优先暴露。
+  it("prefers the leak warning over the cooldown badge", () => {
+    render(
+      <ProviderHealthBadge
+        consecutiveFailures={0}
+        isHealthy
+        circuitState="half_open"
+        halfOpenProbes={1}
+        cooldownSecs={30}
+      />,
+    );
+
+    expect(screen.getByText("health.halfOpenProbeLeaked")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/health\.rateLimitedCooldown/),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -2805,6 +2805,8 @@
     "fatalCircuitHint": "クォータ枯渇による遮断です。復旧ウィンドウ中はアップストリームへ再送せず即座に失敗します",
     "rateLimitedCooldown": "レート制限 {{seconds}}秒",
     "rateLimitedCooldownHint": "上流が 429 と待機時間を返しました。このプロバイダーは引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
+    "halfOpenProbeLeaked": "プローブ停止",
+    "halfOpenProbeLeakedHint": "ハーフオープンのプローブ枠が解放されていません。このプロバイダーは現在すべてのリクエストを拒否し、自動復旧できません。手動でサーキットをリセットしてください。",
     "resetCircuit": "サーキットをリセット",
     "resetCircuitHint": "サーキットを即座にリセットし、このプロバイダーを再プローブします"
   },

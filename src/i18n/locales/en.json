@@ -2805,6 +2805,8 @@
     "fatalCircuitHint": "Triggered by quota exhaustion: fail fast during the recovery window instead of hitting upstream again",
     "rateLimitedCooldown": "Rate limited {{seconds}}s",
     "rateLimitedCooldownHint": "Upstream returned 429 with a wait. This provider is still tried, but is moved to the end of the queue during routing.",
+    "halfOpenProbeLeaked": "Probe stuck",
+    "halfOpenProbeLeakedHint": "The half-open probe permit was never released: this provider now rejects every request and cannot recover on its own. Reset the circuit manually.",
     "resetCircuit": "Reset circuit",
     "resetCircuitHint": "Reset the circuit now and probe this provider again"
   },

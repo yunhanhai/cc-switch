@@ -13,6 +13,10 @@ interface ProviderHealthBadgeProps {
   cooldownSecs?: number;
   /** 本次熔断是否由额度耗尽触发 */
   fatal?: boolean;
+  /** 半开探测名额占用数（>0 且状态为 half_open 时说明探测名额可能泄漏） */
+  halfOpenProbes?: number;
+  /** 熔断器当前状态，用于判断探测名额是否「卡在」半开 */
+  circuitState?: string | null;
   className?: string;
 }
 
@@ -30,9 +34,44 @@ export function ProviderHealthBadge({
   recoveryRemainingSecs = 0,
   cooldownSecs = 0,
   fatal = false,
+  halfOpenProbes = 0,
+  circuitState,
   className,
 }: ProviderHealthBadgeProps) {
   const { t } = useTranslation();
+
+  /**
+   * 半开探测名额泄漏：长期停在 half_open 却已没有可用名额。
+   *
+   * 半开只发放 1 个名额（`allow_half_open_probe` 的 max=1）。正常流程里
+   * 请求结束会把名额还回去，所以稳态下 half_open_probes 应为 0。若它持续
+   * 停在 1（或更多）且熔断器仍是 half_open，说明某条请求路径漏了释放 ——
+   * 该供应商会永久拒绝所有请求，而倒计时显示 0 秒。
+   *
+   * 这是需要用户手动「重置熔断」才能自愈的异常态，所以优先级最高：
+   * 它比普通熔断更严重，且无法自动恢复。
+   */
+  const isProbeLeaked = circuitState === "half_open" && halfOpenProbes > 0;
+  if (isProbeLeaked) {
+    return (
+      <div
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium",
+          "bg-red-500/15 text-red-700 dark:text-red-400",
+          className,
+        )}
+        title={t("health.halfOpenProbeLeakedHint", {
+          defaultValue:
+            "半开探测名额未释放：该供应商目前会拒绝所有请求，且无法自动恢复。请手动「重置熔断」。",
+        })}
+      >
+        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        <span>
+          {t("health.halfOpenProbeLeaked", { defaultValue: "探测卡住" })}
+        </span>
+      </div>
+    );
+  }
 
   // 限流冷却：独立于健康度，说明「上游让我们等」
   if (cooldownSecs > 0) {
