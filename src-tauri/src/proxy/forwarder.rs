@@ -1164,31 +1164,66 @@ impl RequestForwarder {
 
                     match category {
                         ErrorCategory::Retryable => {
-                            // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                            let record_result = if matches!(&e, ProxyError::BillingExhausted(_)) {
+                            // 429 限流不该污染熔断器：冷却表已经把该 provider 推到队尾
+                            // 并登记了共享冷却，再记一次熔断失败等于把"忙"当成"坏"。
+                            // 仅释放 HalfOpen permit，不更新连续失败/错误率/健康度。
+                            // BillingExhausted 虽也语义特殊，但它已被上方 retry 家族
+                            // 单独处理为 record_fatal_result（真正的终态），与 429 不同。
+                            let is_rate_limited = matches!(&e, ProxyError::RateLimited { .. });
+                            if is_rate_limited {
+                                // 已在 forward 超限破圈处对该 provider 做过 429 共享冷却登记：
+                                // - 开关开启且决定等待时登记（逐次 waiting）
+                                // - 超限/关闭时直接破圈未登记，这里补上最长 30s 的保守冷却
+                                //   （让并发请求别立刻再撞同一个窗口）。
+                                if super::rate_limit::should_register_cooldown(
+                                    self.rate_limit_retry_enabled,
+                                    Some(rate_limit_cooling_for_rate_limited(&e)),
+                                ) {
+                                    let cooling_secs =
+                                        rate_limit_cooling_for_rate_limited(&e);
+                                    self.router
+                                        .note_rate_limited(
+                                            &provider.id,
+                                            app_type_str,
+                                            cooling_secs,
+                                            extract_rate_limited_retry_after(&e),
+                                        )
+                                        .await;
+                                }
                                 self.router
-                                    .record_fatal_result(
+                                    .release_permit_neutral(
                                         &provider.id,
                                         app_type_str,
                                         used_half_open_permit,
-                                        e.to_string(),
                                     )
-                                    .await
+                                    .await;
                             } else {
-                                self.router
-                                    .record_result(
-                                        &provider.id,
-                                        app_type_str,
-                                        used_half_open_permit,
-                                        false,
-                                        Some(e.to_string()),
-                                    )
-                                    .await
-                            };
-                            if let Err(record_error) = record_result {
-                                log::warn!(
-                                    "[{app_type_str}] failed to record provider failure: {record_error}"
-                                );
+                                // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
+                                let record_result = if matches!(&e, ProxyError::BillingExhausted(_)) {
+                                    self.router
+                                        .record_fatal_result(
+                                            &provider.id,
+                                            app_type_str,
+                                            used_half_open_permit,
+                                            e.to_string(),
+                                        )
+                                        .await
+                                } else {
+                                    self.router
+                                        .record_result(
+                                            &provider.id,
+                                            app_type_str,
+                                            used_half_open_permit,
+                                            false,
+                                            Some(e.to_string()),
+                                        )
+                                        .await
+                                };
+                                if let Err(record_error) = record_result {
+                                    log::warn!(
+                                        "[{app_type_str}] failed to record provider failure: {record_error}"
+                                    );
+                                }
                             }
 
                             {
@@ -3033,6 +3068,32 @@ fn failover_reason_label(error: &ProxyError) -> &'static str {
         ProxyError::BillingExhausted(_) => "billing_exhausted",
         ProxyError::RateLimited { .. } => "rate_limited",
         _ => "provider_failed",
+    }
+}
+
+/// 429 失败走故障转移时的保守冷却时长（秒）。
+///
+/// 与等待重试路径不同：这里没有"决定等几秒"、也不会 sleep，冷却只是
+/// 给并发请求一个"别再来撞同一个窗口"的提示。取 Retry-After 原值
+///（若有且合理），否则给 30s 保守值；0 值已在 `rate_limit_wait_secs`
+/// 被视为缺失进入退避，所以这里 0 也按缺失处理。
+fn rate_limit_cooling_for_rate_limited(error: &ProxyError) -> u64 {
+    match error {
+        ProxyError::RateLimited {
+            retry_after_secs: Some(secs),
+            ..
+        } if *secs > 0 => (*secs).min(120),
+        _ => 30,
+    }
+}
+
+/// 从 429 错误中提取上游 Retry-After 原值（供冷却快照展示用）。
+fn extract_rate_limited_retry_after(error: &ProxyError) -> Option<u64> {
+    match error {
+        ProxyError::RateLimited {
+            retry_after_secs, ..
+        } => *retry_after_secs,
+        _ => None,
     }
 }
 
@@ -5286,6 +5347,51 @@ mod tests {
         assert_eq!(fwd.rate_limit_wait_secs(Some(1), max), Some(1));
         assert_eq!(fwd.rate_limit_wait_secs(Some(1), max + 1), None);
         assert_eq!(fwd.rate_limit_wait_secs(None, max + 1), None);
+    }
+
+    #[test]
+    fn rate_limit_cooling_uses_header_or_falls_back() {
+        // 有 Retry-After 时取该值（极大值截断到 120s，避免误登记超长冷却）
+        assert_eq!(
+            rate_limit_cooling_for_rate_limited(&ProxyError::RateLimited {
+                retry_after_secs: Some(20),
+                body: None
+            }),
+            20
+        );
+        assert_eq!(
+            rate_limit_cooling_for_rate_limited(&ProxyError::RateLimited {
+                retry_after_secs: Some(999),
+                body: None
+            }),
+            120
+        );
+        // 无头 / 0（已按缺失处理）/ 非 429 都给保守值
+        for error in [
+            ProxyError::RateLimited {
+                retry_after_secs: None,
+                body: None,
+            },
+            ProxyError::RateLimited {
+                retry_after_secs: Some(0),
+                body: None,
+            },
+            ProxyError::ForwardFailed("boom".to_string()),
+        ] {
+            assert_eq!(rate_limit_cooling_for_rate_limited(&error), 30);
+        }
+        // 保存原值供快照展示
+        assert_eq!(
+            extract_rate_limited_retry_after(&ProxyError::RateLimited {
+                retry_after_secs: Some(45),
+                body: None
+            }),
+            Some(45)
+        );
+        assert_eq!(
+            extract_rate_limited_retry_after(&ProxyError::ForwardFailed("x".to_string())),
+            None
+        );
     }
 
     fn provider_with_settings(settings_config: Value) -> Provider {
