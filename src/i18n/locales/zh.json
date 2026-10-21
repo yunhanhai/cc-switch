@@ -187,7 +187,24 @@
       "source": "显示模型",
       "target": "实际模型",
       "remove": "删除规则",
-      "unpricedTargets": "以下目标模型没有定价，用量统计中费用将记为 0：{{targets}}"
+      "unpricedTargets": "以下目标模型没有定价，用量统计中费用将记为 0：{{targets}}",
+      "duplicateSources": "存在重复的显示模型：{{sources}}，后一条会覆盖前一条"
+    },
+    "modelCatalog": {
+      "title": "模型目录",
+      "load": "加载",
+      "refresh": "刷新",
+      "filterPlaceholder": "筛选模型...",
+      "filterAvailable": "仅可用模型",
+      "pickerTitle": "可用模型",
+      "vendorOnly": "仅厂商",
+      "empty": "暂无模型",
+      "more": "还有 {{count}} 个",
+      "count": "{{count}} 个模型",
+      "fetchedAt": "更新于 {{time}}",
+      "pickHint": "点击填入目标模型",
+      "autoFetchHint": "已检测到密钥，正在自动拉取可用模型…",
+      "targetInputHint": "已接入目录，可直接下拉选择或点击上方徽标填入"
     },
     "sortBy": "排序方式",
     "sortManual": "手动排序",

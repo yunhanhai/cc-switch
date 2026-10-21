@@ -187,7 +187,24 @@
       "source": "Display model",
       "target": "Actual model",
       "remove": "Remove rule",
-      "unpricedTargets": "These target models have no pricing; usage cost will show as 0: {{targets}}"
+      "unpricedTargets": "These target models have no pricing; usage cost will show as 0: {{targets}}",
+      "duplicateSources": "Duplicate display models: {{sources}} — the last one wins"
+    },
+    "modelCatalog": {
+      "title": "Model catalog",
+      "load": "Load",
+      "refresh": "Refresh",
+      "filterPlaceholder": "Filter models...",
+      "filterAvailable": "Available only",
+      "pickerTitle": "Available models",
+      "vendorOnly": "Vendor only",
+      "empty": "No models",
+      "more": "{{count}} more",
+      "count": "{{count}} models",
+      "fetchedAt": "Updated {{time}}",
+      "pickHint": "Click to fill target",
+      "autoFetchHint": "Key detected, fetching available models...",
+      "targetInputHint": "Catalog ready — pick from the dropdown or click a badge above"
     },
     "sortBy": "Sort by",
     "sortManual": "Manual order",

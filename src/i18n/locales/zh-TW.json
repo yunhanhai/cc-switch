@@ -187,7 +187,24 @@
       "source": "顯示模型",
       "target": "實際模型",
       "remove": "刪除規則",
-      "unpricedTargets": "以下目標模型沒有定價，用量統計中費用將記為 0：{{targets}}"
+      "unpricedTargets": "以下目標模型沒有定價，用量統計中費用將記為 0：{{targets}}",
+      "duplicateSources": "存在重複的顯示模型：{{sources}}，後一條會覆蓋前一條"
+    },
+    "modelCatalog": {
+      "title": "模型目錄",
+      "load": "載入",
+      "refresh": "重新整理",
+      "filterPlaceholder": "篩選模型...",
+      "filterAvailable": "僅可用模型",
+      "pickerTitle": "可用模型",
+      "vendorOnly": "僅廠商",
+      "empty": "暫無模型",
+      "more": "還有 {{count}} 個",
+      "count": "{{count}} 個模型",
+      "fetchedAt": "更新於 {{time}}",
+      "pickHint": "點擊填入目標模型",
+      "autoFetchHint": "已偵測到金鑰，正在自動拉取可用模型…",
+      "targetInputHint": "已接入目錄，可直接下拉選擇或點擊上方徽章填入"
     },
     "sortBy": "排序方式",
     "sortManual": "手動排序",

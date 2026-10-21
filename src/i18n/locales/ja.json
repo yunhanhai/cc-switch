@@ -187,7 +187,24 @@
       "source": "表示モデル",
       "target": "実際のモデル",
       "remove": "ルールを削除",
-      "unpricedTargets": "以下のターゲットモデルには価格設定がないため、使用量コストは 0 と表示されます: {{targets}}"
+      "unpricedTargets": "以下のターゲットモデルには価格設定がないため、使用量コストは 0 と表示されます: {{targets}}",
+      "duplicateSources": "表示モデルが重複しています: {{sources}} — 最後の1件が有効になります"
+    },
+    "modelCatalog": {
+      "title": "モデルカタログ",
+      "load": "読み込み",
+      "refresh": "更新",
+      "filterPlaceholder": "モデルを絞り込む...",
+      "filterAvailable": "利用可能のみ",
+      "pickerTitle": "利用可能なモデル",
+      "vendorOnly": "ベンダーのみ",
+      "empty": "モデルがありません",
+      "more": "他 {{count}} 件",
+      "count": "{{count}} モデル",
+      "fetchedAt": "更新 {{time}}",
+      "pickHint": "クリックでターゲットに反映",
+      "autoFetchHint": "キーを検出しました、利用可能なモデルを取得中…",
+      "targetInputHint": "カタログ準備完了 — ドロップダウンから選ぶか上のバッジをクリック"
     },
     "sortBy": "並び替え",
     "sortManual": "手動順",
