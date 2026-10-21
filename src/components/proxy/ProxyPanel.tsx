@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Activity,
   Clock,
@@ -27,7 +27,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import { getAppLabel, PROXY_APP_IDS } from "@/config/appConfig";
+import {
+  getAppLabel,
+  PROXY_APP_IDS,
+  type ProxyAppId,
+} from "@/config/appConfig";
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -57,6 +61,17 @@ export function ProxyPanel({
   // 监听地址/端口的本地状态（端口用字符串以支持完全清空）
   const [listenAddress, setListenAddress] = useState("127.0.0.1");
   const [listenPort, setListenPort] = useState("15722");
+  const [effectiveRouteSizes, setEffectiveRouteSizes] = useState<
+    Record<string, number>
+  >({});
+  const handleRouteSizeChange = useCallback(
+    (appType: ProxyAppId, size: number) => {
+      setEffectiveRouteSizes((prev) =>
+        prev[appType] === size ? prev : { ...prev, [appType]: size },
+      );
+    },
+    [],
+  );
 
   // 同步全局配置到本地状态
   useEffect(() => {
@@ -313,7 +328,10 @@ export function ProxyPanel({
                 <p className="text-xs font-medium text-muted-foreground">
                   {getAppLabel(appType)}
                 </p>
-                <ResilienceSummaryBar appType={appType} />
+                <ResilienceSummaryBar
+                  appType={appType}
+                  effectiveRouteSize={effectiveRouteSizes[appType]}
+                />
               </div>
             ))}
 
@@ -430,7 +448,7 @@ export function ProxyPanel({
                 })}
                 value={status.active_connections}
               />
-              {/* [7.5] Routing Groups（统一网关分组，最小可用：每 app 独立分组管理） */}
+              {/* [7.5] Routing Groups（直连上方韧性条的生效路由尺寸，消除同 app 重复 routingGroups 查询） */}
               {PROXY_APP_IDS.filter((id) =>
                 Boolean(takeoverStatus?.[id as keyof typeof takeoverStatus]),
               ).map((appType) => (
@@ -443,7 +461,12 @@ export function ProxyPanel({
                     {t("routingGroups.title", { defaultValue: "路由分组" })}
                   </p>
                   <div className="rounded-lg border border-border/60 bg-card/40 p-3">
-                    <RoutingGroupsPanel appType={appType} />
+                    <RoutingGroupsPanel
+                      appType={appType}
+                      onEffectiveRouteSizeChange={(size) =>
+                        handleRouteSizeChange(appType as ProxyAppId, size)
+                      }
+                    />
                   </div>
                 </div>
               ))}

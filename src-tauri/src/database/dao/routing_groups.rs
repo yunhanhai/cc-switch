@@ -808,4 +808,61 @@ mod tests {
         assert!(err.to_string().contains("不属于"), "{err:?}");
         Ok(())
     }
+
+    #[test]
+    fn test_empty_and_disable_sync_clears_failover_queue() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        db.save_provider("claude", &provider("p1", "P1"))?;
+        db.save_provider("claude", &provider("p2", "P2"))?;
+        let g = db.create_routing_group("claude", "solo", None)?;
+        db.set_routing_group_members(&g.id, &["p1".to_string()])?;
+        assert_eq!(db.get_enabled_routing_group_provider_ids("claude")?.len(), 1);
+        assert_eq!(db.get_failover_queue("claude")?.len(), 1);
+        // 清空成员后，启用分组为空，队列应清空（而非残留 p1）
+        db.set_routing_group_members(&g.id, &[])?;
+        assert!(db.get_enabled_routing_group_provider_ids("claude")?.is_empty());
+        assert!(db.get_failover_queue("claude")?.is_empty());
+        // 再加入 p2 后禁用分组，队列同样清空
+        db.set_routing_group_members(&g.id, &["p2".to_string()])?;
+        assert_eq!(db.get_failover_queue("claude")?.len(), 1);
+        db.update_routing_group(&g.id, None, Some(false), None)?;
+        assert!(db.get_enabled_routing_group_provider_ids("claude")?.is_empty());
+        assert!(db.get_failover_queue("claude")?.is_empty());
+        // 删除分组后亦保持空
+        db.delete_routing_group(&g.id)?;
+        assert!(db.get_failover_queue("claude")?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_failover_queue_double_write_and_detach() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        for id in ["p1", "p2"] {
+            db.save_provider("claude", &provider(id, id))?;
+        }
+        let fast = db.create_routing_group("claude", "fast", None)?;
+        let slow = db.create_routing_group("claude", "slow", None)?;
+        db.set_routing_group_members(&fast.id, &["p1".to_string()])?;
+        // 旧队列双写 add 应搬运归属到 default 并追加 p2
+        db.add_to_failover_queue("claude", "p2")?;
+        let groups = db.list_routing_groups("claude")?;
+        let default = groups
+            .iter()
+            .find(|entry| entry.group.id == "rg_default_claude")
+            .expect("default group mirrored from failover queue");
+        assert!(default.members.iter().any(|member| member.provider_id == "p2"));
+        // p1 仍在 fast，p2 在 default，互不重叠
+        let fast_members = groups
+            .iter()
+            .find(|entry| entry.group.id == fast.id)
+            .unwrap();
+        assert!(fast_members.members.iter().any(|member| member.provider_id == "p1"));
+        // 再从旧队列移除 p2，default 应同步移除但 fast 不受影响
+        db.remove_from_failover_queue("claude", "p2")?;
+        let groups = db.list_routing_groups("claude")?;
+        let _ = slow; // 占位，避免未使用警告
+        let default = groups.iter().find(|entry| entry.group.id == "rg_default_claude").unwrap();
+        assert!(!default.members.iter().any(|member| member.provider_id == "p2"));
+        Ok(())
+    }
 }

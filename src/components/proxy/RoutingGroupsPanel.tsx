@@ -4,7 +4,7 @@
  * 每 app 多分组，成员归属制（同 app 下 provider 仅属一组，避免重复计费与健康漂移）。
  * 支持：创建/重命名/启用/删除 + 成员多选保存 + 分组拖拽 + 组内成员拖拽
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -61,7 +61,13 @@ import {
 } from "@/lib/query/routing-groups";
 import type { ProxyAppId } from "@/config/appConfig";
 
-export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
+export function RoutingGroupsPanel({
+  appType,
+  onEffectiveRouteSizeChange,
+}: {
+  appType: ProxyAppId;
+  onEffectiveRouteSizeChange?: (size: number) => void;
+}) {
   const { t } = useTranslation();
   const { data: groups = [], isLoading } = useRoutingGroups(appType);
   const { data: providersData } = useProvidersQuery(appType);
@@ -89,6 +95,20 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
       enabledGroups,
     };
   }, [groups]);
+  const lastReportedSizeRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onEffectiveRouteSizeChange) return;
+    const size = effectiveRoute.providerIds.length;
+    // 初次 groups=[] 的 0 不上报，避免与 ResilienceSummaryBar 的兜底查询竞态
+    if (!isLoading && lastReportedSizeRef.current !== size) {
+      lastReportedSizeRef.current = size;
+      onEffectiveRouteSizeChange(size);
+    }
+  }, [
+    effectiveRoute.providerIds.length,
+    isLoading,
+    onEffectiveRouteSizeChange,
+  ]);
   const effectiveFirstProviderId =
     effectiveRoute.enabledGroups[0]?.members[0]?.providerId ?? null;
   const effectiveFirstGroupId =
