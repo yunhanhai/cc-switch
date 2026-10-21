@@ -144,6 +144,10 @@ export function ModelCatalogPanel({
   const [filter, setFilter] = useState("");
   const [showVendorOnly, setShowVendorOnly] = useState(false);
   const lastAutoFetchKeyRef = useRef<string | null>(null);
+  const snapshotRef = useRef<ModelCatalogSnapshot | null>(null);
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   const filtered = useMemo(() => {
     const models: CatalogModel[] = snapshot?.models ?? [];
@@ -188,8 +192,9 @@ export function ModelCatalogPanel({
         onSnapshotChange?.(data);
         return data;
       } catch (e) {
-        const fallback: ModelCatalogSnapshot = snapshot
-          ? { ...snapshot, vendorError: String(e) }
+        const prev = snapshotRef.current;
+        const fallback: ModelCatalogSnapshot = prev
+          ? { ...prev, vendorError: String(e) }
           : {
               version: 1,
               fetchedAtSecs: Math.floor(Date.now() / 1000),
@@ -204,15 +209,7 @@ export function ModelCatalogPanel({
         setLoading(false);
       }
     },
-    [
-      baseUrl,
-      apiKey,
-      isFullUrl,
-      modelsUrl,
-      apiFormat,
-      onSnapshotChange,
-      snapshot,
-    ],
+    [baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, onSnapshotChange],
   );
   const fetchCatalog = useCallback(
     async (force: boolean) => {
@@ -229,7 +226,8 @@ export function ModelCatalogPanel({
     if (keyTrimmed.length < 8) return;
     const fetchKey = `${baseUrl}::${isFullUrl ? "1" : "0"}::${apiFormat ?? ""}::${modelsUrl ?? ""}::${keyTrimmed.slice(0, 16)}`;
     if (lastAutoFetchKeyRef.current === fetchKey) return;
-    if (snapshot && snapshot.models.length > 0 && !snapshot.vendorError) {
+    const cur = snapshotRef.current;
+    if (cur && cur.models.length > 0 && !cur.vendorError) {
       lastAutoFetchKeyRef.current = fetchKey;
       return;
     }
@@ -240,16 +238,7 @@ export function ModelCatalogPanel({
       void doFetch(false);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [
-    autoFetch,
-    baseUrl,
-    apiKey,
-    isFullUrl,
-    modelsUrl,
-    apiFormat,
-    snapshot,
-    doFetch,
-  ]);
+  }, [autoFetch, baseUrl, apiKey, isFullUrl, modelsUrl, apiFormat, doFetch]);
 
   // 切换预设/端点时重置自动拉取记忆，允许对新 baseUrl 再次自动拉取
   useEffect(() => {
