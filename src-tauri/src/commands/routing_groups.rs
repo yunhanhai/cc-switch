@@ -100,3 +100,28 @@ pub fn remove_routing_group_member(
         .remove_routing_group_member(&group_id, &provider_id)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn reorder_routing_groups(
+    state: State<'_, AppState>,
+    app_type: String,
+    ordered_ids: Vec<String>,
+) -> Result<(), String> {
+    require_proxy_app(&app_type)?;
+    state
+        .db
+        .reorder_routing_groups(&app_type, &ordered_ids)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_routing_group_members(
+    state: State<'_, AppState>,
+    group_id: String,
+    ordered_provider_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .db
+        .reorder_routing_group_members(&group_id, &ordered_provider_ids)
+        .map_err(|e| e.to_string())
+}

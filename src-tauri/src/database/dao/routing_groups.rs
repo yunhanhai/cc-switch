@@ -192,11 +192,17 @@ impl Database {
         let new_enabled = enabled.unwrap_or(existing.enabled);
         let new_order = sort_order.unwrap_or(existing.sort_order);
         let now = chrono::Utc::now().timestamp();
+        let enabled_changed = new_enabled != existing.enabled;
         conn.execute(
             "UPDATE routing_groups SET name = ?1, enabled = ?2, sort_order = ?3, updated_at = ?4 WHERE id = ?5",
             params![new_name, if new_enabled { 1 } else { 0 }, new_order, now, id],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        if enabled_changed {
+            // 兼容期：启用态变更反向同步 in_failover_queue，保证旧队列视图与分组聚合一致
+            let _ =
+                Self::sync_in_failover_queue_from_enabled_locked(&conn, &existing.app_type);
+        }
         Ok(RoutingGroup {
             id: existing.id,
             app_type: existing.app_type,
@@ -209,12 +215,25 @@ impl Database {
     }
 
     pub fn delete_routing_group(&self, id: &str) -> Result<(), AppError> {
+        // 删除前取 app_type 用于反向同步
+        let app_type_hint: Option<String> = {
+            let conn = lock_conn!(self.conn);
+            conn.query_row(
+                "SELECT app_type FROM routing_groups WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .ok()
+        };
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute("DELETE FROM routing_groups WHERE id = ?1", params![id])
             .map_err(|e| AppError::Database(e.to_string()))?;
         if affected == 0 {
             return Err(AppError::InvalidInput(format!("路由分组不存在: {id}")));
+        }
+        if let Some(app_type) = app_type_hint {
+            let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &app_type);
         }
         Ok(())
     }
@@ -283,6 +302,8 @@ impl Database {
             params![now, group_id],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        // 兼容期反向同步：覆盖式写入时 enabled 聚合的归属已改变，旧队列标记需一致
+        let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &app_type);
         Ok(())
     }
 
@@ -341,6 +362,8 @@ impl Database {
             params![group_id, provider_id, app_type, next, now],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        // 单条追加：若所属分组已启用，聚合到旧队列的可见集需更新
+        let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &app_type);
         Ok(())
     }
 
@@ -349,12 +372,24 @@ impl Database {
         group_id: &str,
         provider_id: &str,
     ) -> Result<(), AppError> {
+        let app_type: Option<String> = {
+            let conn = lock_conn!(self.conn);
+            conn.query_row(
+                "SELECT app_type FROM routing_groups WHERE id = ?1",
+                params![group_id],
+                |row| row.get(0),
+            )
+            .ok()
+        };
         let conn = lock_conn!(self.conn);
         conn.execute(
             "DELETE FROM routing_group_members WHERE group_id = ?1 AND provider_id = ?2",
             params![group_id, provider_id],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        if let Some(app_type) = app_type {
+            let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &app_type);
+        }
         Ok(())
     }
 
@@ -401,6 +436,181 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(Some(RoutingGroupWithMembers { group, members }))
+    }
+
+    /// 批量重排同一 app 下的分组顺序（拖拽排序）。
+    ///
+    /// `ordered_ids` 为该 app 下分组 id 的全量新顺序；依次写入 `sort_order = index`。
+    /// 仅允许对同一 `app_type` 的分组重排，跨 app 的 id 将报错。
+    pub fn reorder_routing_groups(
+        &self,
+        app_type: &str,
+        ordered_ids: &[String],
+    ) -> Result<(), AppError> {
+        if !Self::is_valid_app_type(app_type) {
+            return Err(AppError::InvalidInput(format!(
+                "不支持的应用类型: {app_type}"
+            )));
+        }
+        if ordered_ids.is_empty() {
+            return Ok(());
+        }
+        let conn = lock_conn!(self.conn);
+        // 校验：所有 id 均属同一 app_type
+        for id in ordered_ids {
+            let owner: Option<String> = conn
+                .query_row(
+                    "SELECT app_type FROM routing_groups WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .ok();
+            match owner {
+                Some(t) if t == app_type => {}
+                Some(other) => {
+                    return Err(AppError::InvalidInput(format!(
+                        "分组 {id} 不属于 {app_type}（实际 {other}）"
+                    )))
+                }
+                _ => {
+                    return Err(AppError::InvalidInput(format!("路由分组不存在: {id}")))
+                }
+            }
+        }
+        let now = chrono::Utc::now().timestamp();
+        for (idx, id) in ordered_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE routing_groups SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+                params![idx as i64, now, id],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// 批量重排单个分组内的成员顺序（拖拽排序）。
+    ///
+    /// `ordered_provider_ids` 为该分组当前成员的全量新顺序；
+    /// 非成员或重复 id 将报错。
+    pub fn reorder_routing_group_members(
+        &self,
+        group_id: &str,
+        ordered_provider_ids: &[String],
+    ) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        let app_type: String = conn
+            .query_row(
+                "SELECT app_type FROM routing_groups WHERE id = ?1",
+                params![group_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| AppError::InvalidInput(format!("路由分组不存在: {group_id}")))?;
+
+        // 读取当前成员集合校验
+        let mut stmt = conn
+            .prepare(
+                "SELECT provider_id FROM routing_group_members WHERE group_id = ?1",
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let current: Vec<String> = stmt
+            .query_map(params![group_id], |row| row.get(0))
+            .map_err(|e| AppError::Database(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let current_set: std::collections::HashSet<String> =
+            current.into_iter().collect();
+        if ordered_provider_ids.len() != current_set.len() {
+            return Err(AppError::InvalidInput(
+                "成员重排需提供全量成员且不重复".to_string(),
+            ));
+        }
+        for pid in ordered_provider_ids {
+            if !current_set.contains(pid) {
+                return Err(AppError::InvalidInput(format!(
+                    "供应商 {pid} 不在分组 {group_id} 中"
+                )));
+            }
+        }
+        for (idx, pid) in ordered_provider_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE routing_group_members SET sort_index = ?1 WHERE group_id = ?2 AND provider_id = ?3",
+                params![idx as i64, group_id, pid],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "UPDATE routing_groups SET updated_at = ?1 WHERE id = ?2",
+            params![now, group_id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        // 成员顺序变更不影响 failover 归属，仅顺序，同步 in_failover_queue 的顺序不由该字段决定
+        // 故无需反向同步；但为保持 P1 语义与旧队列拖拽联动，仍可触发轻量同步（仅 enabled 分组聚合时顺序无关）
+        let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &app_type);
+        Ok(())
+    }
+
+    /// 将已启用分组的聚合成员反向同步到 `providers.in_failover_queue`（兼容期）。
+    ///
+    /// 启用分组为空时清空旧队列标记；否则旧队列标记与启用分组聚合一致。
+    /// 失败不抛，仅日志——调用方已在同一锁内，不应因兼容同步失败而阻断主流程。
+    fn sync_in_failover_queue_from_enabled_locked(
+        conn: &rusqlite::Connection,
+        app_type: &str,
+    ) -> Result<(), AppError> {
+        let has_table: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='routing_groups'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !has_table {
+            return Ok(());
+        }
+        let enabled_ids = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT rgm.provider_id FROM routing_groups rg
+                     JOIN routing_group_members rgm ON rgm.group_id = rg.id
+                     WHERE rg.app_type = ?1 AND rg.enabled = 1",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let ids = stmt
+                .query_map(params![app_type], |row| row.get::<_, String>(0))
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            ids
+        };
+        if enabled_ids.is_empty() {
+            conn.execute(
+                "UPDATE providers SET in_failover_queue = 0 WHERE app_type = ?1",
+                params![app_type],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            return Ok(());
+        }
+        // 先清后设，避免残留
+        conn.execute(
+            "UPDATE providers SET in_failover_queue = 0 WHERE app_type = ?1",
+            params![app_type],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        let placeholders = enabled_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE providers SET in_failover_queue = 1 WHERE app_type = ? AND id IN ({placeholders})"
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(enabled_ids.len() + 1);
+        params_vec.push(Box::new(app_type.to_string()));
+        for id in &enabled_ids {
+            params_vec.push(Box::new(id.clone()));
+        }
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|b| b.as_ref() as &dyn rusqlite::ToSql).collect();
+        conn.execute(&sql, params_refs.as_slice())
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
     }
 
     /// 确保该 app 的 default 分组存在（幂等），供旧故障转移队列双写复用。

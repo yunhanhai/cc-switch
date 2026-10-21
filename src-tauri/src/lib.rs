@@ -1604,6 +1604,8 @@ pub fn run() {
             commands::set_routing_group_members,
             commands::add_routing_group_member,
             commands::remove_routing_group_member,
+            commands::reorder_routing_groups,
+            commands::reorder_routing_group_members,
             // Dynamic model catalog (Magpie parity: Real model lists + models.dev + cache)
             commands::get_model_catalog,
             commands::refresh_model_catalog,

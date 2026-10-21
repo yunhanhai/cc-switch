@@ -98,3 +98,32 @@ export function useSetRoutingGroupMembers() {
       ),
   });
 }
+
+export function useReorderRoutingGroups() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { appType: string; orderedIds: string[] }) =>
+      routingGroupsApi.reorderGroups(p.appType, p.orderedIds),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["routingGroups", vars.appType] });
+    },
+    onError: (e: unknown) =>
+      toast.error(extractErrorMessage(e as Error) || "排序失败"),
+  });
+}
+
+export function useReorderRoutingGroupMembers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: {
+      appType: string;
+      groupId: string;
+      orderedProviderIds: string[];
+    }) => routingGroupsApi.reorderMembers(p.groupId, p.orderedProviderIds),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["routingGroups", vars.appType] });
+    },
+    onError: (e: unknown) =>
+      toast.error(extractErrorMessage(e as Error) || "排序失败"),
+  });
+}

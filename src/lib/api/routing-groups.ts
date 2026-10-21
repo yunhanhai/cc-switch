@@ -55,4 +55,16 @@ export const routingGroupsApi = {
   async removeMember(groupId: string, providerId: string): Promise<void> {
     return invoke("remove_routing_group_member", { groupId, providerId });
   },
+  async reorderGroups(appType: string, orderedIds: string[]): Promise<void> {
+    return invoke("reorder_routing_groups", { appType, orderedIds });
+  },
+  async reorderMembers(
+    groupId: string,
+    orderedProviderIds: string[],
+  ): Promise<void> {
+    return invoke("reorder_routing_group_members", {
+      groupId,
+      orderedProviderIds,
+    });
+  },
 };
