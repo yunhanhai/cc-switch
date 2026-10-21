@@ -3364,5 +3364,20 @@
     "expiredHint": "{{tool}}コマンドを実行してログインを更新してください",
     "queryFailed": "クエリに失敗しました",
     "refresh": "更新"
+  },
+  "routingGroups": {
+    "title": "ルーティンググループ",
+    "hint": "同一アプリ内でプロバイダーは排他的に帰属し、重複請求を回避",
+    "namePlaceholder": "グループ名（例: default / fast）",
+    "empty": "グループがありません — default グループを作成してください",
+    "noMembers": "メンバーなし",
+    "editMembers": "メンバーを編集",
+    "pickMembers": "メンバーを選択",
+    "noProviders": "利用可能なプロバイダーがありません",
+    "deleteConfirm": "このグループを削除しますか？帰属は解除されます。",
+    "createSuccess": "ルーティンググループを作成しました",
+    "updateSuccess": "更新しました",
+    "deleteSuccess": "削除しました",
+    "membersSaved": "メンバーを更新しました"
   }
 }

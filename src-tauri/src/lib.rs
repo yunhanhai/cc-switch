@@ -1595,6 +1595,15 @@ pub fn run() {
             commands::remove_from_failover_queue,
             commands::get_auto_failover_enabled,
             commands::set_auto_failover_enabled,
+            // Routing Groups (统一网关 smart 分组)
+            commands::list_routing_groups,
+            commands::create_routing_group,
+            commands::update_routing_group,
+            commands::delete_routing_group,
+            commands::get_routing_group,
+            commands::set_routing_group_members,
+            commands::add_routing_group_member,
+            commands::remove_routing_group_member,
             // Dynamic model catalog (Magpie parity: Real model lists + models.dev + cache)
             commands::get_model_catalog,
             commands::refresh_model_catalog,

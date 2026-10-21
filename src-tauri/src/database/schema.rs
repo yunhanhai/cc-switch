@@ -402,6 +402,64 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 20. Routing Groups（统一网关抽象）
+        //
+        // 将故障转移从「每 app 一条隐式队列（in_failover_queue）」升级为
+        // 显式分组：一个分组绑定一个 app_type，拥有独立成员序列与启用开关，
+        // 为后续 smart 路由策略（按模型/场景分流）预留位置。兼容期保留
+        // in_failover_queue 作为 default 分组的镜像。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS routing_groups (
+                id TEXT PRIMARY KEY,
+                app_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_routing_groups_app_name
+             ON routing_groups(app_type, name)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_groups_app_order
+             ON routing_groups(app_type, sort_order, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS routing_group_members (
+                group_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                sort_index INTEGER NOT NULL DEFAULT 0,
+                added_at INTEGER NOT NULL,
+                PRIMARY KEY (group_id, provider_id),
+                FOREIGN KEY (group_id) REFERENCES routing_groups(id) ON DELETE CASCADE,
+                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_group_members_group
+             ON routing_group_members(group_id, sort_index, added_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_group_members_provider
+             ON routing_group_members(provider_id, app_type)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
         // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
         // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
         if conn
@@ -632,6 +690,11 @@ impl Database {
                         log::info!("迁移数据库从 v17 到 v18（会话日志字节游标列）");
                         Self::migrate_v17_to_v18(conn)?;
                         Self::set_user_version(conn, 18)?;
+                    }
+                    18 => {
+                        log::info!("迁移数据库从 v18 到 v19（Routing Groups 统一网关分组）");
+                        Self::migrate_v18_to_v19(conn)?;
+                        Self::set_user_version(conn, 19)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1691,6 +1754,116 @@ impl Database {
                 "last_tail_fingerprint",
                 "INTEGER",
             )?;
+        }
+        Ok(())
+    }
+
+    /// v18 -> v19: Routing Groups 统一网关分组。
+    ///
+    /// - 新库走 create_tables 已建好两张表；
+    /// - 存量库若已跑过新 create_tables（版本≤18 但表已存在）则幂等跳过；
+    /// - 随后把旧的 in_failover_queue 队列迁移为 default 分组，保持故障转移行为不变。
+    fn migrate_v18_to_v19(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS routing_groups (
+                id TEXT PRIMARY KEY,
+                app_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 routing_groups 表失败: {e}")))?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_routing_groups_app_name
+             ON routing_groups(app_type, name)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_groups_app_order
+             ON routing_groups(app_type, sort_order, created_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS routing_group_members (
+                group_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                sort_index INTEGER NOT NULL DEFAULT 0,
+                added_at INTEGER NOT NULL,
+                PRIMARY KEY (group_id, provider_id),
+                FOREIGN KEY (group_id) REFERENCES routing_groups(id) ON DELETE CASCADE,
+                FOREIGN KEY (provider_id, app_type) REFERENCES providers(id, app_type) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 routing_group_members 表失败: {e}")))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_group_members_group
+             ON routing_group_members(group_id, sort_index, added_at)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_routing_group_members_provider
+             ON routing_group_members(provider_id, app_type)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 旧队列 → default 分组：每 app 一个 default 分组，成员按旧队列顺序
+        let rows: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, app_type FROM providers
+                     WHERE in_failover_queue = 1
+                     ORDER BY app_type, COALESCE(sort_index, 999999), id ASC",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let iter = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            iter.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::Database(e.to_string()))?
+        };
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let now = chrono::Utc::now().timestamp();
+        let mut by_app: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        for (pid, app_type) in rows {
+            by_app.entry(app_type).or_default().push(pid);
+        }
+        for (app_type, members) in by_app {
+            let group_id = format!("rg_default_{app_type}");
+            conn.execute(
+                "INSERT OR IGNORE INTO routing_groups
+                 (id, app_type, name, sort_order, enabled, created_at, updated_at)
+                 VALUES (?1, ?2, 'default', 0, 1, ?3, ?3)",
+                rusqlite::params![group_id, app_type, now],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            for (idx, provider_id) in members.iter().enumerate() {
+                conn.execute(
+                    "INSERT OR IGNORE INTO routing_group_members
+                     (group_id, provider_id, app_type, sort_index, added_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![group_id, provider_id, app_type, idx as i64, now],
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            }
+            log::info!(
+                "Routing Groups 迁移：{app_type} default 分组已导入 {} 个成员",
+                members.len()
+            );
         }
         Ok(())
     }

@@ -3364,5 +3364,20 @@
     "expiredHint": "请运行 {{tool}} 命令刷新登录",
     "queryFailed": "查询失败",
     "refresh": "刷新"
+  },
+  "routingGroups": {
+    "title": "路由分组",
+    "hint": "同 app 下供应商归属制，避免重复计费",
+    "namePlaceholder": "分组名称，如 default / fast",
+    "empty": "暂无分组，创建一个 default 分组开始",
+    "noMembers": "暂无成员",
+    "editMembers": "编辑成员",
+    "pickMembers": "选择成员",
+    "noProviders": "暂无可用供应商",
+    "deleteConfirm": "确定删除该分组吗？成员归属将一并解除。",
+    "createSuccess": "路由分组已创建",
+    "updateSuccess": "已更新",
+    "deleteSuccess": "已删除",
+    "membersSaved": "成员已更新"
   }
 }

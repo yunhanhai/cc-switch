@@ -3364,5 +3364,20 @@
     "expiredHint": "Run the {{tool}} command to refresh your login",
     "queryFailed": "Query failed",
     "refresh": "Refresh"
+  },
+  "routingGroups": {
+    "title": "Routing Groups",
+    "hint": "Providers are owned per app — no duplicate billing",
+    "namePlaceholder": "Group name, e.g. default / fast",
+    "empty": "No groups yet — create a default group to start",
+    "noMembers": "No members",
+    "editMembers": "Edit members",
+    "pickMembers": "Pick members",
+    "noProviders": "No providers available",
+    "deleteConfirm": "Delete this group? Members will be unassigned.",
+    "createSuccess": "Routing group created",
+    "updateSuccess": "Updated",
+    "deleteSuccess": "Deleted",
+    "membersSaved": "Members updated"
   }
 }

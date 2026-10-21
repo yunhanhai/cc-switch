@@ -90,13 +90,40 @@ impl ProviderRouter {
             // 故障转移开启：仅按队列顺序依次尝试（P1 → P2 → ...）
             let all_providers = self.db.get_all_providers(app_type)?;
 
-            // 使用 DAO 返回的排序结果，确保和前端展示一致
-            let ordered_ids: Vec<String> = self
+            // 统一网关：优先使用已启用路由分组的拼接顺序（smart 分组），
+            // 无启用分组或成员为空时回退到旧的 in_failover_queue 队列，保证存量库与空分组的兼容性。
+            let ordered_ids: Vec<String> = match self
                 .db
-                .get_failover_queue(app_type)?
-                .into_iter()
-                .map(|item| item.provider_id)
-                .collect();
+                .get_enabled_routing_group_provider_ids(app_type)
+            {
+                Ok(ids) if !ids.is_empty() => {
+                    log::debug!(
+                        "[{app_type}] 使用路由分组选路（{} 个成员，跨 {} 个已启用分组）",
+                        ids.len(),
+                        self.db
+                            .list_routing_groups(app_type)
+                            .map(|gs| gs.iter().filter(|g| g.group.enabled).count())
+                            .unwrap_or(0)
+                    );
+                    ids
+                }
+                Ok(_) => self
+                    .db
+                    .get_failover_queue(app_type)?
+                    .into_iter()
+                    .map(|item| item.provider_id)
+                    .collect(),
+                Err(e) => {
+                    log::warn!(
+                        "[{app_type}] 读取路由分组失败，回退到旧队列: {e}"
+                    );
+                    self.db
+                        .get_failover_queue(app_type)?
+                        .into_iter()
+                        .map(|item| item.provider_id)
+                        .collect()
+                }
+            };
 
             // 先按队列顺序收集可用 provider，同时记下每个的剩余限流冷却。
             // 冷却中的 provider 不剔除 —— 它只是不该当首选。

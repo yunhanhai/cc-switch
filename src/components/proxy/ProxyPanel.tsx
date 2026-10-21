@@ -4,7 +4,6 @@ import {
   Clock,
   TrendingUp,
   Server,
-  ListOrdered,
   Save,
   Loader2,
   Zap,
@@ -16,10 +15,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { toast } from "sonner";
-import { useFailoverQueue } from "@/lib/query/failover";
 import { ResilienceSummaryBar } from "@/components/proxy/ResilienceSummaryBar";
-import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
-import { useProviderHealth } from "@/lib/query/failover";
+import { RoutingGroupsPanel } from "@/components/proxy/RoutingGroupsPanel";
 import {
   useProxyStatusQuery,
   useProxyTakeoverStatus,
@@ -27,15 +24,10 @@ import {
   useGlobalProxyConfig,
   useUpdateGlobalProxyConfig,
 } from "@/lib/query/proxy";
-import type { ProxyStatus } from "@/types/proxy";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import {
-  getAppLabel,
-  PROXY_APP_IDS,
-  type ProxyAppId,
-} from "@/config/appConfig";
+import { getAppLabel, PROXY_APP_IDS } from "@/config/appConfig";
 
 interface ProxyPanelProps {
   enableLocalProxy: boolean;
@@ -74,12 +66,9 @@ export function ProxyPanel({
     }
   }, [globalConfig]);
 
-  // 获取所有三个应用类型的故障转移队列
-  // 启用自动故障转移后，将按队列优先级（P1→P2→...）选择供应商
-  const { data: claudeQueue = [] } = useFailoverQueue("claude");
-  const { data: codexQueue = [] } = useFailoverQueue("codex");
-  const { data: geminiQueue = [] } = useFailoverQueue("gemini");
-  const { data: grokQueue = [] } = useFailoverQueue("grokbuild");
+  // 已移除旧故障转移队列读取：故障转移选路由由 ProviderRouter
+  // 优先读取已启用路由分组（smart 分组），旧队列仅作兼容回退。
+  // 展示统一走 RoutingGroupsPanel + ResilienceSummaryBar，避免双数据源割裂。
 
   const handleTakeoverChange = async (appType: string, enabled: boolean) => {
     try {
@@ -429,68 +418,7 @@ export function ProxyPanel({
                 </div>
               </div>
 
-              {/* [6] Provider queues */}
-              {(claudeQueue.length > 0 ||
-                codexQueue.length > 0 ||
-                geminiQueue.length > 0 ||
-                grokQueue.length > 0) && (
-                <div className="pt-3 border-t border-border space-y-3">
-                  <div className="flex items-center gap-2">
-                    <ListOrdered className="h-3.5 w-3.5 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">
-                      {t("proxy.failoverQueue.title")}
-                    </p>
-                  </div>
-
-                  {claudeQueue.length > 0 && (
-                    <ProviderQueueGroup
-                      appType="claude"
-                      appLabel="Claude"
-                      targets={claudeQueue.map((item) => ({
-                        id: item.providerId,
-                        name: item.providerName,
-                      }))}
-                      status={status}
-                    />
-                  )}
-
-                  {codexQueue.length > 0 && (
-                    <ProviderQueueGroup
-                      appType="codex"
-                      appLabel="Codex"
-                      targets={codexQueue.map((item) => ({
-                        id: item.providerId,
-                        name: item.providerName,
-                      }))}
-                      status={status}
-                    />
-                  )}
-
-                  {geminiQueue.length > 0 && (
-                    <ProviderQueueGroup
-                      appType="gemini"
-                      appLabel="Gemini"
-                      targets={geminiQueue.map((item) => ({
-                        id: item.providerId,
-                        name: item.providerName,
-                      }))}
-                      status={status}
-                    />
-                  )}
-
-                  {grokQueue.length > 0 && (
-                    <ProviderQueueGroup
-                      appType="grokbuild"
-                      appLabel="Grok Build"
-                      targets={grokQueue.map((item) => ({
-                        id: item.providerId,
-                        name: item.providerName,
-                      }))}
-                      status={status}
-                    />
-                  )}
-                </div>
-              )}
+              {/* [6] 旧故障转移队列视图已移除：统一由上方 RoutingGroupsPanel + ResilienceSummaryBar 承载。 */}
             </div>
 
             {/* [7] Stats cards */}
@@ -502,6 +430,23 @@ export function ProxyPanel({
                 })}
                 value={status.active_connections}
               />
+              {/* [7.5] Routing Groups（统一网关分组，最小可用：每 app 独立分组管理） */}
+              {PROXY_APP_IDS.filter((id) =>
+                Boolean(takeoverStatus?.[id as keyof typeof takeoverStatus]),
+              ).map((appType) => (
+                <div
+                  key={`routing-groups-${appType}`}
+                  className="col-span-full space-y-2"
+                >
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {getAppLabel(appType)} ·{" "}
+                    {t("routingGroups.title", { defaultValue: "路由分组" })}
+                  </p>
+                  <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+                    <RoutingGroupsPanel appType={appType} />
+                  </div>
+                </div>
+              ))}
               <StatCard
                 icon={<TrendingUp className="h-4 w-4" />}
                 label={t("proxy.panel.stats.totalRequests", {
@@ -666,108 +611,5 @@ function StatCard({ icon, label, value, variant = "default" }: StatCardProps) {
   );
 }
 
-interface ProviderQueueGroupProps {
-  appType: ProxyAppId;
-  appLabel: string;
-  targets: Array<{
-    id: string;
-    name: string;
-  }>;
-  status: ProxyStatus;
-}
-
-function ProviderQueueGroup({
-  appType,
-  appLabel,
-  targets,
-  status,
-}: ProviderQueueGroupProps) {
-  // 查找该应用类型的当前活跃目标
-  const activeTarget = status.active_targets?.find(
-    (t) => t.app_type === appType,
-  );
-
-  return (
-    <div className="space-y-2">
-      {/* 应用类型标题 */}
-      <div className="flex items-center gap-2 px-2">
-        <span className="text-xs font-semibold text-foreground/80">
-          {appLabel}
-        </span>
-        <div className="flex-1 h-px bg-border/50" />
-      </div>
-
-      {/* 供应商列表 */}
-      <div className="space-y-1.5">
-        {targets.map((target, index) => (
-          <ProviderQueueItem
-            key={target.id}
-            provider={target}
-            priority={index + 1}
-            appType={appType}
-            isCurrent={activeTarget?.provider_id === target.id}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-interface ProviderQueueItemProps {
-  provider: {
-    id: string;
-    name: string;
-  };
-  priority: number;
-  appType: ProxyAppId;
-  isCurrent: boolean;
-}
-
-function ProviderQueueItem({
-  provider,
-  priority,
-  appType,
-  isCurrent,
-}: ProviderQueueItemProps) {
-  const { t } = useTranslation();
-  const { data: health } = useProviderHealth(provider.id, appType);
-
-  return (
-    <div
-      className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors ${
-        isCurrent
-          ? "border-primary/40 bg-primary/10 text-primary font-medium"
-          : "border-border bg-background/60"
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <span
-          className={`flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-xs font-bold ${
-            isCurrent
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted text-muted-foreground"
-          }`}
-        >
-          {priority}
-        </span>
-        <span className={isCurrent ? "" : "text-foreground"}>
-          {provider.name}
-        </span>
-        {isCurrent && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/20 text-primary">
-            {t("provider.inUse")}
-          </span>
-        )}
-      </div>
-      {/* 健康徽章 */}
-      <ProviderHealthBadge
-        consecutiveFailures={health?.consecutive_failures ?? 0}
-        isHealthy={health?.is_healthy}
-        lastError={health?.last_error}
-        recoveryRemainingSecs={health?.recovery_remaining_secs ?? 0}
-        cooldownSecs={health?.rate_limit_cooldown_secs ?? 0}
-        fatal={health?.fatal ?? false}
-      />
-    </div>
-  );
-}
+// 旧队列的 ProviderQueueGroup / ProviderQueueItem 已移除：
+// 数据面已切到 RoutingGroupsPanel（多分组归属制），双端不再各自维护一套队列视图。

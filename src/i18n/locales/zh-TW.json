@@ -3365,5 +3365,20 @@
     "expiredHint": "請執行 {{tool}} 命令重新整理登入",
     "queryFailed": "查詢失敗",
     "refresh": "重新整理"
+  },
+  "routingGroups": {
+    "title": "路由分組",
+    "hint": "同 app 下供應商歸屬制，避免重複計費",
+    "namePlaceholder": "分組名稱，如 default / fast",
+    "empty": "暫無分組，建立一個 default 分組開始",
+    "noMembers": "暫無成員",
+    "editMembers": "編輯成員",
+    "pickMembers": "選擇成員",
+    "noProviders": "暫無可用供應商",
+    "deleteConfirm": "確定刪除該分組嗎？成員歸屬將一併解除。",
+    "createSuccess": "路由分組已建立",
+    "updateSuccess": "已更新",
+    "deleteSuccess": "已刪除",
+    "membersSaved": "成員已更新"
   }
 }
