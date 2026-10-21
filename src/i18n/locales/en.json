@@ -3032,6 +3032,9 @@
       "unreachableHint": "Providers that could not be connected to in the latest check",
       "coolingDown": "Cooling down",
       "coolingDownHint": "Providers that returned 429 with a wait. They are still tried, but moved to the end of the queue during routing.",
+      "rateLimitWaiting": "Waiting",
+      "rateLimitWaitingHint": "{{providerName}} is waiting {{waitSecs}}s for rate-limit retry (#{{attempt}}); stale failures are hidden during the wait",
+      "rateLimitWaitingIdleHint": "No request is currently waiting for a 429 retry",
       "noData": "—"
     }
   },

@@ -3032,6 +3032,9 @@
       "unreachableHint": "最近一轮检测中无法建立连接的站点数",
       "coolingDown": "冷却中",
       "coolingDownHint": "上游返回 429 并要求等待的站点数。它们仍可被尝试，但在选路时排到队列末尾。",
+      "rateLimitWaiting": "等待中",
+      "rateLimitWaitingHint": "{{providerName}} 限流等待中（{{waitSecs}}s，第 {{attempt}} 次），期间不显示陈旧的失败信息",
+      "rateLimitWaitingIdleHint": "当前没有请求处在 429 等待重试循环中",
       "noData": "—"
     }
   },

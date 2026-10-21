@@ -106,9 +106,35 @@ pub struct ProxyStatus {
     /// 空 map 表示本次运行期尚未发生任何 429 等待。
     #[serde(default)]
     pub rate_limit_waits_by_app: std::collections::HashMap<String, AppRateLimitWaits>,
+    /// 当前是否有请求正在 429 等待循环中（本次轮询快照）。
+    ///
+    /// 用于解决"等待期间显示陈旧错误"：429 内层 `loop { sleep; continue }`
+    /// 可能持续 30-120s，期间若不更新 `last_error`，前端会一直显示上一家
+    /// provider 的旧错误。等待态让 UI 能在该期间展示"正在等待限流恢复"
+    /// 而非陈旧的 `Provider X 失败`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_waiting: Option<RateLimitWaiting>,
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,
+}
+
+/// 快照：当前是否有一个请求正处在 429 等待重试循环中。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitWaiting {
+    /// 正在等待的 provider 展示名
+    pub provider_name: String,
+    /// 正在等待的 provider id
+    pub provider_id: String,
+    /// 所属应用类型
+    pub app_type: String,
+    /// 本次等待的秒数（Retry-After 或退避值）
+    pub wait_secs: u64,
+    /// 本轮 429 的第几次等待（1 起）
+    pub attempt: u32,
+    /// 快照写入时的 ISO8601 时间（供前端做倒计时起点）
+    pub started_at: String,
 }
 
 /// 单个应用的 429 等待统计

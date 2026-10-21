@@ -10,11 +10,13 @@ import {
   ArrowLeftRight,
   Gauge,
   Hourglass,
+  Loader2,
   Timer,
   TrendingUp,
   WifiOff,
 } from "lucide-react";
 import { useResilienceSummary } from "@/lib/query/failover";
+import { useProxyStatusQuery } from "@/lib/query/proxy";
 
 interface ResilienceSummaryBarProps {
   appType: string;
@@ -23,6 +25,12 @@ interface ResilienceSummaryBarProps {
 export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
   const { t } = useTranslation();
   const { data: summary } = useResilienceSummary(appType);
+  const { data: proxyStatus } = useProxyStatusQuery();
+  // 仅当等待态与当前 appType 一致时展示，避免 claude 的等待误显示到 codex 卡片。
+  const waiting =
+    proxyStatus?.rate_limit_waiting?.appType === appType
+      ? proxyStatus.rate_limit_waiting
+      : null;
 
   if (!summary) return null;
 
@@ -53,6 +61,29 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
       hint: t("proxy.resilience.todayFailoversHint", {
         defaultValue: "今天自动切换供应商的次数（按应用统计）",
       }),
+    },
+    {
+      icon: Loader2,
+      label: t("proxy.resilience.rateLimitWaiting", {
+        defaultValue: "等待中",
+      }),
+      value: waiting
+        ? `${waiting.providerName} · ${waiting.waitSecs}s (#${waiting.attempt})`
+        : t("proxy.resilience.noData", { defaultValue: "—" }),
+      tone: waiting
+        ? "text-teal-600 dark:text-teal-400 animate-pulse"
+        : "text-muted-foreground",
+      hint: waiting
+        ? t("proxy.resilience.rateLimitWaitingHint", {
+            defaultValue:
+              "当前有一个请求正因 429 限流等待重试，期间不会显示陈旧的失败信息",
+            providerName: waiting.providerName,
+            waitSecs: waiting.waitSecs,
+            attempt: waiting.attempt,
+          })
+        : t("proxy.resilience.rateLimitWaitingIdleHint", {
+            defaultValue: "当前没有请求处在 429 等待重试循环中",
+          }),
     },
     {
       icon: Timer,
@@ -128,7 +159,7 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
       {items.map((item) => (
         <div
           key={item.label}
@@ -136,7 +167,9 @@ export function ResilienceSummaryBar({ appType }: ResilienceSummaryBarProps) {
           title={item.hint}
         >
           <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <item.icon className="h-3 w-3" />
+            <item.icon
+              className={`h-3 w-3 ${item.label === t("proxy.resilience.rateLimitWaiting", { defaultValue: "等待中" }) && waiting ? "animate-spin" : ""}`}
+            />
             {item.label}
           </span>
           <span

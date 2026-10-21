@@ -3032,6 +3032,9 @@
       "unreachableHint": "直近のチェックで接続を確立できなかったプロバイダー数",
       "coolingDown": "クールダウン中",
       "coolingDownHint": "上流が 429 と待機時間を返したプロバイダー数です。引き続き試行されますが、ルーティング時はキューの末尾に回されます。",
+      "rateLimitWaiting": "待機中",
+      "rateLimitWaitingHint": "{{providerName}} がレート制限で {{waitSecs}} 秒待機中（{{attempt}} 回目）— 待機中は古い失敗表示を隠します",
+      "rateLimitWaitingIdleHint": "現在 429 の再試行待機中のリクエストはありません",
       "noData": "—"
     }
   },

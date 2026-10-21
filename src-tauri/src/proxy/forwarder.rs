@@ -584,12 +584,27 @@ impl RequestForwarder {
                                     "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
                                     provider.name
                                 );
-                                // 韧性统计：记录 429 等待次数与累计等待时长
+                                // 韧性统计 + 等待态快照：让前端在 `sleep` 期间不要
+                                // 一直显示上一家 provider 的陈旧 last_error。
                                 {
                                     let mut st = self.status.write().await;
-                                    // 同时写全局累计与 per-app 分桶：韧性摘要按应用
-                                    // 展示，只写全局会让 claude 的等待数串到 codex 上。
                                     st.record_rate_limit_wait(app_type_str, wait_secs);
+                                    st.rate_limit_waiting = Some(
+                                        crate::proxy::types::RateLimitWaiting {
+                                            provider_name: provider.name.clone(),
+                                            provider_id: provider.id.clone(),
+                                            app_type: app_type_str.to_string(),
+                                            wait_secs,
+                                            attempt: rate_limit_attempt,
+                                            started_at: chrono::Utc::now().to_rfc3339(),
+                                        },
+                                    );
+                                    // last_error 在等待期间展示为"正在等待"而非旧错误，
+                                    // 避免 ResilienceSummaryBar 在 30-120s 等待中误导。
+                                    st.last_error = Some(format!(
+                                        "Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
+                                        provider.name
+                                    ));
                                 }
                                 // 共享冷却：让并发的其他请求别再来撞同一个限流窗口。
                                 // 只有「本请求决定等」时才登记——放弃等待走故障转移的
@@ -624,7 +639,13 @@ impl RequestForwarder {
 
             match forward_outcome {
                 Ok((response, claude_api_format, outbound_model)) => {
-                    // 成功：普通闭合熔断状态异步记录，避免阻塞流式首包返回；
+                    // 成功：清除等待态快照 + 恢复 last_error，再记录熔断状态。
+                    {
+                        let mut st = self.status.write().await;
+                        st.rate_limit_waiting = None;
+                        st.last_error = None;
+                    }
+                    // 普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
                     self.record_success_result(&provider.id, app_type_str, used_half_open_permit)
                         .await;
@@ -1197,6 +1218,18 @@ impl RequestForwarder {
                                         used_half_open_permit,
                                     )
                                     .await;
+                                // 该 provider 的 429 等待循环已结束（破圈走 failover），
+                                // 清掉等待态快照，避免 UI 一直显示"等待中"直到下次成功。
+                                {
+                                    let mut st = self.status.write().await;
+                                    if st
+                                        .rate_limit_waiting
+                                        .as_ref()
+                                        .is_some_and(|w| w.provider_id == provider.id)
+                                    {
+                                        st.rate_limit_waiting = None;
+                                    }
+                                }
                             } else {
                                 // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
                                 let record_result = if matches!(&e, ProxyError::BillingExhausted(_)) {

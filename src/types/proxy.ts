@@ -35,7 +35,24 @@ export interface ProxyStatus {
     string,
     { count: number; totalSecs: number }
   >;
+  /**
+   * 当前是否有一个请求正处在 429 等待循环中（轮询快照）。
+   *
+   * 后端在每次 `sleep` 前写入，成功或破圈后清除；前端用于在长达 30-120s
+   * 的等待期间展示"正在等待限流恢复"而非陈旧的 `Provider X 失败`。
+   */
+  rate_limit_waiting?: RateLimitWaiting | null;
   active_targets?: ActiveTarget[];
+}
+
+/** 后端 429 等待态快照（与 `proxy::types::RateLimitWaiting` 对齐） */
+export interface RateLimitWaiting {
+  providerName: string;
+  providerId: string;
+  appType: string;
+  waitSecs: number;
+  attempt: number;
+  startedAt: string;
 }
 
 export interface ActiveTarget {
