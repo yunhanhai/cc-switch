@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,7 @@ export function ModelMappingEditor({
   onCatalogSelect,
 }: ModelMappingEditorProps) {
   const { t } = useTranslation();
+  const catalogListId = useId();
   const config = useMemo(() => parseConfig(value), [value]);
   const rules = useMemo(() => parseRules(config), [config]);
 
@@ -91,6 +92,18 @@ export function ModelMappingEditor({
       .filter((target) => !target.includes("*"))
       .filter((target) => !pricedIds.has(target.toLowerCase()));
   }, [rules, pricing, pricedIds]);
+
+  const duplicateSources = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const r of rules) {
+      const key = r.source.trim().toLowerCase();
+      if (!key) continue;
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    return new Set(
+      [...seen.entries()].filter(([, c]) => c > 1).map(([k]) => k),
+    );
+  }, [rules]);
 
   const updateRules = (nextRules: ModelMappingRuleDraft[]) => {
     const nextConfig = {
@@ -170,6 +183,25 @@ export function ModelMappingEditor({
           </span>
         </div>
       )}
+      {duplicateSources.size > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            {t("provider.modelMapping.duplicateSources", {
+              defaultValue:
+                "存在重复的显示模型：{{sources}}，后一条会覆盖前一条",
+              sources: [...duplicateSources].join(", "),
+            })}
+          </span>
+        </div>
+      )}
+      {catalogModels && catalogModels.length > 0 ? (
+        <datalist id={catalogListId}>
+          {catalogModels.slice(0, 200).map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+      ) : null}
 
       {rules.length === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -203,8 +235,21 @@ export function ModelMappingEditor({
               />
               <Input
                 value={rule.target}
+                list={
+                  catalogModels && catalogModels.length > 0
+                    ? catalogListId
+                    : undefined
+                }
                 placeholder="glm-5.3"
                 aria-label={t("provider.modelMapping.target")}
+                title={
+                  catalogModels && catalogModels.length > 0
+                    ? t("provider.modelCatalog.targetInputHint", {
+                        defaultValue:
+                          "已接入目录，可直接下拉选择或点击上方徽标填入",
+                      })
+                    : undefined
+                }
                 onChange={(event) => {
                   const next = [...rules];
                   next[index] = { ...rule, target: event.target.value };
