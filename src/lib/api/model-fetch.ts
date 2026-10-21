@@ -7,6 +7,24 @@ export interface FetchedModel {
   ownedBy: string | null;
 }
 
+/** 动态模型目录统一视图（对标 Magpie 的 Real model lists） */
+export type CatalogSource = "vendor" | "modelsDev" | "both";
+
+export interface CatalogModel {
+  id: string;
+  displayName: string;
+  source: CatalogSource;
+  ownedBy: string | null;
+}
+
+export interface ModelCatalogSnapshot {
+  version: number;
+  fetchedAtSecs: number;
+  providerKey: string;
+  models: CatalogModel[];
+  vendorError: string | null;
+}
+
 export interface ModelFetchOptions {
   apiFormat?: string;
   requestHeaders?: Record<string, string>;
@@ -118,4 +136,55 @@ export function showFetchModelsError(
 
   // 通用兜底
   toast.error(t("providerForm.fetchModelsFailed"));
+}
+
+/** 获取动态模型目录（厂商拉取 + models.dev 兜底 + 本地缓存）。 */
+export async function getModelCatalog(
+  baseUrl: string,
+  apiKey: string,
+  isFullUrl?: boolean,
+  modelsUrl?: string,
+  customUserAgent?: string,
+  options?: ModelFetchOptions,
+): Promise<ModelCatalogSnapshot> {
+  return invoke("get_model_catalog", {
+    baseUrl,
+    apiKey,
+    isFullUrl,
+    modelsUrl,
+    customUserAgent,
+    apiFormat: options?.apiFormat,
+    requestHeaders: options?.requestHeaders,
+  });
+}
+
+/** 强制刷新动态模型目录（忽略本地缓存）。 */
+export async function refreshModelCatalog(
+  baseUrl: string,
+  apiKey: string,
+  isFullUrl?: boolean,
+  modelsUrl?: string,
+  customUserAgent?: string,
+  options?: ModelFetchOptions,
+): Promise<ModelCatalogSnapshot> {
+  return invoke("refresh_model_catalog", {
+    baseUrl,
+    apiKey,
+    isFullUrl,
+    modelsUrl,
+    customUserAgent,
+    apiFormat: options?.apiFormat,
+    requestHeaders: options?.requestHeaders,
+  });
+}
+
+/** 读取本地目录缓存状态（不触发网络请求）。 */
+export async function getModelCatalogCacheStatus(
+  baseUrl: string,
+  apiFormat?: string,
+): Promise<ModelCatalogSnapshot | null> {
+  return invoke("get_model_catalog_cache_status", {
+    baseUrl,
+    apiFormat: apiFormat || null,
+  });
 }

@@ -1595,6 +1595,10 @@ pub fn run() {
             commands::remove_from_failover_queue,
             commands::get_auto_failover_enabled,
             commands::set_auto_failover_enabled,
+            // Dynamic model catalog (Magpie parity: Real model lists + models.dev + cache)
+            commands::get_model_catalog,
+            commands::refresh_model_catalog,
+            commands::get_model_catalog_cache_status,
             // Usage statistics
             commands::get_usage_summary,
             commands::get_usage_summary_by_app,
