@@ -6,7 +6,15 @@
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Pencil, Plus, Trash2, X, GripVertical } from "lucide-react";
+import {
+  Check,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+  GripVertical,
+  Copy,
+} from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -32,6 +40,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { toast } from "sonner";
 import { useProvidersQuery } from "@/lib/query";
 import {
   useCreateRoutingGroup,
@@ -52,6 +61,16 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
     () => Object.values(providersData?.providers ?? {}),
     [providersData],
   );
+  const effectiveRoute = useMemo(() => {
+    const enabledGroups = groups.filter((g) => g.group.enabled);
+    const providerIds = enabledGroups.flatMap((g) =>
+      g.members.map((m) => m.providerId),
+    );
+    return {
+      providerIds,
+      enabledGroups,
+    };
+  }, [groups]);
 
   const create = useCreateRoutingGroup();
   const update = useUpdateRoutingGroup();
@@ -94,6 +113,82 @@ export function RoutingGroupsPanel({ appType }: { appType: ProxyAppId }) {
             defaultValue: "同 app 下供应商归属制，避免重复计费",
           })}
         </span>
+      </div>
+
+      {/* 生效路由预览：已启用分组聚合的真实 P1→Pn 顺序，等价于 ProviderRouter 的数据面拼接 */}
+      <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-primary">
+            {t("routingGroups.effectiveTitle", {
+              defaultValue: "生效路由",
+            })}
+          </span>
+          <span className="text-[11px] text-muted-foreground">
+            {t("routingGroups.effectiveHint", {
+              defaultValue: "已启用分组按顺序拼接，P1 优先",
+            })}
+          </span>
+        </div>
+        {effectiveRoute.providerIds.length === 0 ? (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {effectiveRoute.enabledGroups.length === 0
+              ? t("routingGroups.effectiveEmptyNoGroup", {
+                  defaultValue: "暂无已启用分组，将回退到旧故障转移队列",
+                })
+              : t("routingGroups.effectiveEmptyNoMembers", {
+                  defaultValue: "已启用分组均无成员，请先添加成员",
+                })}
+          </p>
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {effectiveRoute.providerIds.map((providerId, idx) => {
+              const name =
+                providers.find(
+                  (p) =>
+                    String((p as unknown as { id: string }).id) === providerId,
+                )?.name ?? providerId;
+              return (
+                <span
+                  key={`${providerId}-${idx}`}
+                  className="inline-flex items-center gap-1"
+                >
+                  {idx > 0 && (
+                    <span className="text-[11px] text-muted-foreground">→</span>
+                  )}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-xs font-medium">
+                    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-bold text-primary">
+                      P{idx + 1}
+                    </span>
+                    <span className="max-w-[14ch] truncate">{name}</span>
+                  </span>
+                </span>
+              );
+            })}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="ml-auto h-6 w-6"
+              title={t("common.copy", { defaultValue: "复制" })}
+              onClick={async () => {
+                const text = effectiveRoute.providerIds.join(", ");
+                try {
+                  await navigator.clipboard.writeText(text);
+                  toast.success(
+                    t("routingGroups.effectiveCopied", {
+                      defaultValue: "已复制生效路由",
+                    }),
+                  );
+                } catch {
+                  toast.error(
+                    t("common.copyFailed", { defaultValue: "复制失败" }),
+                  );
+                }
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">

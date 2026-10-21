@@ -3378,6 +3378,11 @@
     "createSuccess": "路由分组已创建",
     "updateSuccess": "已更新",
     "deleteSuccess": "已删除",
-    "membersSaved": "成员已更新"
+    "membersSaved": "成员已更新",
+    "effectiveTitle": "生效路由",
+    "effectiveHint": "已启用分组按顺序拼接，P1 优先",
+    "effectiveEmptyNoGroup": "暂无已启用分组，将回退到旧故障转移队列",
+    "effectiveEmptyNoMembers": "已启用分组均无成员，请先添加成员",
+    "effectiveCopied": "已复制生效路由"
   }
 }

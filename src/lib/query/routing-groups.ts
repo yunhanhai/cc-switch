@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { routingGroupsApi } from "@/lib/api/routing-groups";
+import {
+  routingGroupsApi,
+  type RoutingGroupWithMembers,
+} from "@/lib/api/routing-groups";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -104,11 +107,43 @@ export function useReorderRoutingGroups() {
   return useMutation({
     mutationFn: (p: { appType: string; orderedIds: string[] }) =>
       routingGroupsApi.reorderGroups(p.appType, p.orderedIds),
-    onSuccess: (_, vars) => {
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ["routingGroups", vars.appType] });
+      const prev =
+        qc.getQueryData<RoutingGroupWithMembers[]>([
+          "routingGroups",
+          vars.appType,
+        ]) ?? null;
+      if (prev) {
+        const byId = new Map(prev.map((g) => [g.group.id, g]));
+        const reordered: RoutingGroupWithMembers[] = [];
+        for (const id of vars.orderedIds) {
+          const g = byId.get(id);
+          if (g) reordered.push(g);
+        }
+        // 追加未在 orderedIds 中的分组（防御性，避免因并发丢失）
+        for (const g of prev) {
+          if (!vars.orderedIds.includes(g.group.id)) reordered.push(g);
+        }
+        qc.setQueryData<RoutingGroupWithMembers[]>(
+          ["routingGroups", vars.appType],
+          reordered,
+        );
+      }
+      return { prev };
+    },
+    onError: (e: unknown, vars, ctx) => {
+      const typed = ctx as
+        | { prev: RoutingGroupWithMembers[] | null }
+        | undefined;
+      if (typed?.prev) {
+        qc.setQueryData(["routingGroups", vars.appType], typed.prev);
+      }
+      toast.error(extractErrorMessage(e as Error) || "排序失败");
+    },
+    onSettled: (_, __, vars) => {
       qc.invalidateQueries({ queryKey: ["routingGroups", vars.appType] });
     },
-    onError: (e: unknown) =>
-      toast.error(extractErrorMessage(e as Error) || "排序失败"),
   });
 }
 
@@ -120,10 +155,51 @@ export function useReorderRoutingGroupMembers() {
       groupId: string;
       orderedProviderIds: string[];
     }) => routingGroupsApi.reorderMembers(p.groupId, p.orderedProviderIds),
-    onSuccess: (_, vars) => {
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ["routingGroups", vars.appType] });
+      const prev =
+        qc.getQueryData<RoutingGroupWithMembers[]>([
+          "routingGroups",
+          vars.appType,
+        ]) ?? null;
+      if (prev) {
+        const next = prev.map((entry) => {
+          if (entry.group.id !== vars.groupId) return entry;
+          const byPid = new Map(entry.members.map((m) => [m.providerId, m]));
+          const reorderedMembers = vars.orderedProviderIds
+            .map((pid) => byPid.get(pid))
+            .filter(Boolean) as typeof entry.members;
+          // 若有缺失则追加剩余（防御性）
+          for (const m of entry.members) {
+            if (!vars.orderedProviderIds.includes(m.providerId)) {
+              reorderedMembers.push(m);
+            }
+          }
+          // 同步 sort_index 为新下标，保持与后端一致的乐观视图
+          const withIndex = reorderedMembers.map((m, idx) => ({
+            ...m,
+            sortIndex: idx,
+          }));
+          return { ...entry, members: withIndex };
+        });
+        qc.setQueryData<RoutingGroupWithMembers[]>(
+          ["routingGroups", vars.appType],
+          next,
+        );
+      }
+      return { prev };
+    },
+    onError: (e: unknown, vars, ctx) => {
+      const typed = ctx as
+        | { prev: RoutingGroupWithMembers[] | null }
+        | undefined;
+      if (typed?.prev) {
+        qc.setQueryData(["routingGroups", vars.appType], typed.prev);
+      }
+      toast.error(extractErrorMessage(e as Error) || "排序失败");
+    },
+    onSettled: (_, __, vars) => {
       qc.invalidateQueries({ queryKey: ["routingGroups", vars.appType] });
     },
-    onError: (e: unknown) =>
-      toast.error(extractErrorMessage(e as Error) || "排序失败"),
   });
 }

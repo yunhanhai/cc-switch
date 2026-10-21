@@ -3378,6 +3378,11 @@
     "createSuccess": "ルーティンググループを作成しました",
     "updateSuccess": "更新しました",
     "deleteSuccess": "削除しました",
-    "membersSaved": "メンバーを更新しました"
+    "membersSaved": "メンバーを更新しました",
+    "effectiveTitle": "有効ルート",
+    "effectiveHint": "有効なグループを連結、P1 が優先",
+    "effectiveEmptyNoGroup": "有効なグループがありません — 旧キューにフォールバックします",
+    "effectiveEmptyNoMembers": "有効なグループにメンバーがありません — メンバーを追加してください",
+    "effectiveCopied": "有効ルートをコピーしました"
   }
 }
