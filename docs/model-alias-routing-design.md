@@ -202,7 +202,7 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 | `src/lib/api/model-aliases.ts` | API + `groupModelAliases` 聚合函数 |
 | `src/lib/query/model-aliases.ts` | 4 个 hooks |
 | `src/components/proxy/ModelAliasPanel.tsx` | 编辑 UI + 建议采纳 |
-| `src/i18n/locales/{zh,en,ja,zh-TW}.json` | `modelAliases.*` 21 个键 |
+| `src/i18n/locales/{zh,en,ja,zh-TW}.json` | `modelAliases.*` 20 个键（P6 清理 `geminiUnsupported` 后） |
 | `src/components/proxy/ProxyPanel.tsx` | 挂载面板 |
 
 **调用点无需改动**：`handler_context` 的主路径改为传模型名，
