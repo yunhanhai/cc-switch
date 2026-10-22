@@ -14,6 +14,20 @@ use crate::proxy::{
 use axum::http::HeaderMap;
 use std::time::Instant;
 
+/// 该 app 的模型名是否位于请求体（`body["model"]`）里。
+///
+/// **Gemini 例外**：它的模型名在 URL 路径中
+/// （`/v1beta/models/<model>:generateContent`），转发时改 `body["model"]`
+/// 不会生效。因此 Gemini **不参与 model alias 路由**：
+/// - 选路阶段不按模型过滤（否则会筛掉渠道却不换名，比不过滤更糟）
+/// - 转发阶段不注入 alias 索引
+///
+/// 若将来要支持 Gemini，必须同时实现 URL 路径中的模型名重写，
+/// 让「过滤」与「换名」成对生效。
+pub(crate) fn model_name_lives_in_body(app_type_str: &str) -> bool {
+    app_type_str != "gemini"
+}
+
 /// 流式超时配置
 #[derive(Debug, Clone, Copy)]
 pub struct StreamingTimeoutConfig {
@@ -131,11 +145,16 @@ impl RequestContext {
 
         // 使用共享的 ProviderRouter 选择 Provider（熔断器状态跨请求保持）
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
+        //
+        // 只有模型名位于请求体的 app 才参与 alias 选路过滤。Gemini 的模型名在
+        // URL 路径里，此时既筛不准（选路时还拿不到 URI）也换不了名（转发不改
+        // URL），强行过滤会导致"筛掉了渠道却没换成名"，比不过滤更糟。
+        let alias_model = model_name_lives_in_body(app_type_str).then_some(request_model.as_str());
         let providers = state
             .provider_router
             // 传入请求模型，让 model alias 能在选路阶段跳过不认识该模型的渠道。
             // 没有配 alias 时该方法等价于 select_providers（安全阀）。
-            .select_providers_for_model(app_type_str, Some(request_model.as_str()))
+            .select_providers_for_model(app_type_str, alias_model)
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
@@ -227,16 +246,23 @@ impl RequestContext {
 
         // 读一次 model alias 索引并注入 forwarder：转发阶段按当前渠道解析物理名。
         // 读取失败或无配置时注入空索引，forwarder 会走原有映射链路（行为不变）。
-        let model_alias_index = state
-            .db
-            .model_alias_index(self.app_type_str)
-            .unwrap_or_else(|e| {
-                log::warn!(
-                    "[{}] 读取 model alias 失败，本次请求不使用 alias: {e}",
-                    self.tag
-                );
-                std::collections::HashMap::new()
-            });
+        //
+        // 与选路保持一致：Gemini 的模型名在 URL 路径里，改 body 不生效，
+        // 因此不注入索引（否则会出现"选路没过滤、转发却改了 body"的错位）。
+        let model_alias_index = if model_name_lives_in_body(self.app_type_str) {
+            state
+                .db
+                .model_alias_index(self.app_type_str)
+                .unwrap_or_else(|e| {
+                    log::warn!(
+                        "[{}] 读取 model alias 失败，本次请求不使用 alias: {e}",
+                        self.tag
+                    );
+                    std::collections::HashMap::new()
+                })
+        } else {
+            std::collections::HashMap::new()
+        };
 
         RequestForwarder::new(
             state.provider_router.clone(),
@@ -318,7 +344,19 @@ pub(crate) fn extract_gemini_model_from_path(endpoint: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_gemini_model_from_path;
+    use super::{extract_gemini_model_from_path, model_name_lives_in_body};
+
+    #[test]
+    fn gemini_is_excluded_from_body_based_model_routing() {
+        // Gemini 的模型名在 URL 路径里：改 body 不生效，所以必须排除在
+        // alias 路由之外，否则会「筛掉渠道却不换名」。
+        assert!(!model_name_lives_in_body("gemini"));
+        assert!(model_name_lives_in_body("claude"));
+        assert!(model_name_lives_in_body("codex"));
+        assert!(model_name_lives_in_body("grokbuild"));
+        // claude-desktop 走独立的 map_proxy_request_model，但模型名也在 body 里
+        assert!(model_name_lives_in_body("claude-desktop"));
+    }
 
     #[test]
     fn extract_model_with_action() {
