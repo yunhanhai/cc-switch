@@ -1,12 +1,22 @@
  # 同模型跨渠道无缝切换（Model Alias Routing）设计
- 
+
  > 目标：一个逻辑模型（如 `sonnet`）在多个渠道各有不同物理名，
  > 任一渠道失败时自动切到下一个渠道，并**自动换用该渠道的物理名**。
  > 对标 yetone/magpie 的「一堆渠道随意切换、同模型无缝」体验。
- 
+
+ **状态：已实现（P1–P4 全部完成）**
+
+ | 阶段 | 提交 | 内容 |
+ | --- | --- | --- |
+ | P1 | `fbddf72` | schema v20 建表 + DAO + 纯函数解析层 |
+ | P2a | `458f2d2` | 选路阶段按请求模型过滤渠道 |
+ | P2b | `7590560` | 转发阶段按当前渠道重映射模型名 |
+ | P3 | `51bb23c` | Tauri 命令 + 编辑 UI + 四语文案 |
+ | P4 | `2f15108` | 从现有 `model_mapping` 归并建议 |
+
  ## 1. 现状与缺口
- 
- 当前链路（`handler_context.rs` → `provider_router.rs` → `forwarder.rs`）：
+
+ 改造前的链路（`handler_context.rs` → `provider_router.rs` → `forwarder.rs`）：
  
  ```text
  请求 model="claude-sonnet-4-5"
@@ -74,98 +84,149 @@
  
  即：**alias 优先，旧映射作为回退**，存量配置零迁移成本。
  
- ### 2.3 选路阶段按模型过滤
- 
- `select_providers` 增加可选模型上下文：
- 
- ```rust
- pub async fn select_providers(
-     &self,
-     app_type: &str,
-     request_model: Option<&str>,   // 新增
- ) -> Result<Vec<Provider>, AppError>
- ```
- 
- 过滤规则（仅在 `request_model` 有值且该 app 存在 alias 定义时生效）：
- 
- ```text
- 候选 provider 保留条件：
-   - 在 model_aliases 中声明了该 alias，或
-   - 有 model_mapping 能匹配该模型（含 * 通配），或
-   - 该 alias 在本 app 无任何声明（全量放开，保持旧行为）
- ```
- 
- 关键安全阀：**若某 app 完全没配 alias，则不做任何过滤**——否则用户升级后
- 所有请求都会因为"没有 alias 声明"而被判定为不支持。
- 
- ### 2.4 转发阶段按 provider 重映射
- 
- `forwarder` 在每次尝试前，用**当前正在尝试的 provider** 解析物理名：
- 
- ```rust
- let physical = resolve_upstream_model(app_type, &logical_model, provider);
- body["model"] = physical;
- ```
- 
- 这里必须放在**重试循环内部**（而不是循环外只算一次），否则切到 P2 时
- 仍会用 P1 的物理名。现有 `apply_model_mapping` 调用点在循环外的
-  `build_request` 阶段，需要下沉或在循环内重算。
- 
- ### 2.5 UI
- 
- 复用 `ModelMappingEditor` 的交互形态，新增「模型别名」页签：
- 
- ```text
- 逻辑模型 [sonnet ▾]  ─┬─ 渠道 A → claude-sonnet-4-5-20250929
-                       ├─ 渠道 B → anthropic/claude-sonnet-4.5
-                       └─ 渠道 C → sonnet-latest
- ```
- 
- - 渠道下拉只列出**该 app 下已启用分组内的 provider**，避免配了永远走不到的别名。
- - 支持"从现有 mapping 导入"：扫描各 provider 的 `model_mapping`，按 target
-   相似度归并成 alias 建议（可选，第二期）。
- 
- ## 3. 改动清单
+### 2.3 选路阶段按模型过滤
 
- | 文件 | 改动 | 风险 |
- | --- | --- | --- |
- | `database/schema.rs` | v20 建表 + 迁移 | 低 |
- | `database/dao/model_aliases.rs` | 新 DAO（CRUD + `resolve` + `providers_for_alias`） | 低 |
- | `commands/model_aliases.rs` | Tauri 命令 5 个 | 低 |
- | `proxy/provider_router.rs` | `select_providers` 加参数 + 过滤 | **中**（签名变更影响 3 处调用） |
- | `proxy/handler_context.rs` | 先解析模型再选路 | **中**（执行顺序调整） |
- | `proxy/forwarder.rs` | 循环内按 provider 重映射 | **中**（核心转发路径） |
- | `lib.rs` | 注册命令 | 低 |
- | 前端 `ModelAliasPanel.tsx` + i18n 四语 | 新 UI | 低 |
+新增 `select_providers_for_model`，原 `select_providers` 改为以 `None` 委托，
+**因此 3 处既有调用点无需改动**（比原计划的签名变更风险更低）：
 
- 调用点（需同步改）：
+```rust
+pub async fn select_providers_for_model(
+    &self,
+    app_type: &str,
+    request_model: Option<&str>,
+) -> Result<Vec<Provider>, AppError>
 
- - `handler_context.rs:134`（主路径）
- - `handlers.rs:155`（claude-desktop 网关）
- - `provider_router.rs:553`（单测）
+pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+    self.select_providers_for_model(app_type, None).await
+}
+```
 
- ## 4. 兼容与回滚
+过滤规则（仅在 `request_model` 有值且该 app 存在 alias 定义时生效）：
 
- - **零配置升级安全**：无 alias 数据时行为与现在完全一致（2.3 的安全阀）。
- - **回滚**：删表不影响任何既有表；`select_providers` 传 `None` 等价旧行为。
- - **观测**：`failover_events.reason` 增加 `model_alias_switch` 值，时间线可见
-   "因模型不匹配跳过渠道 X"。
+```text
+候选 provider 保留条件：
+  - 在 model_aliases 中声明了该 alias，或
+  - 有自有 model_mapping / env 映射（交给旧链路解析），或
+  - 该 alias 在本 app 无任何声明（全量放开，保持旧行为）
+```
 
- ## 5. 分期
+关键安全阀：**若某 app 完全没配 alias，则不做任何过滤**——否则用户升级后
+所有请求都会因为"没有 alias 声明"而被判定为不支持。
 
- | 阶段 | 内容 | 价值 |
- | --- | --- | --- |
- | **P1** | 数据模型 + DAO + `resolve` + 单测 | 打通数据层，可先只读验证 |
- | **P2** | `select_providers` 过滤 + `forwarder` 重映射 | 核心效果生效 |
- | **P3** | UI + i18n + 事件时间线 | 可配置、可观测 |
- | **P4** | 从现有 mapping 自动归并建议 | 降低配置成本 |
+第二个兜底：**过滤后若一个渠道都不剩，回退到未过滤的完整链**。
+宁可让上游返回真实的 `model_not_found`（用户能看懂），也不要在本地静默
+返回 `NoAvailableProvider`（用户无法据此排查是 alias 配错了）。
+
+### 2.4 转发阶段按 provider 重映射
+
+`forwarder` 在每次尝试前，用**当前正在尝试的 provider** 解析物理名：
+
+```rust
+let alias_resolved = body.get("model").and_then(Value::as_str)
+    .and_then(|requested| self.resolve_alias_model(provider, requested));
+
+let mapped_body = if claude_desktop {
+    map_proxy_request_model(...)
+} else if let Some(target) = alias_resolved {
+    let mut aliased = body.clone();
+    aliased["model"] = Value::String(target);
+    aliased
+} else {
+    apply_model_mapping(body.clone(), provider)  // 旧链路
+};
+```
+
+**关键实现发现**：`forward()` 本来就接收"当前正在尝试的 provider"作为参数，
+且重试循环里每个 provider 都会重新调用它。所以「切换渠道时模型名跟着换」
+天然成立，只需把 alias 解析插到映射链路最前面 —— 不需要重构循环结构。
+
+索引通过 `with_model_aliases()` 在请求入口注入一次（`create_forwarder`），
+转发时在内存里查；字段默认 `None`，因此所有既有构造点与测试行为不变。
  
- ## 6. 未决问题
+### 2.5 UI
 
- 1. **Claude Code 的 `[1M]` 后缀**：alias 的 `target_model` 是否允许携带？
-    倾向允许，转发前统一由 `strip_one_m_suffix_for_upstream` 剥离。
- 2. **Codex Official 渠道**：`provider_supports_failover` 已禁止其参与重试，
-    alias 是否需要支持？倾向支持（单渠道场景下仍有意义），但不进重试链。
- 3. **Claude Desktop**：走独立的 `map_proxy_request_model`，是否纳入 alias？
-    倾向第二期再评估，先不改变其"未知 route 直接报错"的严格语义。
+`ModelAliasPanel` 挂在代理页每个已接管 app 的路由分组下方：
+
+```text
+模型别名                                      [已启用]
+同一个逻辑模型在不同渠道叫法不同时，配置这里即可跨渠道无缝切换
+
+[从现有映射生成建议]
+
+┌──────────────────────────────────────────────────┐
+│ sonnet                                3 个渠道 ✏ 🗑 │
+│   渠道A  →  claude-sonnet-4-5-20250929            │
+│   渠道B  →  anthropic/claude-sonnet-4.5           │
+│   渠道C  →  sonnet-latest                         │
+└──────────────────────────────────────────────────┘
+```
+
+- 渠道下拉只列出该 app 的真实 provider；保存时后端还会校验归属（拒绝跨 app）。
+- **整组保存**（`set_model_alias_entries`）而非逐条增删：逐条保存会让中间状态
+  （少一个渠道）短暂生效，而这段时间里的请求可能选到错误渠道。
+- 「从现有映射生成建议」按需扫描（不每次进页面都跑），见 §5.1。
+ 
+## 3. 实际改动清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `database/schema.rs` | v20 建表 + `migrate_v19_to_v20`（纯增量） |
+| `database/dao/model_aliases.rs` | 新 DAO：upsert / set-entries / resolve / providers_for_alias / 批量索引 |
+| `proxy/model_alias.rs` | 纯函数：`resolve_for_provider` / `provider_supports_alias` / 归并建议 |
+| `proxy/model_mapper.rs` | 新增 `provider_has_own_model_mapping` / `provider_mapping_pairs` |
+| `proxy/provider_router.rs` | 新增 `select_providers_for_model` + 过滤 + 全滤回退 |
+| `proxy/handler_context.rs` | 选路传模型名 + 注入 alias 索引到 forwarder |
+| `proxy/forwarder.rs` | `resolve_alias_model` + 映射优先级插到最前 |
+| `commands/model_aliases.rs` | 6 个 Tauri 命令（含 suggest） |
+| `src/lib/api/model-aliases.ts` | API + `groupModelAliases` 聚合函数 |
+| `src/lib/query/model-aliases.ts` | 4 个 hooks |
+| `src/components/proxy/ModelAliasPanel.tsx` | 编辑 UI + 建议采纳 |
+| `src/i18n/locales/{zh,en,ja,zh-TW}.json` | `modelAliases.*` 20 个键 |
+| `src/components/proxy/ProxyPanel.tsx` | 挂载面板 |
+
+**调用点无需改动**：`handler_context` 的主路径改为传模型名，
+`handlers.rs` 的 claude-desktop 网关与既有单测继续用 `select_providers`
+（等价 `None`，不过滤）。
+
+## 4. 兼容与回滚
+
+- **零配置升级安全**：无 alias 数据时行为与现在完全一致（2.3 的安全阀）。
+- **回滚**：`select_providers` 传 `None` 等价旧行为；删表不影响任何既有表。
+- **观测**：被跳过的渠道会打 debug 日志
+  `跳过渠道 X：未声明模型 M 且无自有映射`；alias 命中会打
+  `model alias: sonnet → xxx (渠道 Y)`。
+  （`failover_events.reason` 暂未新增 `model_alias_switch`，因为跳过发生在
+  选路阶段、还没进入"切换"语义，等有明确 UI 需求再加。）
+
+## 5. 分期
+
+全部完成（见文首提交表）。
+
+### 5.1 归并建议规则（P4）
+
+**同一个 `source` 出现在 2 个及以上渠道时，它就是事实上的逻辑模型** ——
+用户已经在用同一个名字打不同渠道，只是还没显式声明成一组。
+
+三条保守规则：
+
+| 情形 | 处理 | 原因 |
+| --- | --- | --- |
+| 只出现在 1 个渠道 | 跳过 | 只是该渠道私有的改名，归并成 alias 反而会限制它 |
+| 含 `*` 的通配 source | 跳过 | 它表达"兜底"而非某个具体模型，归并会改变语义 |
+| 同渠道内重复 source | 只保留第一条 | 与 `apply_model_mapping` 的"先配置的精确规则优先"一致 |
+
+已配置过的 alias 会被过滤，避免重复建议。
+ 
+## 6. 未决问题
+
+1. **Claude Code 的 `[1M]` 后缀**：alias 的 `target_model` 允许携带，
+   转发前由 `strip_one_m_suffix_for_upstream` 统一剥离（已实现）。
+2. **Codex Official 渠道**：`provider_supports_failover` 仍禁止其参与重试，
+   alias 对它只影响模型名、不影响重试链（已实现，符合预期）。
+3. **Claude Desktop**：仍走独立的 `map_proxy_request_model`，**未纳入 alias**
+   —— 它的语义是"未知 route 直接报错"，比 alias 的"回退到旧链路"更严格，
+   合并会削弱这层保护。若将来要支持，需要先定义"Desktop route 未声明"时的
+   行为，属于独立设计。
+4. **`priority` 字段目前恒为 0**：`set_model_alias_entries` 按数组下标写入，
+   实际排序由 UI 顺序决定。保留该字段是为将来"同一渠道多物理名"的扩展。
  
