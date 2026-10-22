@@ -3425,7 +3425,6 @@
     "scanning": "掃描中…",
     "noSuggestions": "沒有可合併的映射（需同一模型名出現在兩個以上供應商）",
     "suggestionsTitle": "發現 {{count}} 組可合併的模型",
-    "adopt": "採用",
-    "geminiUnsupported": "Gemini 的模型名在 URL 路徑中，暫不支援模型別名路由；此處的設定不會生效"
+    "adopt": "採用"
   }
 }
