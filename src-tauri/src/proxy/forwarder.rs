@@ -338,6 +338,37 @@ impl RequestForwarder {
         }
     }
 
+    /// 将 endpoint 路径中的 Gemini 模型名替换为该渠道的物理名（路径别名）。
+    ///
+    /// 仅当该 app 的模型名在路径中（`!model_name_lives_in_body`）且命中 alias 时重写；
+    /// 否则原样返回。保留 `:action` 后缀与 `?query` 部分，新模型名做简单 URL 编码
+    /// 转义（与现有路径风格一致，目前模型名均为 URL-safe，仅防御性处理）。
+    fn rewrite_gemini_endpoint_for_alias(
+        &self,
+        provider: &Provider,
+        endpoint: &str,
+        requested_model: &str,
+    ) -> Option<String> {
+        if crate::proxy::handler_context::model_name_lives_in_body(
+            self.model_alias_app_type,
+        ) {
+            return None;
+        }
+        let target = self.resolve_alias_model(provider, requested_model)?;
+        let rewritten =
+            crate::proxy::handler_context::rewrite_gemini_model_in_path(endpoint, &target)?;
+        log::debug!(
+            "[{}] model alias (path): {} → {} (渠道 {}) endpoint {} → {}",
+            self.model_alias_app_type,
+            requested_model,
+            target,
+            provider.name,
+            endpoint,
+            rewritten
+        );
+        Some(rewritten)
+    }
+
     async fn record_success_result(
         &self,
         provider_id: &str,
@@ -1511,6 +1542,24 @@ impl RequestForwarder {
             mapped_body
         };
 
+        // Gemini 路径别名：endpoint 中的模型名按 alias 重写，使过滤与换名成对。
+        // 仅当 alias 命中时重写，否则保持原 endpoint；重写后的 endpoint 会参与
+        // 后续的 URL 拼装（base_url + endpoint），因此不同渠道会自动使用各
+        // 自的物理模型名。
+        // Gemini 路径别名：用 endpoint 中的逻辑模型解析物理名，生成重写后的 endpoint。
+        // 放在 mapped_body 之后但 effective_endpoint/url 之前，使得路径与 body 的映射一致。
+        let gemini_alias_endpoint: Option<String> = if matches!(app_type, AppType::Gemini) {
+            crate::proxy::handler_context::extract_gemini_model_from_path(endpoint)
+                .and_then(|req_model| {
+                    self.rewrite_gemini_endpoint_for_alias(provider, endpoint, &req_model)
+                })
+        } else {
+            None
+        };
+        let effective_alias_endpoint: Option<&str> = gemini_alias_endpoint.as_deref();
+        // 后续的 effective_endpoint 解析优先使用 alias 重写后的路径
+        let endpoint_for_routing: &str = effective_alias_endpoint.unwrap_or(endpoint);
+
         // 与 CCH 对齐：请求前不做 thinking 主动改写（仅保留兼容入口）
         let mut mapped_body = normalize_thinking_type(mapped_body);
 
@@ -1710,18 +1759,23 @@ impl RequestForwarder {
                 .and_then(|meta| meta.impersonate_claude_code)
                 == Some(true);
         let (effective_endpoint, passthrough_query) = if codex_responses_to_chat {
-            rewrite_codex_responses_endpoint_to_chat(endpoint)
+            rewrite_codex_responses_endpoint_to_chat(endpoint_for_routing)
         } else if codex_responses_to_anthropic {
-            rewrite_codex_responses_endpoint_to_anthropic(endpoint)
+            rewrite_codex_responses_endpoint_to_anthropic(endpoint_for_routing)
         } else if needs_transform && adapter.name() == "Claude" {
             let api_format = resolved_claude_api_format
                 .as_deref()
                 .unwrap_or_else(|| super::providers::get_claude_api_format(provider));
-            rewrite_claude_transform_endpoint(endpoint, api_format, is_copilot, &mapped_body)
+            rewrite_claude_transform_endpoint(
+                endpoint_for_routing,
+                api_format,
+                is_copilot,
+                &mapped_body,
+            )
         } else {
             (
-                endpoint.to_string(),
-                split_endpoint_and_query(endpoint)
+                endpoint_for_routing.to_string(),
+                split_endpoint_and_query(endpoint_for_routing)
                     .1
                     .map(ToString::to_string),
             )
@@ -1945,6 +1999,15 @@ impl RequestForwarder {
             .filter(|m| !m.is_empty())
         {
             outbound_model = Some(m.to_string());
+        }
+        // Gemini 路径别名未在 body 中体现，重写时用路径目标刷新 outbound_model
+        if matches!(app_type, AppType::Gemini) {
+            if let Some(target) = gemini_alias_endpoint
+                .as_deref()
+                .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
+            {
+                outbound_model = Some(target);
+            }
         }
         log_prompt_cache_trace(
             app_type,

@@ -2078,6 +2078,7 @@ pub async fn handle_gemini(
     let mut ctx = RequestContext::new(&state, &body, &headers, AppType::Gemini, "Gemini", "gemini")
         .await?
         .with_model_from_uri(&uri);
+    ctx.correct_providers_for_gemini_model(&state).await?;
 
     // 提取完整的路径和查询参数
     let endpoint = uri

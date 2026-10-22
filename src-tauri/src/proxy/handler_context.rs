@@ -16,16 +16,19 @@ use std::time::Instant;
 
 /// 该 app 的模型名是否位于请求体（`body["model"]`）里。
 ///
-/// **Gemini 例外**：它的模型名在 URL 路径中
-/// （`/v1beta/models/<model>:generateContent`），转发时改 `body["model"]`
-/// 不会生效。因此 Gemini **不参与 model alias 路由**：
-/// - 选路阶段不按模型过滤（否则会筛掉渠道却不换名，比不过滤更糟）
-/// - 转发阶段不注入 alias 索引
-///
-/// 若将来要支持 Gemini，必须同时实现 URL 路径中的模型名重写，
-/// 让「过滤」与「换名」成对生效。
+/// `gemini == false`：模型名在 URL 路径中（`/v1beta/models/<model>:generateContent`），
+/// 通过路径重写实现 alias 路由；其余 app 在 body 中。
 pub(crate) fn model_name_lives_in_body(app_type_str: &str) -> bool {
     app_type_str != "gemini"
+}
+
+/// 该 app 是否支持 model alias 路由（选路过滤 + 转发换名成对）。
+///
+/// 与 `model_name_lives_in_body` 的区别：Gemini 的模型名虽然在 URL 路径里，
+/// 但通过路径重写也能让「过滤」与「换名」成对，因此同样返回 true。
+/// `model_name_lives_in_body` 仍用于判断模型名在 body 还是 path。
+pub(crate) fn supports_model_alias(app_type_str: &str) -> bool {
+    matches!(app_type_str, "claude" | "codex" | "gemini" | "grokbuild")
 }
 
 /// 流式超时配置
@@ -146,10 +149,18 @@ impl RequestContext {
         // 使用共享的 ProviderRouter 选择 Provider（熔断器状态跨请求保持）
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         //
-        // 只有模型名位于请求体的 app 才参与 alias 选路过滤。Gemini 的模型名在
-        // URL 路径里，此时既筛不准（选路时还拿不到 URI）也换不了名（转发不改
-        // URL），强行过滤会导致"筛掉了渠道却没换成名"，比不过滤更糟。
-        let alias_model = model_name_lives_in_body(app_type_str).then_some(request_model.as_str());
+        // Gemini（模型名在 URL 路径）的选路推迟到 with_model_from_uri 解析出
+        // 真实模型后再执行初始过滤与可选的二次纠正；其余 app 直接按 body["model"] 过滤。
+        let alias_model = if supports_model_alias(app_type_str)
+            && !model_name_lives_in_body(app_type_str)
+        {
+            // Gemini：new 阶段尚未拿到 URI，此处不按模型过滤，交由 with_model_from_uri 纠正。
+            None
+        } else if supports_model_alias(app_type_str) {
+            Some(request_model.as_str())
+        } else {
+            None
+        };
         let providers = state
             .provider_router
             // 传入请求模型，让 model alias 能在选路阶段跳过不认识该模型的渠道。
@@ -212,6 +223,42 @@ impl RequestContext {
         self
     }
 
+    /// Gemini 选路纠正：在 new 阶段尚未拿到 URI，此处用真实模型名重筛一次。
+    ///
+    /// 调用方需在 with_model_from_uri 之后、create_forwarder 之前调用；
+    /// 失败时保持原链不变（安全阀），避免把可用链纠成空链。
+    pub async fn correct_providers_for_gemini_model(
+        &mut self,
+        state: &ProxyState,
+    ) -> Result<(), ProxyError> {
+        if !supports_model_alias(self.app_type_str)
+            || model_name_lives_in_body(self.app_type_str)
+        {
+            return Ok(());
+        }
+        if self.request_model.is_empty() || self.request_model == "unknown" {
+            return Ok(());
+        }
+        let providers = state
+            .provider_router
+            .select_providers_for_model(self.app_type_str, Some(self.request_model.as_str()))
+            .await
+            .map_err(|e| match e {
+                crate::error::AppError::AllProvidersCircuitOpen => {
+                    ProxyError::AllProvidersCircuitOpen
+                }
+                crate::error::AppError::NoProvidersConfigured => ProxyError::NoProvidersConfigured,
+                _ => ProxyError::DatabaseError(e.to_string()),
+            })?;
+        if providers.is_empty() {
+            return Ok(());
+        }
+        // 若纠正后链为空（理论上 select 已做回退），保留原链。
+        self.provider = providers.first().cloned().unwrap_or_else(|| self.provider.clone());
+        self.providers = providers;
+        Ok(())
+    }
+
     /// 创建 RequestForwarder
     ///
     /// 使用共享的 ProviderRouter，确保熔断器状态跨请求保持
@@ -246,10 +293,7 @@ impl RequestContext {
 
         // 读一次 model alias 索引并注入 forwarder：转发阶段按当前渠道解析物理名。
         // 读取失败或无配置时注入空索引，forwarder 会走原有映射链路（行为不变）。
-        //
-        // 与选路保持一致：Gemini 的模型名在 URL 路径里，改 body 不生效，
-        // 因此不注入索引（否则会出现"选路没过滤、转发却改了 body"的错位）。
-        let model_alias_index = if model_name_lives_in_body(self.app_type_str) {
+        let model_alias_index = if supports_model_alias(self.app_type_str) {
             state
                 .db
                 .model_alias_index(self.app_type_str)
@@ -342,9 +386,56 @@ pub(crate) fn extract_gemini_model_from_path(endpoint: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Replace the Gemini model id in a path with `new_model`, preserving `:action` and `?query`.
+///
+/// Returns `None` when the path has no `models/<id>` segment (e.g. list endpoint).
+pub(crate) fn rewrite_gemini_model_in_path(endpoint: &str, new_model: &str) -> Option<String> {
+    let trimmed = new_model.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let q_pos = endpoint.find('?');
+    let (path, query) = match q_pos {
+        Some(pos) => (&endpoint[..pos], Some(&endpoint[pos..])),
+        None => (endpoint, None),
+    };
+    let colon_pos = path.rfind(':');
+    let (path_no_action, action) = match colon_pos {
+        Some(pos) if path[pos + 1..].chars().all(|c| c.is_ascii_alphabetic()) => {
+            (&path[..pos], Some(&path[pos..]))
+        }
+        _ => (path, None),
+    };
+    let models_tag = "/models/";
+    let idx = path_no_action.find(models_tag)?;
+    let after_models = idx + models_tag.len();
+    if after_models >= path_no_action.len() {
+        return None;
+    }
+    // 模型段到下一个 '/' 为止（路径中不应再有 '/'，但防御性处理）
+    let model_end = path_no_action[after_models..]
+        .find('/')
+        .map(|off| after_models + off)
+        .unwrap_or(path_no_action.len());
+    let mut out = String::with_capacity(path.len() + trimmed.len() + 8);
+    out.push_str(&path_no_action[..after_models]);
+    out.push_str(trimmed);
+    out.push_str(&path_no_action[model_end..]);
+    if let Some(action) = action {
+        out.push_str(action);
+    }
+    if let Some(query) = query {
+        out.push_str(query);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{extract_gemini_model_from_path, model_name_lives_in_body};
+    use super::{
+        extract_gemini_model_from_path, model_name_lives_in_body, rewrite_gemini_model_in_path,
+        supports_model_alias,
+    };
 
     #[test]
     fn gemini_is_excluded_from_body_based_model_routing() {
@@ -356,6 +447,53 @@ mod tests {
         assert!(model_name_lives_in_body("grokbuild"));
         // claude-desktop 走独立的 map_proxy_request_model，但模型名也在 body 里
         assert!(model_name_lives_in_body("claude-desktop"));
+    }
+
+    #[test]
+    fn gemini_supports_alias_via_path_rewrite() {
+        assert!(supports_model_alias("gemini"));
+        assert!(supports_model_alias("claude"));
+        assert!(!supports_model_alias("claude-desktop"));
+    }
+
+    #[test]
+    fn rewrite_preserves_action_and_query() {
+        assert_eq!(
+            rewrite_gemini_model_in_path(
+                "/v1beta/models/gemini-pro:generateContent?key=abc",
+                "gemini-2.0-flash"
+            )
+            .as_deref(),
+            Some("/v1beta/models/gemini-2.0-flash:generateContent?key=abc")
+        );
+    }
+
+    #[test]
+    fn rewrite_without_action() {
+        assert_eq!(
+            rewrite_gemini_model_in_path("/v1/models/gemini-1.5-pro", "gemini-pro").as_deref(),
+            Some("/v1/models/gemini-pro")
+        );
+    }
+
+    #[test]
+    fn rewrite_with_proxy_prefix() {
+        assert_eq!(
+            rewrite_gemini_model_in_path(
+                "/gemini/v1beta/models/gemini-1.0-pro:countTokens",
+                "x"
+            )
+            .as_deref(),
+            Some("/gemini/v1beta/models/x:countTokens")
+        );
+    }
+
+    #[test]
+    fn rewrite_returns_none_on_list_endpoint() {
+        assert_eq!(
+            rewrite_gemini_model_in_path("/v1beta/models", "x"),
+            None
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@
  > 任一渠道失败时自动切到下一个渠道，并**自动换用该渠道的物理名**。
  > 对标 yetone/magpie 的「一堆渠道随意切换、同模型无缝」体验。
 
- **状态：已实现（P1–P5 全部完成）**
+ **状态：已实现（P1–P6 全部完成）**
 
  | 阶段 | 提交 | 内容 |
  | --- | --- | --- |
@@ -13,7 +13,8 @@
  | P2b | `7590560` | 转发阶段按当前渠道重映射模型名 |
  | P3 | `51bb23c` | Tauri 命令 + 编辑 UI + 四语文案 |
  | P4 | `2f15108` | 从现有 `model_mapping` 归并建议 |
- | P5 | `f5709d8` | Gemini 退出 alias 路由（过滤与换名成对退化） |
+ | P5 | `f5709d8` / `cea6cb2` | Gemini 安全兜底（成对退化）→ 路径重写打通 |
+ | P6 | `—` | Gemini URL 路径别名：选路纠正 + 路径重写 + 前端放开 |
 
  ## 1. 现状与缺口
 
@@ -167,27 +168,24 @@ let mapped_body = if claude_desktop {
   （少一个渠道）短暂生效，而这段时间里的请求可能选到错误渠道。
 - 「从现有映射生成建议」按需扫描（不每次进页面都跑），见 §5.1。
 
-### 2.6 安全边界：Gemini 不参与 alias 路由
+### 2.6 Gemini 路径别名（与 body 别名成对）
 
-Gemini 的模型名不在请求体里，而在 URL 路径中
-（`/v1beta/models/<model>:generateContent`）。若让它参与 alias：
+Gemini 的模型名在 URL 路径中（`/v1beta/models/<model>:generateContent`），
+因此 alias 的「过滤」与「换名」都要在**路径**上成对实现：
 
-- 选路阶段会按模型名筛掉渠道（`filter` 生效）
-- 转发阶段改的是 `body["model"]`，对路径无效（`rename` 不生效）
+- **选路**：`RequestContext::new` 对 Gemini 先不过滤，`handle_gemini` 在
+  `with_model_from_uri` 解析出真实模型后调用
+  `correct_providers_for_gemini_model` 用真实模型重筛一次（`select_providers_for_model`）。
+- **转发**：`forwarder::forward` 在映射阶段后，用 `rewrite_gemini_endpoint_for_alias`
+  将 `endpoint` 路径中的 `<model>` 替换为该渠道的物理名（保留 `:action` 与 `?query`），
+  再进入 `effective_endpoint → url` 拼装；同时刷新 `outbound_model` 用于计费归因。
 
-结果是"渠道被换掉、模型名却没换"，比完全不做 alias 更糟。
-所以 `model_name_lives_in_body()`（`proxy/handler_context.rs`）对 Gemini
-返回 `false`，两处消费点同时退化：
+`model_name_lives_in_body("gemini") == false` 仍用于区分路径/体；但
+`supports_model_alias("gemini") == true`，使 Gemini 的过滤与索引注入与其它
+app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 
-- `select_providers_for_model(app_type, None)` → 不过滤
-- `with_model_aliases` 不注入索引 → 转发走旧链路
-
-前端 `ModelAliasPanel` 用同名判据 `modelNameLivesInBody()` 同步禁用编辑
-（输入框、建议扫描、编辑/删除按钮全部 disabled），并显示一条黄色提示，
-避免用户"配了却完全不生效"。
-
-> **成对原则**：过滤与换名必须同时成立或同时不成立。将来若要让 Gemini
-> 参与，需要先实现 URL 路径中的模型名重写，再把两侧判据一起放开。
+> **成对原则**：过滤与换名必须同时成立或同时不成立。Gemini 通过路径重写
+> 使二者在路径维度成对，故障转移时路径模型名随渠道一起切换。
 
 ## 3. 实际改动清单
 
