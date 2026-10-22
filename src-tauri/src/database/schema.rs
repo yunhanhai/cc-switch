@@ -455,7 +455,46 @@ impl Database {
         .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_routing_group_members_provider
-             ON routing_group_members(provider_id, app_type)",
+            ON routing_group_members(provider_id, app_type)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 21. Model Aliases（同模型跨渠道无缝切换）
+        //
+        // 一个逻辑模型（alias，如 "sonnet"）在多个渠道各有不同物理名。
+        // 选路时按 alias 过滤候选渠道，转发时按当前渠道解析物理名，
+        // 从而做到「渠道断了自动换，模型名跟着换」。
+        //
+        // 与 settings_config.model_mapping 的分工：
+        // - model_aliases：跨渠道共享的逻辑名 → 各渠道物理名（本表）
+        // - model_mapping：单渠道私有的显示名 → 实际名（保留，作为回退）
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS model_aliases (
+                id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                alias TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                target_model TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (id, app_type),
+                UNIQUE (app_type, alias, provider_id)
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 model_aliases 表失败: {e}")))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_aliases_lookup
+             ON model_aliases(app_type, alias, enabled, priority)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_aliases_provider
+             ON model_aliases(app_type, provider_id)",
             [],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -695,6 +734,11 @@ impl Database {
                         log::info!("迁移数据库从 v18 到 v19（Routing Groups 统一网关分组）");
                         Self::migrate_v18_to_v19(conn)?;
                         Self::set_user_version(conn, 19)?;
+                    }
+                    19 => {
+                        log::info!("迁移数据库从 v19 到 v20（Model Alias 同模型跨渠道路由）");
+                        Self::migrate_v19_to_v20(conn)?;
+                        Self::set_user_version(conn, 20)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1817,6 +1861,17 @@ impl Database {
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         // 旧队列 → default 分组：每 app 一个 default 分组，成员按旧队列顺序
+        //
+        // 兼容性：极老的库（v4 及更早）的 providers 表可能还没有
+        // in_failover_queue 列。该列由后续迁移补齐，而本函数在版本循环里
+        // 可能先于补齐执行，直接查询会报 `no such column`。缺列说明此时
+        // 不存在任何旧队列数据，直接跳过导入即可。
+        if !Self::has_column(conn, "providers", "in_failover_queue")? {
+            log::info!(
+                "Routing Groups 迁移：providers 表尚无 in_failover_queue 列，跳过旧队列导入"
+            );
+            return Ok(());
+        }
         let rows: Vec<(String, String)> = {
             let mut stmt = conn
                 .prepare(
@@ -1865,6 +1920,45 @@ impl Database {
                 members.len()
             );
         }
+        Ok(())
+    }
+
+    /// v19 -> v20: Model Aliases（同模型跨渠道无缝切换）。
+    ///
+    /// 纯增量：只建表 + 索引，不迁移任何既有数据。
+    /// 新库走 create_tables 已建好；存量库在此补齐。
+    /// 没有 alias 数据时，转发链路行为与 v19 完全一致。
+    fn migrate_v19_to_v20(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS model_aliases (
+                id TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                alias TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                target_model TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (id, app_type),
+                UNIQUE (app_type, alias, provider_id)
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(format!("创建 model_aliases 表失败: {e}")))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_aliases_lookup
+             ON model_aliases(app_type, alias, enabled, priority)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_aliases_provider
+             ON model_aliases(app_type, provider_id)",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        log::info!("Model Aliases 表已就绪（v19 → v20）");
         Ok(())
     }
 
