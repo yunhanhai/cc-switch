@@ -1612,6 +1612,7 @@ pub fn run() {
             commands::upsert_model_alias,
             commands::delete_model_alias,
             commands::has_model_aliases,
+            commands::suggest_model_aliases,
             // Dynamic model catalog (Magpie parity: Real model lists + models.dev + cache)
             commands::get_model_catalog,
             commands::refresh_model_catalog,

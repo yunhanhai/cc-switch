@@ -9,13 +9,14 @@
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useProvidersQuery } from "@/lib/query";
 import {
   useModelAliases,
+  useModelAliasSuggestions,
   useSetModelAliasEntries,
 } from "@/lib/query/model-aliases";
 import { groupModelAliases } from "@/lib/api/model-aliases";
@@ -45,6 +46,10 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
 
   const [createAlias, setCreateAlias] = useState("");
   const [draft, setDraft] = useState<DraftGroup | null>(null);
+  // 建议按需扫描：只有用户点了按钮才查询（要扫所有 provider 的 settings_config）
+  const [scanEnabled, setScanEnabled] = useState(false);
+  const { data: suggestions = [], isFetching: isScanning } =
+    useModelAliasSuggestions(appType, scanEnabled);
 
   const providerName = (providerId: string) =>
     providers.find(
@@ -112,6 +117,76 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
           </Badge>
         )}
       </div>
+
+      {/* 从现有 model_mapping 归并建议 */}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          disabled={isScanning}
+          onClick={() => setScanEnabled(true)}
+        >
+          <Sparkles className="mr-1 h-3 w-3" />
+          {isScanning
+            ? t("modelAliases.scanning", { defaultValue: "扫描中…" })
+            : t("modelAliases.scan", {
+                defaultValue: "从现有映射生成建议",
+              })}
+        </Button>
+        {scanEnabled && !isScanning && suggestions.length === 0 && (
+          <span className="text-[11px] text-muted-foreground">
+            {t("modelAliases.noSuggestions", {
+              defaultValue:
+                "没有可归并的映射（需同一模型名出现在两个以上渠道）",
+            })}
+          </span>
+        )}
+      </div>
+
+      {suggestions.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <p className="text-xs font-medium text-primary">
+            {t("modelAliases.suggestionsTitle", {
+              defaultValue: "发现 {{count}} 组可归并的模型",
+              count: suggestions.length,
+            })}
+          </p>
+          {suggestions.map((suggestion) => (
+            <div
+              key={suggestion.alias}
+              className="flex items-center gap-2 rounded border border-border/40 bg-background/60 px-2 py-1.5"
+            >
+              <span className="w-24 shrink-0 truncate font-mono text-xs font-medium">
+                {suggestion.alias}
+              </span>
+              <span className="flex-1 truncate text-[11px] text-muted-foreground">
+                {suggestion.entries
+                  .map(
+                    ([providerId, target]) =>
+                      `${providerName(providerId)} → ${target}`,
+                  )
+                  .join("  |  ")}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 shrink-0 text-xs"
+                disabled={setEntries.isPending}
+                onClick={() =>
+                  setEntries.mutate({
+                    appType,
+                    alias: suggestion.alias,
+                    entries: suggestion.entries,
+                  })
+                }
+              >
+                {t("modelAliases.adopt", { defaultValue: "采纳" })}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 新建逻辑模型 */}
       <div className="flex items-center gap-2">

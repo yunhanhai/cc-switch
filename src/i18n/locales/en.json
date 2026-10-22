@@ -3419,6 +3419,11 @@
     "saved": "Model aliases saved",
     "saveFailed": "Save failed",
     "deleted": "Deleted",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "scan": "Suggest from existing mappings",
+    "scanning": "Scanning...",
+    "noSuggestions": "Nothing to merge (a model name must appear on 2+ channels)",
+    "suggestionsTitle": "{{count}} mergeable model group(s) found",
+    "adopt": "Adopt"
   }
 }

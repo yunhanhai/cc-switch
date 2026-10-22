@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { modelAliasesApi, type ModelAlias } from "@/lib/api/model-aliases";
+import {
+  modelAliasesApi,
+  type ModelAlias,
+  type ModelAliasSuggestion,
+} from "@/lib/api/model-aliases";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
 const modelAliasesKey = (appType: string) => ["modelAliases", appType] as const;
@@ -75,4 +79,19 @@ export function useHasModelAliases(appType: string, enabled = true) {
   return (data?.length ?? 0) > 0;
 }
 
-export type { ModelAlias };
+/**
+ * 从已有 `model_mapping` 归并出的建议。
+ *
+ * 按需触发（`enabled` 由调用方控制），因为要扫描该 app 下所有 provider 的
+ * settings_config，不适合每次进页面都跑。
+ */
+export function useModelAliasSuggestions(appType: string, enabled = false) {
+  return useQuery({
+    queryKey: ["modelAliasSuggestions", appType],
+    queryFn: () => modelAliasesApi.suggest(appType),
+    enabled: enabled && !!appType,
+    staleTime: 0,
+  });
+}
+
+export type { ModelAlias, ModelAliasSuggestion };

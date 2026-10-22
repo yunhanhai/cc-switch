@@ -76,14 +76,69 @@
          .map_err(|e| e.to_string())
  }
  
- /// 该 app 是否已配置任何模型别名。
- ///
- /// 前端用它决定是否展示「已启用模型别名路由」的提示。
- #[tauri::command]
- pub fn has_model_aliases(state: State<'_, AppState>, app_type: String) -> Result<bool, String> {
-     require_proxy_app(&app_type)?;
-     state
-         .db
-         .has_any_model_alias(&app_type)
-         .map_err(|e| e.to_string())
- }
+/// 该 app 是否已配置任何模型别名。
+///
+/// 前端用它决定是否展示「已启用模型别名路由」的提示。
+#[tauri::command]
+pub fn has_model_aliases(state: State<'_, AppState>, app_type: String) -> Result<bool, String> {
+    require_proxy_app(&app_type)?;
+    state
+        .db
+        .has_any_model_alias(&app_type)
+        .map_err(|e| e.to_string())
+}
+
+/// 一条归并建议（供前端展示「一键采纳」）。
+#[derive(serde::Serialize)]
+pub struct ModelAliasSuggestion {
+    pub alias: String,
+    /// (provider_id, target_model)
+    pub entries: Vec<(String, String)>,
+}
+
+/// 从各渠道已有的 `model_mapping` 归并出 alias 建议。
+///
+/// 只建议「同一个 source 出现在两个及以上渠道」的情况 —— 那是用户实际已在
+/// 用同一名字打不同渠道、但还没显式声明成一组。已配置过的 alias 会被过滤。
+#[tauri::command]
+pub fn suggest_model_aliases(
+    state: State<'_, AppState>,
+    app_type: String,
+) -> Result<Vec<ModelAliasSuggestion>, String> {
+    require_proxy_app(&app_type)?;
+
+    let providers = state
+        .db
+        .get_all_providers(&app_type)
+        .map_err(|e| e.to_string())?;
+    let pairs_by_provider: Vec<(String, Vec<(String, String)>)> = providers
+        .values()
+        .map(|provider| {
+            (
+                provider.id.clone(),
+                crate::proxy::model_mapper::provider_mapping_pairs(provider),
+            )
+        })
+        .filter(|(_, pairs)| !pairs.is_empty())
+        .collect();
+
+    let existing_aliases: Vec<String> = state
+        .db
+        .list_model_aliases(&app_type)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|item| item.alias)
+        .collect();
+
+    let suggestions = crate::proxy::model_alias::suggest_aliases_from_mappings(&pairs_by_provider);
+    let filtered =
+        crate::proxy::model_alias::filter_existing_aliases(suggestions, &existing_aliases);
+
+    Ok(filtered
+        .into_iter()
+        .map(|suggestion| ModelAliasSuggestion {
+            alias: suggestion.alias,
+            entries: suggestion.entries,
+        })
+        .collect())
+}

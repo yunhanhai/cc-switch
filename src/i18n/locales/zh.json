@@ -3419,6 +3419,11 @@
     "saved": "模型别名已保存",
     "saveFailed": "保存失败",
     "deleted": "已删除",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "scan": "从现有映射生成建议",
+    "scanning": "扫描中…",
+    "noSuggestions": "没有可归并的映射（需同一模型名出现在两个以上渠道）",
+    "suggestionsTitle": "发现 {{count}} 组可归并的模型",
+    "adopt": "采纳"
   }
 }

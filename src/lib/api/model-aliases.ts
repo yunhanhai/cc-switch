@@ -12,6 +12,12 @@ export interface ModelAlias {
   updatedAt: number;
 }
 
+/** 从已有 model_mapping 归并出的建议（同 source 出现在多个渠道时才有）。 */
+export interface ModelAliasSuggestion {
+  alias: string;
+  entries: Array<[string, string]>;
+}
+
 /** 一个逻辑模型及其在各渠道上的物理名（UI 编辑单元）。 */
 export interface ModelAliasGroup {
   alias: string;
@@ -70,5 +76,10 @@ export const modelAliasesApi = {
 
   async hasAny(appType: string): Promise<boolean> {
     return invoke("has_model_aliases", { appType });
+  },
+
+  /** 从各渠道已有的 model_mapping 归并出建议；已配置的 alias 会被后端过滤。 */
+  async suggest(appType: string): Promise<ModelAliasSuggestion[]> {
+    return invoke("suggest_model_aliases", { appType });
   },
 };

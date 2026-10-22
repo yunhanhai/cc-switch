@@ -47,28 +47,89 @@
  ///
  /// 只有「该 app 有 alias 数据、但此渠道既没声明此 alias、也没有自有映射」
  /// 时才返回 `false`。
- pub fn provider_supports_alias(
-     index: &ModelAliasIndex,
-     alias: &str,
-     provider_id: &str,
-     has_own_mapping: bool,
- ) -> bool {
-     if index.is_empty() {
-         return true;
-     }
-     if matches!(
-         resolve_for_provider(index, alias, provider_id),
-         AliasResolution::Mapped(_)
-     ) {
-         return true;
-     }
-     // 没有 alias 声明但有自有映射：可能是通配规则，交给旧链路判定
-     has_own_mapping
+pub fn provider_supports_alias(
+    index: &ModelAliasIndex,
+    alias: &str,
+    provider_id: &str,
+    has_own_mapping: bool,
+) -> bool {
+    if index.is_empty() {
+        return true;
+    }
+    if matches!(
+        resolve_for_provider(index, alias, provider_id),
+        AliasResolution::Mapped(_)
+    ) {
+        return true;
+    }
+    // 没有 alias 声明但有自有映射：可能是通配规则，交给旧链路判定
+    has_own_mapping
+}
+
+ /// 归并建议：一个逻辑模型及其建议的渠道映射。
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub struct AliasSuggestion {
+     pub alias: String,
+     pub entries: Vec<(String, String)>,
  }
- 
- #[cfg(test)]
- mod tests {
-     use super::*;
+
+ /// 从各渠道已有的 `model_mapping` 归并出 alias 建议。
+ ///
+ /// 规则：同一个 `source`（客户端实际发送的模型名）出现在 **两个及以上** 渠道时，
+ /// 它就是天然的「逻辑模型」——用户已经在用同一个名字打不同渠道，只是还没把
+ /// 它们显式声明成一组。只有单渠道出现的 source 不生成建议：那只是该渠道私有
+ /// 的改名，归并成 alias 反而会限制它。
+ ///
+ /// `pairs_by_provider` 为 `(provider_id, [(source, target)])`。
+ ///
+ /// 通配符 source（含 `*`）一律跳过：它表达的是"兜底"而不是某个具体模型，
+ /// 归并成 alias 会把兜底规则变成精确匹配，语义被改变。
+ pub fn suggest_aliases_from_mappings(
+     pairs_by_provider: &[(String, Vec<(String, String)>)],
+ ) -> Vec<AliasSuggestion> {
+     // source -> [(provider_id, target)]
+     let mut by_source: std::collections::BTreeMap<String, Vec<(String, String)>> =
+         std::collections::BTreeMap::new();
+
+     for (provider_id, pairs) in pairs_by_provider {
+         for (source, target) in pairs {
+             if source.contains('*') {
+                 continue;
+             }
+             let entry = by_source
+                 .entry(source.clone())
+                 .or_default();
+             // 同一渠道内重复的 source 只保留第一条（与 apply_model_mapping 的
+             // "先配置的精确规则优先" 语义一致）
+             if !entry.iter().any(|(existing, _)| existing == provider_id) {
+                 entry.push((provider_id.clone(), target.clone()));
+             }
+         }
+     }
+
+     by_source
+         .into_iter()
+         .filter(|(_, entries)| entries.len() >= 2)
+         .map(|(alias, entries)| AliasSuggestion { alias, entries })
+         .collect()
+ }
+
+ /// 过滤掉用户已经配置过的 alias，避免重复建议。
+ pub fn filter_existing_aliases(
+     suggestions: Vec<AliasSuggestion>,
+     existing_aliases: &[String],
+ ) -> Vec<AliasSuggestion> {
+     let existing: std::collections::HashSet<&str> =
+         existing_aliases.iter().map(String::as_str).collect();
+     suggestions
+         .into_iter()
+         .filter(|suggestion| !existing.contains(suggestion.alias.as_str()))
+         .collect()
+ }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
  
      fn index_of(entries: &[(&str, &str, &str)]) -> ModelAliasIndex {
          entries
@@ -138,5 +199,93 @@
          // 渠道 B 没配 alias，但有自己的 model_mapping（可能是通配）→ 交给旧链路
          let index = index_of(&[("sonnet", "ch_a", "s-a")]);
          assert!(provider_supports_alias(&index, "sonnet", "ch_b", true));
+     }
+
+     fn pairs(entries: &[(&str, &[(&str, &str)])]) -> Vec<(String, Vec<(String, String)>)> {
+         entries
+             .iter()
+             .map(|(provider, rules)| {
+                 (
+                     provider.to_string(),
+                     rules
+                         .iter()
+                         .map(|(source, target)| (source.to_string(), target.to_string()))
+                         .collect(),
+                 )
+             })
+             .collect()
+     }
+
+     #[test]
+     fn suggestion_groups_source_shared_by_multiple_channels() {
+         let input = pairs(&[
+             (
+                 "ch_a",
+                 &[
+                     ("sonnet", "claude-sonnet-4-5-20250929"),
+                     ("only-a", "private-a"),
+                 ],
+             ),
+             (
+                 "ch_b",
+                 &[
+                     ("sonnet", "anthropic/claude-sonnet-4.5"),
+                     ("only-b", "private-b"),
+                 ],
+             ),
+         ]);
+
+         let suggestions = suggest_aliases_from_mappings(&input);
+         assert_eq!(suggestions.len(), 1, "只有 sonnet 出现在两个渠道");
+         assert_eq!(suggestions[0].alias, "sonnet");
+         assert_eq!(suggestions[0].entries.len(), 2);
+         assert_eq!(
+             suggestions[0].entries[0],
+             ("ch_a".to_string(), "claude-sonnet-4-5-20250929".to_string())
+         );
+         assert_eq!(
+             suggestions[0].entries[1],
+             ("ch_b".to_string(), "anthropic/claude-sonnet-4.5".to_string())
+         );
+     }
+
+     #[test]
+     fn suggestion_skips_single_channel_and_wildcards() {
+         let input = pairs(&[
+             ("ch_a", &[("solo", "x"), ("*", "fallback")]),
+             ("ch_b", &[("*", "other-fallback")]),
+         ]);
+         // solo 只在一个渠道；* 是通配兜底 —— 都不应生成建议
+         assert!(suggest_aliases_from_mappings(&input).is_empty());
+     }
+
+     #[test]
+     fn suggestion_dedups_repeated_source_within_one_channel() {
+         let input = pairs(&[
+             ("ch_a", &[("sonnet", "first"), ("sonnet", "second")]),
+             ("ch_b", &[("sonnet", "b-sonnet")]),
+         ]);
+         let suggestions = suggest_aliases_from_mappings(&input);
+         assert_eq!(suggestions.len(), 1);
+         assert_eq!(suggestions[0].entries.len(), 2, "同渠道重复只保留一条");
+         assert_eq!(
+             suggestions[0].entries[0],
+             ("ch_a".to_string(), "first".to_string()),
+             "保留先配置的那条"
+         );
+     }
+
+     #[test]
+     fn suggestion_filters_aliases_already_configured() {
+         let input = pairs(&[
+             ("ch_a", &[("sonnet", "a"), ("opus", "a-opus")]),
+             ("ch_b", &[("sonnet", "b"), ("opus", "b-opus")]),
+         ]);
+         let suggestions = suggest_aliases_from_mappings(&input);
+         assert_eq!(suggestions.len(), 2);
+
+         let remaining = filter_existing_aliases(suggestions, &["sonnet".to_string()]);
+         assert_eq!(remaining.len(), 1);
+         assert_eq!(remaining[0].alias, "opus");
      }
  }

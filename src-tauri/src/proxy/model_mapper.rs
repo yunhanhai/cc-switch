@@ -87,19 +87,32 @@ fn generic_mapping_rules(provider: &Provider) -> Vec<GenericModelMappingRule> {
         .collect()
 }
 
- /// 该 provider 是否具备"能解析任意模型名"的自有映射能力。
+/// 该 provider 是否具备"能解析任意模型名"的自有映射能力。
+///
+/// 供 model alias 选路过滤使用：一个没有 alias 声明的渠道，只要它有
+/// `model_mapping`（尤其是 `*` 通配）或 env 映射，就仍有可能正确处理该模型，
+/// 不应被过滤掉。
+///
+/// 注意这里判断的是"有没有能力"，不是"是否匹配某个具体模型"——
+/// 具体匹配由 `apply_model_mapping` 在转发阶段完成，选路阶段不必重复计算。
+pub fn provider_has_own_model_mapping(provider: &Provider) -> bool {
+    if !generic_mapping_rules(provider).is_empty() {
+        return true;
+    }
+    ModelMapping::from_provider(provider).has_mapping()
+}
+
+ /// 导出该 provider 显式配置的 `(source, target)` 映射对，供 model alias 归并建议使用。
  ///
- /// 供 model alias 选路过滤使用：一个没有 alias 声明的渠道，只要它有
- /// `model_mapping`（尤其是 `*` 通配）或 env 映射，就仍有可能正确处理该模型，
- /// 不应被过滤掉。
- ///
- /// 注意这里判断的是"有没有能力"，不是"是否匹配某个具体模型"——
- /// 具体匹配由 `apply_model_mapping` 在转发阶段完成，选路阶段不必重复计算。
- pub fn provider_has_own_model_mapping(provider: &Provider) -> bool {
-     if !generic_mapping_rules(provider).is_empty() {
-         return true;
-     }
-     ModelMapping::from_provider(provider).has_mapping()
+ /// 只返回 `model_mapping` 数组里的显式规则，不含 env 映射 —— env 的键是
+ /// "档位"（sonnet/opus/haiku）而非客户端实际发送的模型名，归并成 alias 后
+ /// 匹配不到真实请求，反而会误导用户。
+ pub fn provider_mapping_pairs(provider: &Provider) -> Vec<(String, String)> {
+     generic_mapping_rules(provider)
+         .into_iter()
+         .map(|rule| (rule.source.trim().to_string(), rule.target.trim().to_string()))
+         .filter(|(source, target)| !source.is_empty() && !target.is_empty())
+         .collect()
  }
 
 /// 模型映射配置
