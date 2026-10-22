@@ -1071,4 +1071,79 @@ mod tests {
         assert!(all_ids.contains(&"p1".to_string()));
         Ok(())
     }
+
+    /// 跨 app 隔离：四个代理应用各自的分组聚合与 failover 镜像互不串扰。
+    ///
+    /// 这是归属制最容易出错的边界 —— provider id 在不同 app 下可以重名
+    /// （`providers` 主键是 `(id, app_type)`），所以任何一处漏掉 `app_type`
+    /// 过滤，都会让 claude 的成员被写进 codex 的 `in_failover_queue`。
+    #[test]
+    fn test_cross_app_isolation_of_groups_and_failover_mirror() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let app_types = ["claude", "codex", "gemini", "grokbuild"];
+        // 刻意让四个 app 使用同名 provider id，暴露漏过滤 app_type 的实现
+        for app_type in app_types {
+            for id in ["shared_a", "shared_b"] {
+                db.save_provider(app_type, &provider(id, &format!("{app_type}-{id}")))?;
+            }
+        }
+
+        // 每个 app 建一个分组，成员分配不同：claude→a, codex→b, gemini→a, grokbuild→b
+        let mut group_ids = std::collections::HashMap::new();
+        for app_type in app_types {
+            let group = db.create_routing_group(app_type, "default", None)?;
+            let member = if matches!(app_type, "claude" | "gemini") {
+                "shared_a"
+            } else {
+                "shared_b"
+            };
+            db.set_routing_group_members(&group.id, &[member.to_string()])?;
+            group_ids.insert(app_type, group.id);
+        }
+
+        // 各 app 的聚合与镜像都只能看到自己的成员
+        for app_type in app_types {
+            let expected = if matches!(app_type, "claude" | "gemini") {
+                "shared_a"
+            } else {
+                "shared_b"
+            };
+            assert_eq!(
+                db.get_enabled_routing_group_provider_ids(app_type)?,
+                vec![expected.to_string()],
+                "[{app_type}] 聚合结果串扰"
+            );
+            let queue: Vec<String> = db
+                .get_failover_queue(app_type)?
+                .into_iter()
+                .map(|item| item.provider_id)
+                .collect();
+            assert_eq!(queue, vec![expected.to_string()], "[{app_type}] failover 镜像串扰");
+        }
+
+        // 禁用 claude 的分组：只有 claude 清空，其余 app 不受影响
+        let claude_group_id = group_ids["claude"].clone();
+        db.update_routing_group(&claude_group_id, None, Some(false), None)?;
+        assert!(
+            db.get_enabled_routing_group_provider_ids("claude")?.is_empty(),
+            "claude 禁用后聚合应为空"
+        );
+        assert!(db.get_failover_queue("claude")?.is_empty());
+        for app_type in ["codex", "gemini", "grokbuild"] {
+            assert_eq!(
+                db.get_enabled_routing_group_provider_ids(app_type)?.len(),
+                1,
+                "[{app_type}] 不应受 claude 禁用影响"
+            );
+            assert_eq!(db.get_failover_queue(app_type)?.len(), 1);
+        }
+
+        // 跨 app 重排必须被拒绝，且不得改动任何顺序
+        let codex_group_id = group_ids["codex"].clone();
+        let err = db
+            .reorder_routing_groups("claude", &[codex_group_id])
+            .unwrap_err();
+        assert!(err.to_string().contains("不属于"), "{err:?}");
+        Ok(())
+    }
 }
