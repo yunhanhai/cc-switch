@@ -4,7 +4,7 @@
  > 任一渠道失败时自动切到下一个渠道，并**自动换用该渠道的物理名**。
  > 对标 yetone/magpie 的「一堆渠道随意切换、同模型无缝」体验。
 
- **状态：已实现（P1–P4 全部完成）**
+ **状态：已实现（P1–P5 全部完成）**
 
  | 阶段 | 提交 | 内容 |
  | --- | --- | --- |
@@ -13,6 +13,7 @@
  | P2b | `7590560` | 转发阶段按当前渠道重映射模型名 |
  | P3 | `51bb23c` | Tauri 命令 + 编辑 UI + 四语文案 |
  | P4 | `2f15108` | 从现有 `model_mapping` 归并建议 |
+ | P5 | `f5709d8` | Gemini 退出 alias 路由（过滤与换名成对退化） |
 
  ## 1. 现状与缺口
 
@@ -165,7 +166,29 @@ let mapped_body = if claude_desktop {
 - **整组保存**（`set_model_alias_entries`）而非逐条增删：逐条保存会让中间状态
   （少一个渠道）短暂生效，而这段时间里的请求可能选到错误渠道。
 - 「从现有映射生成建议」按需扫描（不每次进页面都跑），见 §5.1。
- 
+
+### 2.6 安全边界：Gemini 不参与 alias 路由
+
+Gemini 的模型名不在请求体里，而在 URL 路径中
+（`/v1beta/models/<model>:generateContent`）。若让它参与 alias：
+
+- 选路阶段会按模型名筛掉渠道（`filter` 生效）
+- 转发阶段改的是 `body["model"]`，对路径无效（`rename` 不生效）
+
+结果是"渠道被换掉、模型名却没换"，比完全不做 alias 更糟。
+所以 `model_name_lives_in_body()`（`proxy/handler_context.rs`）对 Gemini
+返回 `false`，两处消费点同时退化：
+
+- `select_providers_for_model(app_type, None)` → 不过滤
+- `with_model_aliases` 不注入索引 → 转发走旧链路
+
+前端 `ModelAliasPanel` 用同名判据 `modelNameLivesInBody()` 同步禁用编辑
+（输入框、建议扫描、编辑/删除按钮全部 disabled），并显示一条黄色提示，
+避免用户"配了却完全不生效"。
+
+> **成对原则**：过滤与换名必须同时成立或同时不成立。将来若要让 Gemini
+> 参与，需要先实现 URL 路径中的模型名重写，再把两侧判据一起放开。
+
 ## 3. 实际改动清单
 
 | 文件 | 改动 |
@@ -181,7 +204,7 @@ let mapped_body = if claude_desktop {
 | `src/lib/api/model-aliases.ts` | API + `groupModelAliases` 聚合函数 |
 | `src/lib/query/model-aliases.ts` | 4 个 hooks |
 | `src/components/proxy/ModelAliasPanel.tsx` | 编辑 UI + 建议采纳 |
-| `src/i18n/locales/{zh,en,ja,zh-TW}.json` | `modelAliases.*` 20 个键 |
+| `src/i18n/locales/{zh,en,ja,zh-TW}.json` | `modelAliases.*` 21 个键 |
 | `src/components/proxy/ProxyPanel.tsx` | 挂载面板 |
 
 **调用点无需改动**：`handler_context` 的主路径改为传模型名，

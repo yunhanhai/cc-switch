@@ -22,6 +22,17 @@ import {
 import { groupModelAliases } from "@/lib/api/model-aliases";
 import type { ProxyAppId } from "@/config/appConfig";
 
+/**
+ * 该 app 的模型名是否位于请求体（`body["model"]`）里。
+ *
+ * **Gemini 例外**：模型名在 URL 路径中（`/v1beta/models/<model>:generateContent`），
+ * 转发时改 body 不生效。后端已把 Gemini 排除在 alias 路由之外（选路不过滤、
+ * 转发不注入索引），这里同步禁用编辑，避免用户配了却完全不生效。
+ *
+ * 与后端 `proxy::handler_context::model_name_lives_in_body` 必须保持一致。
+ */
+const modelNameLivesInBody = (appType: ProxyAppId) => appType !== "gemini";
+
 interface DraftEntry {
   providerId: string;
   targetModel: string;
@@ -34,6 +45,7 @@ interface DraftGroup {
 
 export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
   const { t } = useTranslation();
+  const editable = modelNameLivesInBody(appType);
   const { data: aliases = [], isLoading } = useModelAliases(appType);
   const { data: providersData } = useProvidersQuery(appType);
   const setEntries = useSetModelAliasEntries();
@@ -118,13 +130,22 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
         )}
       </div>
 
+      {!editable && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+          {t("modelAliases.geminiUnsupported", {
+            defaultValue:
+              "Gemini 的模型名在 URL 路径中，暂不支持模型别名路由；此处的配置不会生效",
+          })}
+        </p>
+      )}
+
       {/* 从现有 model_mapping 归并建议 */}
       <div className="flex items-center gap-2">
         <Button
           size="sm"
           variant="outline"
           className="h-7 text-xs"
-          disabled={isScanning}
+          disabled={isScanning || !editable}
           onClick={() => setScanEnabled(true)}
         >
           <Sparkles className="mr-1 h-3 w-3" />
@@ -197,11 +218,16 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
           value={createAlias}
           onChange={(event) => setCreateAlias(event.target.value)}
           className="h-8"
+          disabled={!editable}
           onKeyDown={(event) => {
             if (event.key === "Enter") beginCreate();
           }}
         />
-        <Button size="sm" disabled={!createAlias.trim()} onClick={beginCreate}>
+        <Button
+          size="sm"
+          disabled={!createAlias.trim() || !editable}
+          onClick={beginCreate}
+        >
           <Plus className="mr-1 h-3.5 w-3.5" />
           {t("common.add", { defaultValue: "添加" })}
         </Button>
@@ -238,6 +264,7 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
                     variant="ghost"
                     className="h-7 w-7"
                     title={t("common.edit", { defaultValue: "编辑" })}
+                    disabled={!editable}
                     onClick={() => beginEdit(group.alias, group.entries)}
                   >
                     <Pencil className="h-3.5 w-3.5" />
@@ -249,6 +276,7 @@ export function ModelAliasPanel({ appType }: { appType: ProxyAppId }) {
                     title={t("modelAliases.clearAlias", {
                       defaultValue: "删除该逻辑模型",
                     })}
+                    disabled={!editable}
                     onClick={() =>
                       setEntries.mutate({
                         appType,

@@ -3424,6 +3424,7 @@
     "scanning": "Scanning...",
     "noSuggestions": "Nothing to merge (a model name must appear on 2+ channels)",
     "suggestionsTitle": "{{count}} mergeable model group(s) found",
-    "adopt": "Adopt"
+    "adopt": "Adopt",
+    "geminiUnsupported": "Gemini puts the model name in the URL path, so model alias routing is not supported here; configuration on this page will have no effect"
   }
 }

@@ -3424,6 +3424,7 @@
     "scanning": "扫描中…",
     "noSuggestions": "没有可归并的映射（需同一模型名出现在两个以上渠道）",
     "suggestionsTitle": "发现 {{count}} 组可归并的模型",
-    "adopt": "采纳"
+    "adopt": "采纳",
+    "geminiUnsupported": "Gemini 的模型名在 URL 路径中，暂不支持模型别名路由；此处的配置不会生效"
   }
 }

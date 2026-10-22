@@ -3424,6 +3424,7 @@
     "scanning": "スキャン中…",
     "noSuggestions": "統合できるマッピングがありません（同じモデル名が 2 つ以上のチャネルに必要）",
     "suggestionsTitle": "{{count}} 件の統合可能なモデルを検出",
-    "adopt": "採用"
+    "adopt": "採用",
+    "geminiUnsupported": "Gemini はモデル名を URL パスに含めるため、モデルエイリアスルーティングには未対応です。この画面の設定は反映されません"
   }
 }
