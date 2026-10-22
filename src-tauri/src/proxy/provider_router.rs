@@ -50,6 +50,24 @@ impl ProviderRouter {
     /// - 故障转移关闭时：仅返回当前供应商
     /// - 故障转移开启时：仅使用故障转移队列，按队列顺序依次尝试（P1 → P2 → ...）
     pub async fn select_providers(&self, app_type: &str) -> Result<Vec<Provider>, AppError> {
+        self.select_providers_for_model(app_type, None).await
+    }
+
+    /// 选择可用的供应商，并按请求模型过滤候选渠道（model alias 路由）。
+    ///
+    /// `request_model` 为 `None` 时行为与 [`select_providers`] 完全一致。
+    ///
+    /// 过滤只发生在**故障转移链**上，且遵循两条保守原则：
+    /// 1. 该 app 完全没有 alias 数据时不过滤（安全阀，避免升级后全部不可用）；
+    /// 2. 有自有 `model_mapping` 的渠道即使没声明 alias 也保留（可能是通配规则）。
+    ///
+    /// 过滤后若一个渠道都不剩，**回退到未过滤的完整链**——宁可让上游返回
+    /// model_not_found（用户能看懂），也不要在本地静默返回 NoAvailableProvider。
+    pub async fn select_providers_for_model(
+        &self,
+        app_type: &str,
+        request_model: Option<&str>,
+    ) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
@@ -129,6 +147,32 @@ impl ProviderRouter {
             // 冷却中的 provider 不剔除 —— 它只是不该当首选。
             let mut available: Vec<(Provider, u64)> = Vec::with_capacity(ordered_ids.len());
 
+            // model alias 过滤上下文：只在调用方给了模型名、且该 app 配了 alias 时
+            // 才加载（`model_alias_index` 为空即安全阀生效，后续不过滤）。
+            // 读取失败按"没有 alias"处理，绝不能因新功能让选路整体失败。
+            let alias_index = match request_model {
+                Some(model) if !model.trim().is_empty() => {
+                    match self.db.model_alias_index(app_type) {
+                        Ok(index) => {
+                            if index.is_empty() {
+                                None
+                            } else {
+                                log::debug!(
+                                    "[{app_type}] model alias 生效：{} 条映射，请求模型 {model}",
+                                    index.len()
+                                );
+                                Some(index)
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("[{app_type}] 读取 model alias 失败，跳过模型过滤: {e}");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+
             for provider_id in ordered_ids {
                 let Some(provider) = all_providers.get(&provider_id).cloned() else {
                     continue;
@@ -137,6 +181,26 @@ impl ProviderRouter {
                     continue;
                 }
                 total_providers += 1;
+
+                // 模型级过滤：该渠道既不认识这个 alias，也没有自有映射时跳过。
+                // 被跳过的渠道不参与熔断统计（`total_providers` 已累加，但
+                // `circuit_open_count` 不会增加），因此不会误报"全部熔断"。
+                if let (Some(model), Some(index)) = (request_model, alias_index.as_ref()) {
+                    let has_own_mapping =
+                        crate::proxy::model_mapper::provider_has_own_model_mapping(&provider);
+                    if !crate::proxy::model_alias::provider_supports_alias(
+                        index,
+                        model,
+                        &provider.id,
+                        has_own_mapping,
+                    ) {
+                        log::debug!(
+                            "[{app_type}] 跳过渠道 {}：未声明模型 {model} 且无自有映射",
+                            provider.name
+                        );
+                        continue;
+                    }
+                }
 
                 let circuit_key = format!("{app_type}:{}", provider.id);
                 let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
@@ -149,6 +213,45 @@ impl ProviderRouter {
                     available.push((provider, cooldown_secs));
                 } else {
                     circuit_open_count += 1;
+                }
+            }
+
+            // 安全兜底：模型过滤把渠道全滤掉了，说明 alias 配置与当前渠道不匹配。
+            // 此时回退到"不按模型过滤"的完整链，让上游返回真实的 model_not_found，
+            // 而不是在本地静默报 NoAvailableProvider（用户无法据此排查）。
+            if available.is_empty() && alias_index.is_some() {
+                log::warn!(
+                    "[{app_type}] model alias 过滤后无可用渠道，回退到完整故障转移链（请检查 alias 配置）"
+                );
+                for provider_id in self
+                    .db
+                    .get_enabled_routing_group_provider_ids(app_type)?
+                    .into_iter()
+                    .chain(
+                        self.db
+                            .get_failover_queue(app_type)?
+                            .into_iter()
+                            .map(|item| item.provider_id),
+                    )
+                {
+                    let Some(provider) = all_providers.get(&provider_id).cloned() else {
+                        continue;
+                    };
+                    if !provider_supports_failover(app_type, &provider) {
+                        continue;
+                    }
+                    if available.iter().any(|(existing, _)| existing.id == provider.id) {
+                        continue;
+                    }
+                    let circuit_key = format!("{app_type}:{}", provider.id);
+                    let breaker = self.get_or_create_circuit_breaker(&circuit_key).await;
+                    if breaker.is_available().await {
+                        let cooldown_secs = self
+                            .rate_limit_cooldown
+                            .remaining_secs(app_type, &provider.id)
+                            .await;
+                        available.push((provider, cooldown_secs));
+                    }
                 }
             }
 
@@ -915,6 +1018,143 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["fallback"]
         );
+    }
+
+    /// 无 alias 配置时，传入模型名不得改变选路结果（安全阀）。
+    #[tokio::test]
+    #[serial]
+    async fn select_providers_for_model_without_aliases_is_unchanged() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        for id in ["a", "b"] {
+            db.save_provider(
+                "claude",
+                &Provider::with_id(id.to_string(), id.to_string(), json!({}), None),
+            )
+            .unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let router = ProviderRouter::new(db);
+        let without_model = router.select_providers("claude").await.unwrap();
+        let with_model = router
+            .select_providers_for_model("claude", Some("claude-sonnet-4-5"))
+            .await
+            .unwrap();
+        assert_eq!(
+            with_model.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            without_model.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            "无 alias 时模型过滤必须不生效"
+        );
+    }
+
+    /// 配了 alias 后，未声明该模型的渠道应被跳过。
+    #[tokio::test]
+    #[serial]
+    async fn select_providers_for_model_skips_undeclared_channels() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        for id in ["a", "b", "c"] {
+            db.save_provider(
+                "claude",
+                &Provider::with_id(id.to_string(), id.to_string(), json!({}), None),
+            )
+            .unwrap();
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        // a 与 c 声明了 sonnet，b 没有（也没有自有映射）
+        db.upsert_model_alias("claude", "sonnet", "a", "a-sonnet", None, None)
+            .unwrap();
+        db.upsert_model_alias("claude", "sonnet", "c", "c-sonnet", None, None)
+            .unwrap();
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let providers = ProviderRouter::new(db)
+            .select_providers_for_model("claude", Some("sonnet"))
+            .await
+            .unwrap();
+        assert_eq!(
+            providers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "c"],
+            "未声明 sonnet 的渠道 b 应被跳过"
+        );
+    }
+
+    /// 有自有 model_mapping 的渠道即使没声明 alias 也应保留。
+    #[tokio::test]
+    #[serial]
+    async fn select_providers_for_model_keeps_channels_with_own_mapping() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.save_provider(
+            "claude",
+            &Provider::with_id("a".to_string(), "a".to_string(), json!({}), None),
+        )
+        .unwrap();
+        // b 没有 alias，但有通配 model_mapping
+        db.save_provider(
+            "claude",
+            &Provider::with_id(
+                "b".to_string(),
+                "b".to_string(),
+                json!({"model_mapping": [{"source": "*", "target": "fallback-model"}]}),
+                None,
+            ),
+        )
+        .unwrap();
+        for id in ["a", "b"] {
+            db.add_to_failover_queue("claude", id).unwrap();
+        }
+        db.upsert_model_alias("claude", "sonnet", "a", "a-sonnet", None, None)
+            .unwrap();
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let providers = ProviderRouter::new(db)
+            .select_providers_for_model("claude", Some("sonnet"))
+            .await
+            .unwrap();
+        assert_eq!(
+            providers.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"],
+            "有自有映射的渠道不应被过滤"
+        );
+    }
+
+    /// 过滤后无渠道时回退到完整链，而不是报 NoProvidersConfigured。
+    #[tokio::test]
+    #[serial]
+    async fn select_providers_for_model_falls_back_when_everything_filtered() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        db.save_provider(
+            "claude",
+            &Provider::with_id("a".to_string(), "a".to_string(), json!({}), None),
+        )
+        .unwrap();
+        db.add_to_failover_queue("claude", "a").unwrap();
+        // 只为 opus 配 alias；请求 sonnet 时所有渠道都被滤掉
+        db.upsert_model_alias("claude", "opus", "a", "a-opus", None, None)
+            .unwrap();
+
+        let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+        config.auto_failover_enabled = true;
+        db.update_proxy_config_for_app(config).await.unwrap();
+
+        let providers = ProviderRouter::new(db)
+            .select_providers_for_model("claude", Some("sonnet"))
+            .await
+            .expect("应回退到完整链而不是报错");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "a");
     }
 
     #[tokio::test]

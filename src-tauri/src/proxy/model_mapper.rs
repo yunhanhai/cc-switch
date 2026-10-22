@@ -87,6 +87,21 @@ fn generic_mapping_rules(provider: &Provider) -> Vec<GenericModelMappingRule> {
         .collect()
 }
 
+ /// 该 provider 是否具备"能解析任意模型名"的自有映射能力。
+ ///
+ /// 供 model alias 选路过滤使用：一个没有 alias 声明的渠道，只要它有
+ /// `model_mapping`（尤其是 `*` 通配）或 env 映射，就仍有可能正确处理该模型，
+ /// 不应被过滤掉。
+ ///
+ /// 注意这里判断的是"有没有能力"，不是"是否匹配某个具体模型"——
+ /// 具体匹配由 `apply_model_mapping` 在转发阶段完成，选路阶段不必重复计算。
+ pub fn provider_has_own_model_mapping(provider: &Provider) -> bool {
+     if !generic_mapping_rules(provider).is_empty() {
+         return true;
+     }
+     ModelMapping::from_provider(provider).has_mapping()
+ }
+
 /// 模型映射配置
 pub struct ModelMapping {
     pub haiku_model: Option<String>,

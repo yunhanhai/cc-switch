@@ -43,7 +43,6 @@ pub(crate) use dao::proxy::{
 pub use dao::FailoverEvent;
 pub use dao::FailoverQueueItem;
 pub use dao::LatestStreamCheck;
-pub use dao::ModelAlias;
 pub use dao::Profile;
 pub use dao::RoutingGroup;
 pub use dao::RoutingGroupWithMembers;

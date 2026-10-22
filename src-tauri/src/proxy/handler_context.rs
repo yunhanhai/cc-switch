@@ -133,7 +133,9 @@ impl RequestContext {
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         let providers = state
             .provider_router
-            .select_providers(app_type_str)
+            // 传入请求模型，让 model alias 能在选路阶段跳过不认识该模型的渠道。
+            // 没有配 alias 时该方法等价于 select_providers（安全阀）。
+            .select_providers_for_model(app_type_str, Some(request_model.as_str()))
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
