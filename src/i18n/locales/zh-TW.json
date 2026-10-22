@@ -3404,5 +3404,22 @@
     "dragStartHint": "開始拖曳 {{id}}",
     "dragEndHint": "已將 {{activeId}} 移動至 {{overId}} 位置",
     "dragCancelHint": "拖曳已取消"
+  },
+  "modelAliases": {
+    "title": "模型別名",
+    "hint": "同一個邏輯模型在不同供應商叫法不同時，設定這裡即可跨供應商無縫切換",
+    "active": "已啟用",
+    "aliasPlaceholder": "邏輯模型名，如 sonnet",
+    "empty": "暫無設定。新增一個邏輯模型，並為每個供應商填入它在該供應商的真實模型名",
+    "channelCount": "{{count}} 個供應商",
+    "pickChannel": "選擇供應商",
+    "targetPlaceholder": "該供應商的真實模型名",
+    "addChannel": "新增供應商",
+    "removeChannel": "移除該供應商",
+    "clearAlias": "刪除該邏輯模型",
+    "saved": "模型別名已儲存",
+    "saveFailed": "儲存失敗",
+    "deleted": "已刪除",
+    "deleteFailed": "刪除失敗"
   }
 }

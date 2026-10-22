@@ -3403,5 +3403,22 @@
     "dragStartHint": "Started dragging {{id}}",
     "dragEndHint": "Moved {{activeId}} to {{overId}}",
     "dragCancelHint": "Drag cancelled"
+  },
+  "modelAliases": {
+    "title": "Model aliases",
+    "hint": "When the same logical model has different names per channel, configure it here for seamless cross-channel switching",
+    "active": "Active",
+    "aliasPlaceholder": "Logical model name, e.g. sonnet",
+    "empty": "Nothing configured yet. Add a logical model and fill in its real name for each channel",
+    "channelCount": "{{count}} channels",
+    "pickChannel": "Pick a channel",
+    "targetPlaceholder": "Real model name on this channel",
+    "addChannel": "Add channel",
+    "removeChannel": "Remove this channel",
+    "clearAlias": "Delete this logical model",
+    "saved": "Model aliases saved",
+    "saveFailed": "Save failed",
+    "deleted": "Deleted",
+    "deleteFailed": "Delete failed"
   }
 }

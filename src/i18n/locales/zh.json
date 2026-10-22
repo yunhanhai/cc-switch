@@ -3403,5 +3403,22 @@
     "dragStartHint": "开始拖拽 {{id}}",
     "dragEndHint": "已将 {{activeId}} 移动到 {{overId}} 位置",
     "dragCancelHint": "拖拽已取消"
+  },
+  "modelAliases": {
+    "title": "模型别名",
+    "hint": "同一个逻辑模型在不同渠道叫法不同时，配置这里即可跨渠道无缝切换",
+    "active": "已启用",
+    "aliasPlaceholder": "逻辑模型名，如 sonnet",
+    "empty": "暂无配置。添加一个逻辑模型，并为每个渠道填入它在该渠道的真实模型名",
+    "channelCount": "{{count}} 个渠道",
+    "pickChannel": "选择渠道",
+    "targetPlaceholder": "该渠道的真实模型名",
+    "addChannel": "添加渠道",
+    "removeChannel": "移除该渠道",
+    "clearAlias": "删除该逻辑模型",
+    "saved": "模型别名已保存",
+    "saveFailed": "保存失败",
+    "deleted": "已删除",
+    "deleteFailed": "删除失败"
   }
 }

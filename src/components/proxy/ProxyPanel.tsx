@@ -17,6 +17,7 @@ import { ToggleRow } from "@/components/ui/toggle-row";
 import { toast } from "sonner";
 import { ResilienceSummaryBar } from "@/components/proxy/ResilienceSummaryBar";
 import { RoutingGroupsPanel } from "@/components/proxy/RoutingGroupsPanel";
+import { ModelAliasPanel } from "@/components/proxy/ModelAliasPanel";
 import {
   useProxyStatusQuery,
   useProxyTakeoverStatus,
@@ -467,6 +468,10 @@ export function ProxyPanel({
                         handleRouteSizeChange(appType as ProxyAppId, size)
                       }
                     />
+                  </div>
+                  {/* 模型别名：同模型跨渠道无缝切换 */}
+                  <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+                    <ModelAliasPanel appType={appType} />
                   </div>
                 </div>
               ))}

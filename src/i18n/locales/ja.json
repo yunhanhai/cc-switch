@@ -3403,5 +3403,22 @@
     "dragStartHint": "{{id}} のドラッグを開始しました",
     "dragEndHint": "{{activeId}} を {{overId}} に移動しました",
     "dragCancelHint": "ドラッグをキャンセル"
+  },
+  "modelAliases": {
+    "title": "モデルエイリアス",
+    "hint": "同じ論理モデルがチャネルごとに異なる名前を持つ場合、ここで設定するとチャネル間をシームレスに切り替えられます",
+    "active": "有効",
+    "aliasPlaceholder": "論理モデル名（例: sonnet）",
+    "empty": "設定がありません。論理モデルを追加し、各チャネルでの実際のモデル名を入力してください",
+    "channelCount": "{{count}} チャネル",
+    "pickChannel": "チャネルを選択",
+    "targetPlaceholder": "このチャネルでの実際のモデル名",
+    "addChannel": "チャネルを追加",
+    "removeChannel": "このチャネルを削除",
+    "clearAlias": "この論理モデルを削除",
+    "saved": "モデルエイリアスを保存しました",
+    "saveFailed": "保存に失敗しました",
+    "deleted": "削除しました",
+    "deleteFailed": "削除に失敗しました"
   }
 }

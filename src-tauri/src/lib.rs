@@ -1606,6 +1606,12 @@ pub fn run() {
             commands::remove_routing_group_member,
             commands::reorder_routing_groups,
             commands::reorder_routing_group_members,
+            // Model Alias：同模型跨渠道无缝切换
+            commands::list_model_aliases,
+            commands::set_model_alias_entries,
+            commands::upsert_model_alias,
+            commands::delete_model_alias,
+            commands::has_model_aliases,
             // Dynamic model catalog (Magpie parity: Real model lists + models.dev + cache)
             commands::get_model_catalog,
             commands::refresh_model_catalog,
