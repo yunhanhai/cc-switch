@@ -225,6 +225,19 @@ impl RequestContext {
             0
         };
 
+        // 读一次 model alias 索引并注入 forwarder：转发阶段按当前渠道解析物理名。
+        // 读取失败或无配置时注入空索引，forwarder 会走原有映射链路（行为不变）。
+        let model_alias_index = state
+            .db
+            .model_alias_index(self.app_type_str)
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "[{}] 读取 model alias 失败，本次请求不使用 alias: {e}",
+                    self.tag
+                );
+                std::collections::HashMap::new()
+            });
+
         RequestForwarder::new(
             state.provider_router.clone(),
             non_streaming_timeout,
@@ -246,6 +259,7 @@ impl RequestContext {
             self.app_config.rate_limit_retry_enabled,
             self.app_config.rate_limit_max_wait_secs as u64,
         )
+        .with_model_aliases(model_alias_index, self.app_type_str)
     }
 
     /// 获取 Provider 列表（用于故障转移）

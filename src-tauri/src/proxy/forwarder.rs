@@ -192,6 +192,13 @@ pub struct RequestForwarder {
     rate_limit_retry_enabled: bool,
     /// 429 等待重试的最长等待时间（秒）。超过则不等待、走故障转移。
     rate_limit_max_wait_secs: u64,
+    /// model alias 索引（alias, provider_id) -> 该渠道的物理模型名。
+    ///
+    /// 由 `RequestContext::create_forwarder` 在请求入口一次性读入，转发时在内存里查。
+    /// `None` 表示该 app 没有 alias 配置（安全阀：行为与引入此功能前完全一致）。
+    model_alias_index: Option<super::model_alias::ModelAliasIndex>,
+    /// 本请求的 app_type 字符串，用于日志与 alias 解析
+    model_alias_app_type: &'static str,
 }
 
 impl RequestForwarder {
@@ -286,6 +293,48 @@ impl RequestForwarder {
             max_attempts,
             rate_limit_retry_enabled,
             rate_limit_max_wait_secs,
+            // 默认不启用 model alias：由请求入口按需注入（见 create_forwarder）。
+            // 这样所有既有构造点（含测试）无需改动，行为与引入前一致。
+            model_alias_index: None,
+            model_alias_app_type: "",
+        }
+    }
+
+    /// 注入 model alias 索引（同模型跨渠道切换）。
+    ///
+    /// 由 `RequestContext::create_forwarder` 在请求入口调用；索引为空时
+    /// 等价于未启用，`resolve_upstream_model` 会直接走旧映射链路。
+    pub fn with_model_aliases(
+        mut self,
+        index: super::model_alias::ModelAliasIndex,
+        app_type: &'static str,
+    ) -> Self {
+        if index.is_empty() {
+            return self;
+        }
+        self.model_alias_index = Some(index);
+        self.model_alias_app_type = app_type;
+        self
+    }
+
+    /// 解析某渠道上该逻辑模型应使用的物理名。
+    ///
+    /// 优先级：alias 声明 > 交由调用方走旧映射链路。
+    /// 返回 `Some` 时调用方应直接替换 `body["model"]`。
+    fn resolve_alias_model(&self, provider: &Provider, requested_model: &str) -> Option<String> {
+        let index = self.model_alias_index.as_ref()?;
+        match super::model_alias::resolve_for_provider(index, requested_model, &provider.id) {
+            super::model_alias::AliasResolution::Mapped(target) => {
+                log::debug!(
+                    "[{}] model alias: {} → {} (渠道 {})",
+                    self.model_alias_app_type,
+                    requested_model,
+                    target,
+                    provider.name
+                );
+                Some(target)
+            }
+            super::model_alias::AliasResolution::NotDeclared => None,
         }
     }
 
@@ -1437,9 +1486,25 @@ impl RequestForwarder {
         // 应用模型映射（独立于格式转换）
         // Claude Desktop proxy 模式必须先把 Desktop 可见的 claude-* route
         // 映射成真实上游模型名，并且未知 route 要直接报错，不能使用默认模型兜底。
+        //
+        // model alias 优先级最高：它表达的是「这个逻辑模型在当前渠道叫什么」，
+        // 比渠道私有的 model_mapping 更权威。未声明时（NotDeclared）返回 None，
+        // 完整回落到下面的既有链路，因此没有 alias 配置的行为完全不变。
+        //
+        // 注意：`provider` 是本次尝试的渠道（外层 for provider in providers），
+        // 所以换渠道重试时会自动用新渠道的物理名 —— 这正是"模型名跟着渠道走"。
+        let alias_resolved = body
+            .get("model")
+            .and_then(Value::as_str)
+            .and_then(|requested| self.resolve_alias_model(provider, requested));
+
         let mapped_body = if matches!(app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
+        } else if let Some(target) = alias_resolved {
+            let mut aliased = body.clone();
+            aliased["model"] = Value::String(target);
+            aliased
         } else {
             let (mapped_body, _original_model, _mapped_model) =
                 super::model_mapper::apply_model_mapping(body.clone(), provider);
@@ -4103,6 +4168,8 @@ mod tests {
             max_attempts: 1,
             rate_limit_retry_enabled: false,
             rate_limit_max_wait_secs: 120,
+            model_alias_index: None,
+            model_alias_app_type: "",
         }
     }
 
@@ -5305,6 +5372,50 @@ mod tests {
         fwd.rate_limit_retry_enabled = enabled;
         fwd.rate_limit_max_wait_secs = max_wait_secs;
         fwd
+    }
+
+    fn provider_for_alias(id: &str) -> Provider {
+        Provider::with_id(id.to_string(), id.to_string(), serde_json::json!({}), None)
+    }
+
+    #[test]
+    fn alias_resolves_per_channel_so_retry_switches_model_name() {
+        let index: super::super::model_alias::ModelAliasIndex = [
+            (
+                ("sonnet".to_string(), "ch_a".to_string()),
+                "claude-sonnet-4-5-20250929".to_string(),
+            ),
+            (
+                ("sonnet".to_string(), "ch_b".to_string()),
+                "anthropic/claude-sonnet-4.5".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1))
+            .with_model_aliases(index, "claude");
+
+        // 同一个逻辑模型在两个渠道解析出不同物理名 —— 这是跨渠道切换的核心
+        assert_eq!(
+            fwd.resolve_alias_model(&provider_for_alias("ch_a"), "sonnet"),
+            Some("claude-sonnet-4-5-20250929".to_string())
+        );
+        assert_eq!(
+            fwd.resolve_alias_model(&provider_for_alias("ch_b"), "sonnet"),
+            Some("anthropic/claude-sonnet-4.5".to_string())
+        );
+        // 未声明的渠道返回 None，调用方回落到旧映射链路
+        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_c"), "sonnet"), None);
+        // 未声明的逻辑模型同样回落
+        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_a"), "opus"), None);
+    }
+
+    #[test]
+    fn empty_alias_index_disables_resolution() {
+        // 安全阀：空索引等价于未启用，绝不能把模型名改坏
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1))
+            .with_model_aliases(std::collections::HashMap::new(), "claude");
+        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_a"), "sonnet"), None);
     }
 
     #[test]
