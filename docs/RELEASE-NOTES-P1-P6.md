@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `299b3b04`。
-> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2822 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `9d576b07`。
+> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2823 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -32,6 +32,8 @@
  | — | `a5bd6a29` | 对齐发版说明至 `ba34c90`；记录 bundle `clone` 验证（`fetch --unshallow` 修复浅克隆） |
  | — | `b5ba7dc5` | 补 Gemini 选路纠正端到端测试（3 用例，两段式选路/未知模型保链/非 Gemini no-op） |
  | — | `299b3b04` | 补 Gemini 路径重写决策测试（3 用例）并合并 P6 重复注释 |
+ | — | `0cfd60e9` | 发版说明同步至 `299b3b04`，新增 P1–P6 覆盖矩阵 |
+ | — | `9d576b07` | **修复**：Gemini 选路纠正改为不可失败（原返回 `Err` + `?` 会把可服务请求打成 500），并补对应测试 |
  
  ## 行为与兼容
  
@@ -39,10 +41,13 @@
  - **优先级**：`alias 声明 > 自有 model_mapping（含 * 通配）> env 映射 > 原样`；存量配置零迁移。
  - **回滚**：`select_providers(..., None)` 等价旧行为；删表不影响既有表。
  - **观测**：跳过渠道打 `跳过渠道 X：未声明模型 M`（debug）；命中打 `model alias: alias → target (渠道 Y)`。
+ - **Gemini 两段式选路**：`new()` 先按 body 选路（Gemini 此时不过滤），URI 解析后由
+   `correct_providers_for_gemini_model` 按真实模型收窄。该纠正**不可失败**：
+   任何异常只记 `warn` 并保留原链，绝不把可服务请求打成 500（见 `9d576b07`）。
  
-## 交付件
+ ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-299b3b04/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-9d576b07/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
@@ -50,14 +55,14 @@
 
  ## 测试说明
 
-- 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
+ - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
  - **P1–P6 覆盖矩阵**（P6 的「过滤」与「换名」两半均有端到端测试）：
 
   | 环节 | 位置 | 用例数 | 关键断言 |
   | --- | --- | --- | --- |
   | 纯函数解析 | `proxy::model_alias` | 11 | 命中/未声明/空白 target/空索引安全阀/归并规则与过滤 |
   | 选路过滤 | `proxy::provider_router` | 3 | 无配置不过滤、跳过未声明渠道、有自有映射保留、全滤回退 |
-  | Gemini 选路纠正 | `proxy::handler_context::tests::gemini_correction` | 3 | 两段式筛选、未知模型保链、非 Gemini no-op |
+  | Gemini 选路纠正 | `proxy::handler_context::tests::gemini_correction` | 4 | 两段式筛选、未知模型保链、非 Gemini no-op、纠错失败仍保链（不 500） |
   | 路径重写（纯函数） | `proxy::handler_context` | 4 | 保留 `:action`/`?query`、list 端点返回 `None` |
   | 路径重写（转发决策） | `proxy::forwarder` | 3 | 命中改写、未命中不动、仅 Gemini 生效 |
   | 别名聚合（前端） | `tests/lib/api/modelAliases.group.test.ts` | 4 | 分组、组内渠道序、别名排序、字段投影 |
