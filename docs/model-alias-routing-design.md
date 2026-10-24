@@ -266,11 +266,18 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 6. **Claude + `gemini_native` 格式（已审查，无需改动）**：
    `gemini_native` 是 Claude app 的一等 `api_format` 选项
    （见 `ClaudeFormFields` 的下拉项与 `claudeProviderPresets`）。
-   该路径的模型名虽然最终出现在 URL 里，但**来源是 body**：
-   `rewrite_claude_transform_endpoint` 用 `transform_gemini::extract_gemini_model(&mapped_body)`
-   拼出 `/v1beta/models/{model}:generateContent`，而 `mapped_body` 在此前
-   已由 `resolve_alias_model` 按当前渠道重映射。
-   因此「过滤」（Claude 走 `body["model"]`）与「换名」天然成对，
-   P6 的 `matches!(app_type, AppType::Gemini)` 守卫是**有意为之**——
-   若放开该守卫，反而会对同一次请求做第二次换名。
+  该路径的模型名虽然最终出现在 URL 里，但**来源是 body**：
+  `rewrite_claude_transform_endpoint` 用 `transform_gemini::extract_gemini_model(&mapped_body)`
+  拼出 `/v1beta/models/{model}:generateContent`，而 `mapped_body` 在此前
+  已由 `resolve_alias_model` 按当前渠道重映射。
+  因此「过滤」（Claude 走 `body["model"]`）与「换名」天然成对，
+  P6 的 `matches!(app_type, AppType::Gemini)` 守卫是**有意为之**——
+  若放开该守卫，反而会对同一次请求做第二次换名。
+
+7. **连通性检测与 alias 无关（已审查，无需改动）**：
+   `services/stream_check.rs` 的语义是"只探 `base_url` 可达性"——
+   GET 一次 base_url，收到任意 HTTP 响应即算可达，**不发真实模型请求**
+   （`model_used` 恒为空），且**绝不触碰故障转移熔断器**（见该文件头设计说明）。
+   因此它既不需要 alias 换名，也不会因 alias 的选路过滤而误判：
+   "可达性"与"模型名是否正确"是两件事，后者由真实流量的熔断器回答。
  
