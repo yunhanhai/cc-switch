@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
- > 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `4071f39`。
- > 状态：P1–P6 全部完成，`cargo check / 2816 passed / typecheck / format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `349f00f`。
+> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2816 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -26,6 +26,8 @@
  | — | `ad555ff` | 文档补齐 P6 哈希 |
  | — | `640dd00` | 清理 `geminiUnsupported` 四语死键 |
  | — | `4071f39` | 修正文档 20 键一致 |
+ | — | `44034d1` | 落盘本草稿 `docs/RELEASE-NOTES-P1-P6.md` |
+ | — | `349f00f` | 补 `groupModelAliases` 前端单测（4 用例，面板渠道行序/排序/字段投影） |
  
  ## 行为与兼容
  
@@ -35,10 +37,14 @@
  - **观测**：跳过渠道打 `跳过渠道 X：未声明模型 M`（debug）；命中打 `model alias: alias → target (渠道 Y)`。
  
  ## 交付件
- 
- - 主交付：`D:\dev-cache\cc-switch-patches-4071f39/`（`v3.20.1..HEAD` 共 58 个 patch，其中 P1–P6 10 个，`git am` 可靠还原）
- - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，`verify` 通过；`clone` 因本仓库浅历史/缺祖先受限，不影响主交付）
+
+ - 主交付：`D:\dev-cache\cc-switch-patches-349f00f/`（`v3.20.1..HEAD` 共 60 个 patch，其中 P1–P6 及收尾 12 个，`git am` 可靠还原）
+ - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，`verify` 通过，`HEAD 349f00f`；`clone` 因本仓库浅历史/缺祖先受限，不影响主交付）
  - 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
+
+ ## 测试说明
+
+ - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
  
  ## 下一步
  
