@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `9d576b07`。
-> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2823 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `2fdbdf9f`。
+> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2827 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -34,6 +34,8 @@
  | — | `299b3b04` | 补 Gemini 路径重写决策测试（3 用例）并合并 P6 重复注释 |
  | — | `0cfd60e9` | 发版说明同步至 `299b3b04`，新增 P1–P6 覆盖矩阵 |
  | — | `9d576b07` | **修复**：Gemini 选路纠正改为不可失败（原返回 `Err` + `?` 会把可服务请求打成 500），并补对应测试 |
+ | — | `39304a12` | 记录已核实的 Gemini full-URL 路径重写缺口与修法方向 |
+ | — | `2fdbdf9f` | **修复**：full-URL 模式补齐 Gemini 路径别名（三重守卫），使「过滤与换名成对」覆盖全部 URL 组装分支 |
  
  ## 行为与兼容
  
@@ -44,10 +46,13 @@
  - **Gemini 两段式选路**：`new()` 先按 body 选路（Gemini 此时不过滤），URI 解析后由
    `correct_providers_for_gemini_model` 按真实模型收窄。该纠正**不可失败**：
    任何异常只记 `warn` 并保留原链，绝不把可服务请求打成 500（见 `9d576b07`）。
+ - **Gemini full-URL 渠道**：`is_full_url` 模式下 URL 会覆盖 endpoint，因此路径别名
+   在 `rewrite_gemini_full_url_for_alias` 中补做，三重守卫（命中 alias、URL 含
+   `models/<id>` 段、该段仍是本次逻辑模型）；任一不满足即保持原 URL（见 `2fdbdf9f`）。
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-9d576b07/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-2fdbdf9f/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
@@ -65,9 +70,10 @@
   | Gemini 选路纠正 | `proxy::handler_context::tests::gemini_correction` | 4 | 两段式筛选、未知模型保链、非 Gemini no-op、纠错失败仍保链（不 500） |
   | 路径重写（纯函数） | `proxy::handler_context` | 4 | 保留 `:action`/`?query`、list 端点返回 `None` |
   | 路径重写（转发决策） | `proxy::forwarder` | 3 | 命中改写、未命中不动、仅 Gemini 生效 |
+  | 路径重写（full-URL） | `proxy::forwarder` | 4 | 钉在逻辑模型时改名、未命中/钉在其它模型/无 `models` 段均不动 |
   | 别名聚合（前端） | `tests/lib/api/modelAliases.group.test.ts` | 4 | 分组、组内渠道序、别名排序、字段投影 |
 
-   `cargo test --lib -- model_alias` / `-- handler_context` / `-- proxy::forwarder::tests::gemini` 与
+   `cargo test --lib -- model_alias` / `-- handler_context` / `-- proxy::forwarder::tests` 与
   `npx vitest run tests/lib/api/modelAliases.group.test.ts` 可分别复现。
  
  ## 下一步
