@@ -568,4 +568,260 @@ mod tests {
             Some("gemini-2.0-flash"),
         );
     }
+
+    /// P6 端到端：Gemini 选路纠正（`new` 不过滤 → URI 解析 → 重筛）。
+    ///
+    /// 用嵌套子模块承载额外导入，避免改动上方既有的 `use super::{...}`。
+    mod gemini_correction {
+        use crate::app_config::AppType;
+        use crate::database::Database;
+        use crate::provider::Provider;
+        use crate::proxy::failover_switch::FailoverSwitchManager;
+        use crate::proxy::handler_context::RequestContext;
+        use crate::proxy::provider_router::ProviderRouter;
+        use crate::proxy::providers::{
+            codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
+        };
+        use crate::proxy::server::ProxyState;
+        use crate::proxy::types::{ProxyConfig, ProxyStatus};
+        use axum::http::HeaderMap;
+        use serde_json::json;
+        use serial_test::serial;
+        use std::collections::HashMap;
+        use std::env;
+        use std::sync::Arc;
+        use tempfile::TempDir;
+        use tokio::sync::RwLock;
+
+        /// 把 HOME 指向临时目录，避免测试读写真实用户数据。
+        ///
+        /// `RequestContext::new` 会经 `settings::get_current_provider` 读全局设置，
+        /// 因此必须像 `provider_router` 的测试一样先隔离 HOME。
+        struct TempHome {
+            #[allow(dead_code)]
+            dir: TempDir,
+            original_home: Option<String>,
+            original_userprofile: Option<String>,
+            original_test_home: Option<String>,
+        }
+
+        impl TempHome {
+            fn new() -> Self {
+                let dir = TempDir::new().expect("failed to create temp home");
+                let original_home = env::var("HOME").ok();
+                let original_userprofile = env::var("USERPROFILE").ok();
+                let original_test_home = env::var("CC_SWITCH_TEST_HOME").ok();
+
+                env::set_var("HOME", dir.path());
+                env::set_var("USERPROFILE", dir.path());
+                env::set_var("CC_SWITCH_TEST_HOME", dir.path());
+                crate::settings::reload_settings().expect("reload settings");
+
+                Self {
+                    dir,
+                    original_home,
+                    original_userprofile,
+                    original_test_home,
+                }
+            }
+        }
+
+        impl Drop for TempHome {
+            fn drop(&mut self) {
+                match &self.original_home {
+                    Some(value) => env::set_var("HOME", value),
+                    None => env::remove_var("HOME"),
+                }
+                match &self.original_userprofile {
+                    Some(value) => env::set_var("USERPROFILE", value),
+                    None => env::remove_var("USERPROFILE"),
+                }
+                match &self.original_test_home {
+                    Some(value) => env::set_var("CC_SWITCH_TEST_HOME", value),
+                    None => env::remove_var("CC_SWITCH_TEST_HOME"),
+                }
+                let _ = crate::settings::reload_settings();
+            }
+        }
+
+        fn build_state(db: Arc<Database>) -> ProxyState {
+            ProxyState {
+                db: db.clone(),
+                config: Arc::new(RwLock::new(ProxyConfig::default())),
+                status: Arc::new(RwLock::new(ProxyStatus::default())),
+                start_time: Arc::new(RwLock::new(None)),
+                current_providers: Arc::new(RwLock::new(HashMap::new())),
+                provider_router: Arc::new(ProviderRouter::new(db.clone())),
+                gemini_shadow: Arc::new(GeminiShadowStore::default()),
+                codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
+                app_handle: None,
+                failover_manager: Arc::new(FailoverSwitchManager::new(db)),
+            }
+        }
+
+        /// 播入 N 个渠道并全部加入故障转移队列。
+        fn seed_gemini_providers(db: &Database, ids: &[&str]) {
+            for id in ids {
+                db.save_provider(
+                    "gemini",
+                    &Provider::with_id(id.to_string(), id.to_string(), json!({}), None),
+                )
+                .unwrap();
+                db.add_to_failover_queue("gemini", id).unwrap();
+            }
+        }
+
+        async fn enable_gemini_failover(db: &Database) {
+            let mut config = db.get_proxy_config_for_app("gemini").await.unwrap();
+            config.auto_failover_enabled = true;
+            db.update_proxy_config_for_app(config).await.unwrap();
+        }
+
+        /// P6 核心：`new` 阶段拿不到 URI 时不过滤，`correct_providers_for_gemini_model`
+        /// 用路径里的真实模型重筛，跳过未声明该逻辑模型的渠道。
+        #[tokio::test]
+        #[serial]
+        async fn gemini_correction_filters_chain_by_path_model() {
+            let _home = TempHome::new();
+            let db = Arc::new(Database::memory().unwrap());
+            seed_gemini_providers(&db, &["a", "b", "c"]);
+            // a 与 c 声明了 gemini-pro；b 既没声明也无自有映射
+            db.upsert_model_alias("gemini", "gemini-pro", "a", "a-gemini-pro", None, None)
+                .unwrap();
+            db.upsert_model_alias("gemini", "gemini-pro", "c", "c-gemini-pro", None, None)
+                .unwrap();
+            enable_gemini_failover(&db).await;
+            let state = build_state(db);
+
+            // Gemini 的模型名在路径里，new 阶段 body 无 model，因此初始链不过滤
+            let mut ctx = RequestContext::new(
+                &state,
+                &json!({}),
+                &HeaderMap::new(),
+                AppType::Gemini,
+                "Gemini",
+                "gemini",
+            )
+            .await
+            .expect("ctx 创建应成功");
+            assert_eq!(
+                ctx.get_providers().len(),
+                3,
+                "new 阶段尚未拿到 URI，不应过滤"
+            );
+
+            // URI 提供真实逻辑模型 → 纠正后只保留声明的渠道
+            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent"
+                .parse()
+                .unwrap();
+            ctx = ctx.with_model_from_uri(&uri);
+            assert_eq!(ctx.request_model, "gemini-pro");
+            ctx.correct_providers_for_gemini_model(&state)
+                .await
+                .expect("纠正不应报错");
+
+            assert_eq!(
+                ctx.get_providers()
+                    .iter()
+                    .map(|provider| provider.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["a", "c"],
+                "未声明 gemini-pro 的渠道 b 应被纠正掉"
+            );
+            assert_eq!(ctx.provider.id, "a", "首选应更新为纠正后的首个渠道");
+        }
+
+        /// 路径无法解析出模型（如 list 端点）时必须保持原链不变。
+        #[tokio::test]
+        #[serial]
+        async fn gemini_correction_keeps_chain_when_path_has_no_model() {
+            let _home = TempHome::new();
+            let db = Arc::new(Database::memory().unwrap());
+            seed_gemini_providers(&db, &["a", "b"]);
+            db.upsert_model_alias("gemini", "gemini-pro", "a", "a-gemini-pro", None, None)
+                .unwrap();
+            enable_gemini_failover(&db).await;
+            let state = build_state(db);
+
+            let mut ctx = RequestContext::new(
+                &state,
+                &json!({}),
+                &HeaderMap::new(),
+                AppType::Gemini,
+                "Gemini",
+                "gemini",
+            )
+            .await
+            .unwrap();
+            let uri: axum::http::Uri = "/v1beta/models".parse().unwrap();
+            ctx = ctx.with_model_from_uri(&uri);
+            assert_eq!(ctx.request_model, "unknown");
+
+            ctx.correct_providers_for_gemini_model(&state)
+                .await
+                .unwrap();
+            assert_eq!(
+                ctx.get_providers().len(),
+                2,
+                "模型未知时应保持原链（安全阀）"
+            );
+        }
+
+        /// 非 Gemini app 调用纠正必须是 no-op（不能重复选路）。
+        #[tokio::test]
+        #[serial]
+        async fn correction_is_noop_for_body_based_apps() {
+            let _home = TempHome::new();
+            let db = Arc::new(Database::memory().unwrap());
+            for id in ["a", "b"] {
+                db.save_provider(
+                    "claude",
+                    &Provider::with_id(id.to_string(), id.to_string(), json!({}), None),
+                )
+                .unwrap();
+                db.add_to_failover_queue("claude", id).unwrap();
+            }
+            // 两个渠道都声明 sonnet，使 new 阶段的模型过滤不会削减链路，
+            // 从而能干净地验证「纠正对非 Gemini app 是 no-op」。
+            db.upsert_model_alias("claude", "sonnet", "a", "a-sonnet", None, None)
+                .unwrap();
+            db.upsert_model_alias("claude", "sonnet", "b", "b-sonnet", None, None)
+                .unwrap();
+            let mut config = db.get_proxy_config_for_app("claude").await.unwrap();
+            config.auto_failover_enabled = true;
+            db.update_proxy_config_for_app(config).await.unwrap();
+            let state = build_state(db);
+
+            // body 直接给逻辑模型名：new 阶段即完成过滤，与 Gemini 的两段式不同
+            let mut ctx = RequestContext::new(
+                &state,
+                &json!({ "model": "sonnet" }),
+                &HeaderMap::new(),
+                AppType::Claude,
+                "Claude",
+                "claude",
+            )
+            .await
+            .unwrap();
+            let before = ctx
+                .get_providers()
+                .iter()
+                .map(|provider| provider.id.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(before, vec!["a".to_string(), "b".to_string()]);
+
+            ctx.correct_providers_for_gemini_model(&state)
+                .await
+                .unwrap();
+            assert_eq!(
+                ctx.get_providers()
+                    .iter()
+                    .map(|provider| provider.id.clone())
+                    .collect::<Vec<_>>(),
+                before,
+                "非 Gemini 应为 no-op，链路与首选都不变"
+            );
+            assert_eq!(ctx.provider.id, "a");
+        }
+    }
 }
