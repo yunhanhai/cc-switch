@@ -296,4 +296,17 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
    边界确认：Gemini 原生请求体不含 `model` 字段，故 URL 无模型段时（list 端点）
    通用 body 刷新不会赋值，归因自然回落到 `request_model`（`with_model_from_uri`
    已从 URI 解析），语义正确。
+
+9. **渠道模型覆写不得冲掉 alias 换名（已修复，`7e183b44`）**：
+   GrokBuild 分支与 Codex 的两条转换路径（Chat / Anthropic）都会调用
+   `apply_codex_upstream_model`，它在**请求模型不属于该渠道 `modelCatalog`**
+   时会无条件改写为 `settings_config.model`。而 alias 换出的物理名通常不在
+   catalog 中，于是刚换好的名字被静默冲掉，请求以渠道默认模型发出 ——
+   重新出现「选路按逻辑模型过滤、body 却发另一个模型」。
+
+   现三处调用点均加 `alias_resolved.is_none()` 守卫：alias 表达的就是
+   "这个逻辑模型在该渠道叫什么"，比渠道默认模型更权威。
+
+   > **不变量**：alias 命中的请求，`body["model"]` 在离开 `forward()` 时
+   > 必须等于该渠道的 alias 物理名。任何新增的"渠道级模型改写"都要遵守它。
  

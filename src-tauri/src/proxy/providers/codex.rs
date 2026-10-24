@@ -1634,6 +1634,12 @@ wire_api = "chat"
         ));
     }
 
+    /// 非 catalog 模型会被渠道配置的模型覆写 —— 本行为正是 `forwarder` 三处
+    /// 调用点必须用 `alias_resolved.is_none()` 守卫的原因（见 `7e183b44`）：
+    /// alias 换出的物理名通常不在 catalog 中，不守卫就会被这里静默冲掉。
+    ///
+    /// 若将来改成"不覆写非 catalog 模型"，本测试会失败，请同步复查那三处守卫
+    /// 是否仍必要，以及 `docs/model-alias-routing-design.md` §6 第 9 条。
     #[test]
     fn test_apply_codex_chat_upstream_model_uses_provider_config_model() {
         let mut provider = create_provider(json!({
