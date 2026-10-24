@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `2daeba47`。
-> 状态：P1–P6 全部完成，`cargo test --lib 2827 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `c2ac2295`。
+> 状态：P1–P6 全部完成，`cargo test --lib 2831 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -39,6 +39,9 @@
  | — | `0716521a` | 记录 Claude + `gemini_native` 无需路径重写的审查结论（模型名来自 body，已天然成对） |
  | — | `cebf2ace` | 清理 `zh-TW` 孤儿键 `settings.oneClickInstall`（上游遗留，无调用点） |
  | — | `2daeba47` | 新增 i18n 全局守卫：四语键集合双向比对 + 非 `pi.*` 占位符一致性（6 用例，已负向验证） |
+ | — | `844169c8` | 记录连通性检测与 alias 无关的审查结论（只探 base_url，不涉模型名/熔断器） |
+ | — | `73c1abcf` / `1cf66bee` / `d6164e5d` | **修复归因契约**：`outbound_model` 改取最终 URL 真值（前两次按 alias 记账推断在 full-URL 守卫拒绝时会错报物理名），并抽出 `resolve_gemini_outbound_model` + 4 用例 |
+ | — | `c2ac2295` | 设计文档固化 `outbound_model` 真值来源契约（第 8 条） |
  
  ## 行为与兼容
  
@@ -52,10 +55,13 @@
  - **Gemini full-URL 渠道**：`is_full_url` 模式下 URL 会覆盖 endpoint，因此路径别名
    在 `rewrite_gemini_full_url_for_alias` 中补做，三重守卫（命中 alias、URL 含
    `models/<id>` 段、该段仍是本次逻辑模型）；任一不满足即保持原 URL（见 `2fdbdf9f`）。
+ - **计费归因真值契约**：`outbound_model`（供 usage 归因）必须取自真实出站载体——
+    body-based app 取定稿 `filtered_body["model"]`，Gemini 取最终拼装的 `url`；
+    **不得**从 alias 记账推断（见 `d6164e5d` 与设计文档 §6 第 8 条）。
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-2daeba47/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-c2ac2295/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
@@ -77,6 +83,7 @@
   | 路径重写（纯函数） | `proxy::handler_context` | 4 | 保留 `:action`/`?query`、list 端点返回 `None` |
   | 路径重写（转发决策） | `proxy::forwarder` | 3 | 命中改写、未命中不动、仅 Gemini 生效 |
   | 路径重写（full-URL） | `proxy::forwarder` | 4 | 钉在逻辑模型时改名、未命中/钉在其它模型/无 `models` 段均不动 |
+  | 计费归因（Gemini） | `proxy::forwarder` | 4 | 取最终 URL 真值：重写后/拒绝改写/被钉住/无模型段 |
   | 别名聚合（前端） | `tests/lib/api/modelAliases.group.test.ts` | 4 | 分组、组内渠道序、别名排序、字段投影 |
 
    `cargo test --lib -- model_alias` / `-- handler_context` / `-- proxy::forwarder::tests` 与
