@@ -225,38 +225,48 @@ impl RequestContext {
 
     /// Gemini 选路纠正：在 new 阶段尚未拿到 URI，此处用真实模型名重筛一次。
     ///
-    /// 调用方需在 with_model_from_uri 之后、create_forwarder 之前调用；
-    /// 失败时保持原链不变（安全阀），避免把可用链纠成空链。
-    pub async fn correct_providers_for_gemini_model(
-        &mut self,
-        state: &ProxyState,
-    ) -> Result<(), ProxyError> {
+    /// 调用方需在 with_model_from_uri 之后、create_forwarder 之前调用。
+    ///
+    /// **本方法是纯增益，绝不失败**：`new` 阶段已经选出一整条可用链，
+    /// 纠正只是按真实模型把它收窄。因此任何异常（DB 抖动、全滤回退后的
+    /// 空链等）都只记日志并保留原链，不向调用方报错 —— 否则一个本可正常
+    /// 服务的请求会因为"优化失败"而 500。
+    pub async fn correct_providers_for_gemini_model(&mut self, state: &ProxyState) {
         if !supports_model_alias(self.app_type_str)
             || model_name_lives_in_body(self.app_type_str)
         {
-            return Ok(());
+            return;
         }
         if self.request_model.is_empty() || self.request_model == "unknown" {
-            return Ok(());
+            return;
         }
-        let providers = state
+        let providers = match state
             .provider_router
             .select_providers_for_model(self.app_type_str, Some(self.request_model.as_str()))
             .await
-            .map_err(|e| match e {
-                crate::error::AppError::AllProvidersCircuitOpen => {
-                    ProxyError::AllProvidersCircuitOpen
-                }
-                crate::error::AppError::NoProvidersConfigured => ProxyError::NoProvidersConfigured,
-                _ => ProxyError::DatabaseError(e.to_string()),
-            })?;
+        {
+            Ok(providers) => providers,
+            Err(e) => {
+                log::warn!(
+                    "[{}] Gemini 选路纠正失败，保留 new 阶段的选路结果: {e}",
+                    self.tag
+                );
+                return;
+            }
+        };
         if providers.is_empty() {
-            return Ok(());
+            log::warn!(
+                "[{}] Gemini 选路纠正得到空链（模型 {}），保留 new 阶段的选路结果",
+                self.tag,
+                self.request_model
+            );
+            return;
         }
-        // 若纠正后链为空（理论上 select 已做回退），保留原链。
-        self.provider = providers.first().cloned().unwrap_or_else(|| self.provider.clone());
+        let Some(first) = providers.first().cloned() else {
+            return;
+        };
+        self.provider = first;
         self.providers = providers;
-        Ok(())
     }
 
     /// 创建 RequestForwarder
@@ -716,9 +726,7 @@ mod tests {
                 .unwrap();
             ctx = ctx.with_model_from_uri(&uri);
             assert_eq!(ctx.request_model, "gemini-pro");
-            ctx.correct_providers_for_gemini_model(&state)
-                .await
-                .expect("纠正不应报错");
+            ctx.correct_providers_for_gemini_model(&state).await;
 
             assert_eq!(
                 ctx.get_providers()
@@ -757,9 +765,7 @@ mod tests {
             ctx = ctx.with_model_from_uri(&uri);
             assert_eq!(ctx.request_model, "unknown");
 
-            ctx.correct_providers_for_gemini_model(&state)
-                .await
-                .unwrap();
+            ctx.correct_providers_for_gemini_model(&state).await;
             assert_eq!(
                 ctx.get_providers().len(),
                 2,
@@ -810,9 +816,7 @@ mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(before, vec!["a".to_string(), "b".to_string()]);
 
-            ctx.correct_providers_for_gemini_model(&state)
-                .await
-                .unwrap();
+            ctx.correct_providers_for_gemini_model(&state).await;
             assert_eq!(
                 ctx.get_providers()
                     .iter()
@@ -820,6 +824,60 @@ mod tests {
                     .collect::<Vec<_>>(),
                 before,
                 "非 Gemini 应为 no-op，链路与首选都不变"
+            );
+            assert_eq!(ctx.provider.id, "a");
+        }
+
+        /// 纠正失败（此处令选路整体报错）时不得向调用方传播错误：
+        /// `new` 阶段已经有一条可用链，纠正只是纯增益，失败应静默保留原链。
+        /// 否则一个本可正常服务的 Gemini 请求会因为"优化失败"而 500。
+        #[tokio::test]
+        #[serial]
+        async fn gemini_correction_keeps_chain_when_selection_errors() {
+            let _home = TempHome::new();
+            let db = Arc::new(Database::memory().unwrap());
+            seed_gemini_providers(&db, &["a", "b"]);
+            db.upsert_model_alias("gemini", "gemini-pro", "a", "a-gemini-pro", None, None)
+                .unwrap();
+            enable_gemini_failover(&db).await;
+            let state = build_state(db.clone());
+
+            let mut ctx = RequestContext::new(
+                &state,
+                &json!({}),
+                &HeaderMap::new(),
+                AppType::Gemini,
+                "Gemini",
+                "gemini",
+            )
+            .await
+            .unwrap();
+            let before = ctx
+                .get_providers()
+                .iter()
+                .map(|provider| provider.id.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(before.len(), 2);
+
+            // 清空故障转移队列：纠正时的重选路会得到 NoProvidersConfigured。
+            for id in ["a", "b"] {
+                db.remove_from_failover_queue("gemini", id).unwrap();
+            }
+
+            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent"
+                .parse()
+                .unwrap();
+            ctx = ctx.with_model_from_uri(&uri);
+            // 关键：返回类型是 ()，调用方无法（也不需要）处理错误。
+            ctx.correct_providers_for_gemini_model(&state).await;
+
+            assert_eq!(
+                ctx.get_providers()
+                    .iter()
+                    .map(|provider| provider.id.clone())
+                    .collect::<Vec<_>>(),
+                before,
+                "纠正失败必须保留 new 阶段的选路结果，而不是把请求打成错误"
             );
             assert_eq!(ctx.provider.id, "a");
         }
