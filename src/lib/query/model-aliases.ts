@@ -52,6 +52,13 @@ export function useSetModelAliasEntries() {
   });
 }
 
+/**
+ * 按主键删除单条 alias 记录。
+ *
+ * 当前 UI 走的是 `useSetModelAliasEntries`（整组替换，传空数组即删除整个逻辑模型），
+ * 因此**没有调用点**；保留它是为脚本化 / 未来的逐条编辑入口（后端对应命令同样保留）。
+ * 若确认不再需要，前后端应成对移除。
+ */
 export function useDeleteModelAlias() {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -73,7 +80,12 @@ export function useDeleteModelAlias() {
   });
 }
 
-/** 供 UI 判断是否已启用别名路由（决定是否展示提示条）。 */
+/**
+ * 供调用方判断是否已启用别名路由（决定是否展示提示条）。
+ *
+ * 面板内的「已启用」徽章改为直接用 `useModelAliases` 的结果长度推导，
+ * 以避免多一次 IPC；该 hook 保留给需要独立判断的场景。
+ */
 export function useHasModelAliases(appType: string, enabled = true) {
   const { data } = useModelAliases(appType, enabled);
   return (data?.length ?? 0) > 0;

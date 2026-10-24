@@ -76,9 +76,11 @@
          .map_err(|e| e.to_string())
  }
  
-/// 该 app 是否已配置任何模型别名。
+/// 该 app 是否已配置任何模型别名（安全阀的对外查询）。
 ///
-/// 前端用它决定是否展示「已启用模型别名路由」的提示。
+/// 注意：当前 UI **没有**调用它 —— `ModelAliasPanel` 的「已启用」徽章是直接由
+/// `list_model_aliases` 的结果长度推导的，少一次往返。此命令保留给脚本化调用方
+/// （如 deeplink、外部工具）做"是否需要提示用户配置别名"的判断。
 #[tauri::command]
 pub fn has_model_aliases(state: State<'_, AppState>, app_type: String) -> Result<bool, String> {
     require_proxy_app(&app_type)?;
