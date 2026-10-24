@@ -250,4 +250,15 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
    行为，属于独立设计。
 4. **`priority` 字段目前恒为 0**：`set_model_alias_entries` 按数组下标写入，
    实际排序由 UI 顺序决定。保留该字段是为将来"同一渠道多物理名"的扩展。
+
+5. **Gemini + full-URL 模式的路径重写缺口（已核实，未修）**：
+   `forwarder` 中 `is_full_url == true` 的渠道走
+   `append_query_to_full_url(&base_url, ...)`，只保留 base_url、**丢弃
+   `effective_endpoint`**，因此 P6 的 `endpoint_for_routing` 重写在该分支不生效——
+   若这类渠道同时配了 alias，会出现「选路按逻辑模型过滤、URL 里仍是逻辑模型名」。
+   影响面评估：Gemini 表单（`GeminiFormFields`）调 `EndpointField` 时**未传
+   `showFullUrlToggle`**（默认 `false`），故 UI 无法为 Gemini 打开该模式；
+   但 `meta.isFullUrl` 可来自历史数据或手写 JSON，故分支并非绝对不可达。
+   若将来确认需要支持，应让 `append_query_to_full_url` 分支也应用路径重写
+   （以 base_url 中是否存在 `models/<id>` 段判定，无该段则保持原样不猜测）。
  
