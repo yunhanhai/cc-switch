@@ -310,9 +310,20 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
    > **不变量**：alias 命中的请求，`body["model"]` 在离开 `forward()` 时
    > 必须等于该渠道的 alias 物理名。任何新增的"渠道级模型改写"都要遵守它。
 
-10. **Copilot 的两处 `model` 写入：不变量例外，且是有意的（已审查）**：
-    逐一审计了 `forwarder` 中所有 `["model"] =` 写入点（共 4 处），除 alias 自身
-    与 `[1m]` 剥离外，其余两处都在 Copilot 路径，且**都不加 alias 守卫**：
+10. **全 proxy 模块 `model` 写入点审计（13 处，零越权）**：
+    `rg '\["model"\]\s*=' src-tauri/src/proxy` 枚举出 13 处写入，逐一判定如下：
+
+    | 类别 | 处数 | 判定 |
+    | --- | --- | --- |
+    | alias 应用本身（`forwarder:1537`） | 1 | 不变量来源 |
+    | `[1m]` 剥离（`forwarder:1934`） | 1 | 同族名（仅去后缀），不违反 |
+    | Copilot warmup 降级 | 1 | 有意例外，见下 |
+    | Copilot live-model 解析（含 `copilot_model_map:53`） | 2 | 有意例外，见下 |
+    | `apply_codex_upstream_model`（`codex.rs:408`） | 1 | 已加调用点守卫（`7e183b44`） |
+    | `model_mapper` 映射链路（3 处） | 3 | **仅在 alias 未命中时被调用**（forwarder 的 `else` 分支），天然安全 |
+    | `transform_*` 格式转换（4 处） | 4 | 纯搬运：`if let Some(model) = body.get("model")` 原样转入新结构；`transform_codex_anthropic` 并注释 "the upstream model has already been applied by the forwarder" |
+
+    两处 Copilot 例外**都不加 alias 守卫**，理由不同：
 
     - **warmup 降级**（Copilot 优化器）：仅对 `classification.is_warmup` 的请求
       生效，把模型换成配置的 `warmup_model`。warmup 是客户端的连通性探测、不是
