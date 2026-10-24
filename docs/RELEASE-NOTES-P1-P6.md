@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `2fdbdf9f`。
-> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2827 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `2daeba47`。
+> 状态：P1–P6 全部完成，`cargo test --lib 2827 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -36,6 +36,9 @@
  | — | `9d576b07` | **修复**：Gemini 选路纠正改为不可失败（原返回 `Err` + `?` 会把可服务请求打成 500），并补对应测试 |
  | — | `39304a12` | 记录已核实的 Gemini full-URL 路径重写缺口与修法方向 |
  | — | `2fdbdf9f` | **修复**：full-URL 模式补齐 Gemini 路径别名（三重守卫），使「过滤与换名成对」覆盖全部 URL 组装分支 |
+ | — | `0716521a` | 记录 Claude + `gemini_native` 无需路径重写的审查结论（模型名来自 body，已天然成对） |
+ | — | `cebf2ace` | 清理 `zh-TW` 孤儿键 `settings.oneClickInstall`（上游遗留，无调用点） |
+ | — | `2daeba47` | 新增 i18n 全局守卫：四语键集合双向比对 + 非 `pi.*` 占位符一致性（6 用例，已负向验证） |
  
  ## 行为与兼容
  
@@ -52,15 +55,18 @@
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-2fdbdf9f/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-2daeba47/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
  - 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
+ - **i18n 一致性**：四语现各 3005 键、完全等值；`localeCoverage.test.ts` 已加全局守卫，
+   今后漏译或多余/拼错键会被 CI 直接拦下（见 `2daeba47`）。
 
  ## 测试说明
 
- - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
+ - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1031 用例全绿）。
+ - 另有 i18n 全局守卫用例（`tests/config/localeCoverage.test.ts`，15 例，含四语键集合与占位符一致性）。
  - **P1–P6 覆盖矩阵**（P6 的「过滤」与「换名」两半均有端到端测试）：
 
   | 环节 | 位置 | 用例数 | 关键断言 |
