@@ -309,4 +309,20 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 
    > **不变量**：alias 命中的请求，`body["model"]` 在离开 `forward()` 时
    > 必须等于该渠道的 alias 物理名。任何新增的"渠道级模型改写"都要遵守它。
+
+10. **Copilot 的两处 `model` 写入：不变量例外，且是有意的（已审查）**：
+    逐一审计了 `forwarder` 中所有 `["model"] =` 写入点（共 4 处），除 alias 自身
+    与 `[1m]` 剥离外，其余两处都在 Copilot 路径，且**都不加 alias 守卫**：
+
+    - **warmup 降级**（Copilot 优化器）：仅对 `classification.is_warmup` 的请求
+      生效，把模型换成配置的 `warmup_model`。warmup 是客户端的连通性探测、不是
+      真实对话，降级到便宜小模型是刻意的省钱优化，不应因 alias 而回归大模型。
+    - **live-model 解析**（`apply_copilot_live_model_resolution`）：把模型 id
+      归一化/回退到该账号 Copilot 目录内的可用 id（`resolve_against_models`）。
+      这是 Copilot 渠道的**必需适配**（目录外 id 会被上游拒绝），语义上与 alias
+      **叠加而非覆盖**：alias 决定"此逻辑模型在本渠道叫什么"，Copilot 解析确保
+      "这个名字在 Copilot 目录内可解析"。
+
+    审计同时确认 alias 校验（`model_aliases` DAO）只要求 provider 存在，
+    不排除 Copilot 渠道，故二者确实可能同时生效 —— 上述判断正是针对该情形。
  
