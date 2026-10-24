@@ -10,6 +10,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RoutingGroup {
     pub id: String,
     pub app_type: String,
@@ -21,12 +22,14 @@ pub struct RoutingGroup {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoutingGroupWithMembers {
     pub group: RoutingGroup,
     pub members: Vec<RoutingGroupMember>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RoutingGroupMember {
     pub group_id: String,
     pub provider_id: String,
@@ -693,6 +696,46 @@ mod tests {
             json!({"env": {"ANTHROPIC_BASE_URL": "https://api.example.com"}}),
             None,
         )
+    }
+
+    /// 前端 `RoutingGroup` / `RoutingGroupMember` 接口用 camelCase
+    /// （`sortOrder` / `providerId` / `sortIndex` …），而这些结构体直接作为
+    /// Tauri 命令返回值序列化。Tauri 只转换命令**参数**，返回值走纯 serde，
+    /// 因此必须靠 `rename_all` 保证字段名——否则面板会静默读到 undefined。
+    #[test]
+    fn routing_group_serializes_with_camel_case_field_names() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        db.save_provider("claude", &provider("p1", "P1"))?;
+        let group = db.create_routing_group("claude", "default", None)?;
+        db.set_routing_group_members(&group.id, &["p1".to_string()])?;
+
+        // 命令返回的是 RoutingGroupWithMembers（{ group, members } 嵌套结构）
+        let listed = db.list_routing_groups("claude")?;
+        let value = serde_json::to_value(&listed[0]).unwrap();
+        let object = value.as_object().expect("应为 JSON 对象");
+
+        let group = object["group"].as_object().expect("应有 group 对象");
+        for field in ["sortOrder", "appType", "createdAt", "updatedAt"] {
+            assert!(
+                group.contains_key(field),
+                "分组序列化后缺少 camelCase 字段 {field}，实际字段: {:?}",
+                group.keys().collect::<Vec<_>>()
+            );
+        }
+
+        let member = object["members"]
+            .as_array()
+            .and_then(|members| members.first())
+            .and_then(|member| member.as_object())
+            .expect("应有成员对象");
+        for field in ["groupId", "providerId", "sortIndex", "addedAt"] {
+            assert!(
+                member.contains_key(field),
+                "成员序列化后缺少 camelCase 字段 {field}，实际字段: {:?}",
+                member.keys().collect::<Vec<_>>()
+            );
+        }
+        Ok(())
     }
 
     #[test]

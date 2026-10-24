@@ -14,8 +14,9 @@
  use serde::{Deserialize, Serialize};
  use std::collections::HashMap;
  
- #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
- pub struct ModelAlias {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelAlias {
      pub id: String,
      pub app_type: String,
      pub alias: String,
@@ -406,16 +407,44 @@
      }
  
      #[test]
-     fn alias_upsert_is_idempotent_on_unique_key() -> Result<(), AppError> {
-         let db = Database::memory()?;
-         seed(&db)?;
-         db.upsert_model_alias("claude", "sonnet", "ch_a", "old-name", None, None)?;
-         db.upsert_model_alias("claude", "sonnet", "ch_a", "new-name", None, None)?;
-         let all = db.list_model_aliases("claude")?;
-         assert_eq!(all.len(), 1, "同一 (alias, provider) 应只有一条");
-         assert_eq!(all[0].target_model, "new-name");
-         Ok(())
-     }
+    fn alias_upsert_is_idempotent_on_unique_key() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        seed(&db)?;
+        db.upsert_model_alias("claude", "sonnet", "ch_a", "old-name", None, None)?;
+        db.upsert_model_alias("claude", "sonnet", "ch_a", "new-name", None, None)?;
+        let all = db.list_model_aliases("claude")?;
+        assert_eq!(all.len(), 1, "同一 (alias, provider) 应只有一条");
+        assert_eq!(all[0].target_model, "new-name");
+        Ok(())
+    }
+
+    /// 前端 `ModelAlias` 接口用 camelCase（`appType` / `providerId` / `targetModel`），
+    /// 而这些结构体是直接作为 Tauri 命令返回值序列化给前端的。
+    /// 此测试确保序列化后的字段名与前端读取的一致——否则 UI 会静默拿到 undefined。
+    #[test]
+    fn model_alias_serializes_with_camel_case_field_names() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        seed(&db)?;
+        let created = db.upsert_model_alias("claude", "sonnet", "ch_a", "a-model", None, None)?;
+
+        let value = serde_json::to_value(&created).unwrap();
+        let object = value.as_object().expect("应为 JSON 对象");
+
+        for field in [
+            "appType",
+            "providerId",
+            "targetModel",
+            "createdAt",
+            "updatedAt",
+        ] {
+            assert!(
+                object.contains_key(field),
+                "序列化后缺少 camelCase 字段 {field}（前端会读到 undefined），实际字段: {:?}",
+                object.keys().collect::<Vec<_>>()
+            );
+        }
+        Ok(())
+    }
  
      #[test]
      fn alias_rejects_unknown_provider() -> Result<(), AppError> {
