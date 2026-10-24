@@ -1532,7 +1532,7 @@ impl RequestForwarder {
         let mapped_body = if matches!(app_type, AppType::ClaudeDesktop) {
             crate::claude_desktop_config::map_proxy_request_model(body.clone(), provider)
                 .map_err(|e| ProxyError::InvalidRequest(e.to_string()))?
-        } else if let Some(target) = alias_resolved {
+        } else if let Some(target) = alias_resolved.clone() {
             let mut aliased = body.clone();
             aliased["model"] = Value::String(target);
             aliased
@@ -1562,7 +1562,13 @@ impl RequestForwarder {
         // Grok Build exposes a stable client-side model profile in config.toml.
         // Route requests to the provider's real upstream model before applying
         // the optional Responses -> Chat/Anthropic bridge.
-        if matches!(app_type, AppType::GrokBuild) {
+        //
+        // 但 alias 已命中时必须跳过：`apply_codex_upstream_model` 在请求模型
+        // 不属于该渠道 `modelCatalog` 时会**无条件覆写**为 `settings_config.model`，
+        // 而 alias 的物理名通常不在 catalog 里 —— 覆写会把刚换好的名字冲掉，
+        // 重新出现「选路按逻辑模型过滤、body 却发渠道默认模型」的错位。
+        // alias 表达的就是"这个逻辑模型在该渠道叫什么"，比渠道默认模型更权威。
+        if matches!(app_type, AppType::GrokBuild) && alias_resolved.is_none() {
             super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
         }
 
@@ -1863,7 +1869,11 @@ impl RequestForwarder {
                     "[Codex] Restored or enriched {restored} cached function call item(s) for Chat upstream"
                 );
             }
-            super::providers::apply_codex_chat_upstream_model(provider, &mut mapped_body);
+            // alias 已命中时跳过渠道模型覆写：它会用 settings_config.model 冲掉
+            // alias 换好的物理名（原因同下方 GrokBuild 分支的注释）。
+            if alias_resolved.is_none() {
+                super::providers::apply_codex_chat_upstream_model(provider, &mut mapped_body);
+            }
             let reasoning_config =
                 super::providers::resolve_codex_chat_reasoning_config(provider, &mapped_body);
             let mut chat_body = super::providers::transform_codex_chat::responses_to_chat_completions_with_reasoning(
@@ -1880,7 +1890,10 @@ impl RequestForwarder {
             chat_body
         } else if codex_responses_to_anthropic {
             let mut mapped_body = mapped_body;
-            super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
+            // alias 已命中时跳过渠道模型覆写（原因同 GrokBuild 分支的注释）。
+            if alias_resolved.is_none() {
+                super::providers::apply_codex_upstream_model(provider, &mut mapped_body);
+            }
             // Per-provider output ceiling override. Codex does not forward its
             // `model_max_output_tokens` in the request body, so honor the value
             // configured on the provider here — it takes precedence over any
