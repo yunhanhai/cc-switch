@@ -1791,6 +1791,12 @@ impl RequestForwarder {
         let is_codex_alpha_search = matches!(app_type, AppType::Codex)
             && split_endpoint_and_query(&effective_endpoint).0 == "/alpha/search";
 
+        // full-URL 分支若真正改写了 URL，记下生效的物理名，供下方归因刷新使用。
+        // 必须记录「实际生效」而非「alias 是否命中」：三重守卫可能拒绝改写
+        // （URL 被钉在别的模型上等），此时 URL 仍是逻辑模型名，归因也必须如此，
+        // 否则 outbound_model 会与真实出站 URL 不一致。
+        let mut gemini_full_url_applied_model: Option<String> = None;
+
         let url = if matches!(resolved_claude_api_format.as_deref(), Some("gemini_native")) {
             super::gemini_url::resolve_gemini_native_url(
                 &base_url,
@@ -1826,6 +1832,7 @@ impl RequestForwarder {
                         base_url,
                         rewritten
                     );
+                    gemini_full_url_applied_model = Some(rewritten.clone());
                     append_query_to_full_url(&rewritten, passthrough_query.as_deref())
                 }
                 None => append_query_to_full_url(&base_url, passthrough_query.as_deref()),
@@ -2022,12 +2029,23 @@ impl RequestForwarder {
         {
             outbound_model = Some(m.to_string());
         }
-        // Gemini 路径别名未在 body 中体现，重写时用路径目标刷新 outbound_model
+        // Gemini 路径别名未在 body 中体现，重写时用路径目标刷新 outbound_model。
+        //
+        // 分两种情况，务必以「URL 实际是什么」为准：
+        // - full-URL 分支：只有三重守卫真正改写时才刷新（`applied_model`），
+        //   守卫拒绝时 URL 仍是逻辑模型名，归因必须保持一致；
+        // - 其余 Gemini 分支：`effective_endpoint` 已由 `endpoint_for_routing` 重写，
+        //   从它取模型名即为真值。
         if matches!(app_type, AppType::Gemini) {
-            if let Some(target) = gemini_alias_endpoint
+            let applied_model = gemini_full_url_applied_model
                 .as_deref()
                 .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
-            {
+                .or_else(|| {
+                    gemini_alias_endpoint
+                        .as_deref()
+                        .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
+                });
+            if let Some(target) = applied_model {
                 outbound_model = Some(target);
             }
         }
