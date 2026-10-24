@@ -1791,12 +1791,6 @@ impl RequestForwarder {
         let is_codex_alpha_search = matches!(app_type, AppType::Codex)
             && split_endpoint_and_query(&effective_endpoint).0 == "/alpha/search";
 
-        // full-URL 分支若真正改写了 URL，记下生效的物理名，供下方归因刷新使用。
-        // 必须记录「实际生效」而非「alias 是否命中」：三重守卫可能拒绝改写
-        // （URL 被钉在别的模型上等），此时 URL 仍是逻辑模型名，归因也必须如此，
-        // 否则 outbound_model 会与真实出站 URL 不一致。
-        let mut gemini_full_url_applied_model: Option<String> = None;
-
         let url = if matches!(resolved_claude_api_format.as_deref(), Some("gemini_native")) {
             super::gemini_url::resolve_gemini_native_url(
                 &base_url,
@@ -1832,7 +1826,6 @@ impl RequestForwarder {
                         base_url,
                         rewritten
                     );
-                    gemini_full_url_applied_model = Some(rewritten.clone());
                     append_query_to_full_url(&rewritten, passthrough_query.as_deref())
                 }
                 None => append_query_to_full_url(&base_url, passthrough_query.as_deref()),
@@ -2029,18 +2022,11 @@ impl RequestForwarder {
         {
             outbound_model = Some(m.to_string());
         }
-        // Gemini 路径别名未在 body 中体现，重写时用路径目标刷新 outbound_model。
-        //
-        // 分两种情况，务必以「URL 实际是什么」为准：
-        // - full-URL 分支：只有三重守卫真正改写时才刷新（`applied_model`），
-        //   守卫拒绝时 URL 仍是逻辑模型名，归因必须保持一致；
-        // - 其余 Gemini 分支：`effective_endpoint` 已由 `endpoint_for_routing` 重写，
-        //   从它取模型名即为真值。
+        // Gemini 的模型名可能在 URL 路径里（不在 body），故以**最终 URL** 为准刷新。
+        // 这是唯一可靠来源：无论走 `endpoint_for_routing` 重写、full-URL 守卫改写，
+        // 还是两者都未生效，URL 中的 `models/<id>` 就是上游实际收到的名字。
         if matches!(app_type, AppType::Gemini) {
-            if let Some(target) = resolve_gemini_outbound_model(
-                gemini_full_url_applied_model.as_deref(),
-                gemini_alias_endpoint.as_deref(),
-            ) {
+            if let Some(target) = resolve_gemini_outbound_model(&url) {
                 outbound_model = Some(target);
             }
         }
@@ -3770,23 +3756,18 @@ fn append_query_to_full_url(base_url: &str, query: Option<&str>) -> String {
 
 /// 决定 Gemini 的 `outbound_model`（真正发往上游的模型名，用于 usage 归因）。
 ///
-/// 两个入参都描述"URL 里的模型名"，语义不同，**优先级必须严格**：
-/// - `full_url_applied`：full-URL 模式下三重守卫**真正改写**后的 URL
-///   （未改写时为 `None`）。它最权威——只有它才能证明上游收到的是物理名。
-/// - `alias_endpoint`：非 full-URL 分支由 `endpoint_for_routing` 重写后的
-///   endpoint，在那里它确实决定最终 URL。
+/// **唯一可靠的真值来源就是最终拼装出的 URL**。无论走了哪条分支
+/// （`endpoint_for_routing` 重写、full-URL 三重守卫改写、或两者都未生效），
+/// URL 里的 `models/<id>` 段就是上游实际收到的模型名。
 ///
-/// 若只看 `alias_endpoint`（曾经的实现），当守卫拒绝改写时归因会声称物理名、
-/// 而实际 URL 仍是逻辑模型名——归因与真实出站请求不一致。
-fn resolve_gemini_outbound_model(
-    full_url_applied: Option<&str>,
-    alias_endpoint: Option<&str>,
-) -> Option<String> {
-    full_url_applied
-        .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
-        .or_else(|| {
-            alias_endpoint.and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
-        })
+/// 反例（前两版实现）：按「alias 是否命中」或其改写结果推断，在 full-URL
+/// 守卫拒绝改写时会声称物理名，而 URL 实际仍是逻辑模型名或被用户钉住的模型——
+/// 归因与真实出站请求不一致。
+///
+/// 返回 `None` 表示 URL 中不存在模型段（如 list 端点 / 无模型段的终点地址），
+/// 调用方应保留 body 派生的归因。
+fn resolve_gemini_outbound_model(final_url: &str) -> Option<String> {
+    crate::proxy::handler_context::extract_gemini_model_from_path(final_url)
 }
 
 /// 让 full-URL 模式的 Gemini 渠道也应用路径别名。
@@ -6094,37 +6075,54 @@ mod tests {
         );
     }
 
-    /// 归因必须取 full-URL 分支真正生效的那个模型名（最高优先级）。
+    /// 非 full-URL 分支：URL 由 `endpoint_for_routing` 重写，取其中的模型名。
     #[test]
-    fn outbound_model_prefers_the_applied_full_url_rewrite() {
+    fn outbound_model_reads_the_rewritten_path() {
         assert_eq!(
             resolve_gemini_outbound_model(
-                Some("https://relay.example.com/v1beta/models/gemini-2.0-flash:generateContent"),
-                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
-            )
-            .as_deref(),
-            Some("gemini-2.0-flash")
-        );
-    }
-
-    /// full-URL 守卫未改写时，必须回落到 endpoint 派生的名字，
-    /// 不能凭空断言物理名（否则归因与真实出站 URL 不一致）。
-    #[test]
-    fn outbound_model_falls_back_when_full_url_was_not_rewritten() {
-        assert_eq!(
-            resolve_gemini_outbound_model(
-                None,
-                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
             )
             .as_deref(),
             Some("gemini-2.0-flash"),
-            "非 full-URL 分支由 endpoint_for_routing 决定 URL，从它取真值"
         );
     }
 
-    /// 两者皆无（未命中 alias）时返回 None，让调用方保留 body 派生的归因。
+    /// full-URL 守卫拒绝改写时，最终 URL 仍是逻辑模型名 —— 归因必须照实记录，
+    /// 不能按「alias 是否命中」推断成物理名。
     #[test]
-    fn outbound_model_is_none_without_any_rewrite() {
-        assert_eq!(resolve_gemini_outbound_model(None, None), None);
+    fn outbound_model_reports_the_logical_name_when_rewrite_declined() {
+        assert_eq!(
+            resolve_gemini_outbound_model(
+                "https://relay.example.com/v1beta/models/gemini-pro:generateContent"
+            )
+            .as_deref(),
+            Some("gemini-pro"),
+            "URL 未被改写，归因就必须是 URL 里的名字"
+        );
+    }
+
+    /// 用户把 URL 钉在其它模型上时，归因同样以 URL 为准。
+    #[test]
+    fn outbound_model_reports_a_pinned_model_from_the_url() {
+        assert_eq!(
+            resolve_gemini_outbound_model(
+                "https://relay.example.com/v1beta/models/pinned-other-model:generateContent"
+            )
+            .as_deref(),
+            Some("pinned-other-model")
+        );
+    }
+
+    /// URL 中无模型段（list 端点等）时返回 None，调用方保留 body 派生的归因。
+    #[test]
+    fn outbound_model_is_none_without_a_model_segment() {
+        assert_eq!(
+            resolve_gemini_outbound_model("https://generativelanguage.googleapis.com/v1beta/models"),
+            None
+        );
+        assert_eq!(
+            resolve_gemini_outbound_model("https://relay.example.com/custom/endpoint"),
+            None
+        );
     }
 }
