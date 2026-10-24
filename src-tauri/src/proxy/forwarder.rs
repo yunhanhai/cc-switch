@@ -1542,12 +1542,9 @@ impl RequestForwarder {
             mapped_body
         };
 
-        // Gemini 路径别名：endpoint 中的模型名按 alias 重写，使过滤与换名成对。
-        // 仅当 alias 命中时重写，否则保持原 endpoint；重写后的 endpoint 会参与
-        // 后续的 URL 拼装（base_url + endpoint），因此不同渠道会自动使用各
-        // 自的物理模型名。
-        // Gemini 路径别名：用 endpoint 中的逻辑模型解析物理名，生成重写后的 endpoint。
-        // 放在 mapped_body 之后但 effective_endpoint/url 之前，使得路径与 body 的映射一致。
+        // Gemini 路径别名：用 endpoint 中的逻辑模型解析该渠道的物理名，重写路径。
+        // 使「过滤」与「换名」成对——不同渠道自动使用各自的物理模型名。
+        // 仅命中 alias 时重写；未命中保持原 endpoint，行为与引入前一致。
         let gemini_alias_endpoint: Option<String> = if matches!(app_type, AppType::Gemini) {
             crate::proxy::handler_context::extract_gemini_model_from_path(endpoint)
                 .and_then(|req_model| {
@@ -1556,9 +1553,8 @@ impl RequestForwarder {
         } else {
             None
         };
-        let effective_alias_endpoint: Option<&str> = gemini_alias_endpoint.as_deref();
-        // 后续的 effective_endpoint 解析优先使用 alias 重写后的路径
-        let endpoint_for_routing: &str = effective_alias_endpoint.unwrap_or(endpoint);
+        // 后续的 effective_endpoint → url 拼装优先使用重写后的路径。
+        let endpoint_for_routing: &str = gemini_alias_endpoint.as_deref().unwrap_or(endpoint);
 
         // 与 CCH 对齐：请求前不做 thinking 主动改写（仅保留兼容入口）
         let mut mapped_body = normalize_thinking_type(mapped_body);
@@ -5870,5 +5866,87 @@ mod tests {
         });
         let body = body_with_image("any-model");
         assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
+    }
+
+    /// P6 转发层：Gemini 路径别名必须把 endpoint 中的逻辑模型换成该渠道的物理名，
+    /// 且保留 `:action` 与 query；这是「过滤与换名成对」中「换名」的一半。
+    #[test]
+    fn gemini_endpoint_is_rewritten_to_channel_model() {
+        let mut fwd = test_forwarder(Duration::from_secs(0), Duration::from_secs(0));
+        fwd.model_alias_index = Some(
+            [(
+                ("gemini-pro".to_string(), "provider-1".to_string()),
+                "gemini-2.0-flash".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        fwd.model_alias_app_type = "gemini";
+        let provider = test_provider_with_type(None);
+
+        let rewritten = fwd
+            .rewrite_gemini_endpoint_for_alias(
+                &provider,
+                "/v1beta/models/gemini-pro:generateContent?key=abc",
+                "gemini-pro",
+            )
+            .expect("命中的 alias 应重写路径");
+
+        assert_eq!(
+            rewritten,
+            "/v1beta/models/gemini-2.0-flash:generateContent?key=abc"
+        );
+    }
+
+    /// 未命中 alias 时必须返回 None，让调用方保留原 endpoint（行为与引入前一致）。
+    #[test]
+    fn gemini_endpoint_untouched_when_alias_not_declared() {
+        let mut fwd = test_forwarder(Duration::from_secs(0), Duration::from_secs(0));
+        fwd.model_alias_index = Some(
+            [(
+                ("gemini-pro".to_string(), "other-provider".to_string()),
+                "gemini-2.0-flash".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        fwd.model_alias_app_type = "gemini";
+        let provider = test_provider_with_type(None);
+
+        assert_eq!(
+            fwd.rewrite_gemini_endpoint_for_alias(
+                &provider,
+                "/v1beta/models/gemini-pro:generateContent",
+                "gemini-pro",
+            ),
+            None,
+            "该渠道未声明此逻辑模型，不应改写路径"
+        );
+    }
+
+    /// 模型名在 body 的 app（非 Gemini）绝不能走路径重写，否则 base_url 会被拼错。
+    #[test]
+    fn path_rewrite_is_gemini_only() {
+        let mut fwd = test_forwarder(Duration::from_secs(0), Duration::from_secs(0));
+        fwd.model_alias_index = Some(
+            [(
+                ("gemini-pro".to_string(), "provider-1".to_string()),
+                "gemini-2.0-flash".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        fwd.model_alias_app_type = "claude";
+        let provider = test_provider_with_type(None);
+
+        assert_eq!(
+            fwd.rewrite_gemini_endpoint_for_alias(
+                &provider,
+                "/v1beta/models/gemini-pro:generateContent",
+                "gemini-pro",
+            ),
+            None,
+            "模型名在 body 的 app 不应改写路径"
+        );
     }
 }
