@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `ba34c90`。
-> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2816 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `299b3b04`。
+> 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2822 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -29,6 +29,9 @@
  | — | `44034d1` | 落盘本草稿 `docs/RELEASE-NOTES-P1-P6.md` |
  | — | `349f00f` | 补 `groupModelAliases` 前端单测（4 用例，面板渠道行序/排序/字段投影） |
  | — | `ba34c90` | 同步本发版说明至 `349f00f`（含测试说明与交付路径） |
+ | — | `a5bd6a29` | 对齐发版说明至 `ba34c90`；记录 bundle `clone` 验证（`fetch --unshallow` 修复浅克隆） |
+ | — | `b5ba7dc5` | 补 Gemini 选路纠正端到端测试（3 用例，两段式选路/未知模型保链/非 Gemini no-op） |
+ | — | `299b3b04` | 补 Gemini 路径重写决策测试（3 用例）并合并 P6 重复注释 |
  
  ## 行为与兼容
  
@@ -39,13 +42,28 @@
  
 ## 交付件
 
-- 主交付：`D:\dev-cache\cc-switch-patches-ba34c90/`（`v3.20.1..HEAD` 共 61 个 patch，其中 P1–P6 及收尾 13 个；已用 `git am` 全量演练，还原树哈希与源分支逐字节一致）
-- 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史，`HEAD ba34c90`；本机已 `fetch --unshallow` 修复浅克隆，`git clone` 演练通过且 commit hash 完全一致）
-- 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
+ - 主交付：`D:\dev-cache\cc-switch-patches-299b3b04/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
+ - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
+   （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
+ - 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
 
  ## 测试说明
 
- - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
+- 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1025 用例全绿）。
+ - **P1–P6 覆盖矩阵**（P6 的「过滤」与「换名」两半均有端到端测试）：
+
+  | 环节 | 位置 | 用例数 | 关键断言 |
+  | --- | --- | --- | --- |
+  | 纯函数解析 | `proxy::model_alias` | 11 | 命中/未声明/空白 target/空索引安全阀/归并规则与过滤 |
+  | 选路过滤 | `proxy::provider_router` | 3 | 无配置不过滤、跳过未声明渠道、有自有映射保留、全滤回退 |
+  | Gemini 选路纠正 | `proxy::handler_context::tests::gemini_correction` | 3 | 两段式筛选、未知模型保链、非 Gemini no-op |
+  | 路径重写（纯函数） | `proxy::handler_context` | 4 | 保留 `:action`/`?query`、list 端点返回 `None` |
+  | 路径重写（转发决策） | `proxy::forwarder` | 3 | 命中改写、未命中不动、仅 Gemini 生效 |
+  | 别名聚合（前端） | `tests/lib/api/modelAliases.group.test.ts` | 4 | 分组、组内渠道序、别名排序、字段投影 |
+
+   `cargo test --lib -- model_alias` / `-- handler_context` / `-- proxy::forwarder::tests::gemini` 与
+  `npx vitest run tests/lib/api/modelAliases.group.test.ts` 可分别复现。
  
  ## 下一步
  
