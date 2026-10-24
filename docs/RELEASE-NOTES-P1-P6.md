@@ -1,6 +1,6 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `4928e85e`。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `faaef158`。
 > 状态：P1–P6 全部完成，`cargo test --lib 2831 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
@@ -45,6 +45,9 @@
  | — | `ef1af4a3` | 审计无调用点的 CRUD 入口：DAO 层全部在用（夹具/安全阀断言），命令层保留并写明理由 |
  | — | `7e183b44` | **修复**：三处渠道模型覆写（GrokBuild + Codex Chat/Anthropic）在 alias 命中时不再覆写，避免冲掉刚换好的物理名 |
  | — | `4928e85e` | 固化「alias 不得被渠道级改写覆盖」不变量（设计文档 §6 第 9 条）并交叉引用相关测试 |
+ | — | `05c7e9ff` | 审计 `forwarder` 全部 4 处 `model` 写入点，记录两处 Copilot 有意例外 |
+ | — | `8f90c6b9` | 审计扩至整个 `proxy` 模块（13 处）：`model_mapper` 在 alias 命中时不可达，`transform_*` 为纯搬运 |
+ | — | `faaef158` | 补全审计边界：模块外 5 处已核查且不在 alias 路径；措辞由"零越权"改为"零未记录越权" |
  
  ## 行为与兼容
  
@@ -67,7 +70,7 @@
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-4928e85e/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-faaef158/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
