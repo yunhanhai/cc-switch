@@ -1,7 +1,7 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `faaef158`。
-> 状态：P1–P6 全部完成，`cargo test --lib 2831 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `b397db32`。
+> 状态：P1–P6 全部完成，`cargo test --lib 2833 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -48,6 +48,8 @@
  | — | `05c7e9ff` | 审计 `forwarder` 全部 4 处 `model` 写入点，记录两处 Copilot 有意例外 |
  | — | `8f90c6b9` | 审计扩至整个 `proxy` 模块（13 处）：`model_mapper` 在 alias 命中时不可达，`transform_*` 为纯搬运 |
  | — | `faaef158` | 补全审计边界：模块外 5 处已核查且不在 alias 路径；措辞由"零越权"改为"零未记录越权" |
+ | — | `bcf151d0` | 发版说明同步至 `faaef158`（写入点审计留痕） |
+ | — | `b397db32` | **修复（独立于 alias 的既有缺陷）**：`ModelAlias` 与 `RoutingGroup` 系列缺 serde rename，Tauri 返回值是 snake_case 而前端读 camelCase，导致 UI 中 `appType`/`providerId`/`targetModel`/`sortOrder` 等**静默为 undefined**；补 `rename_all = "camelCase"` + 2 条契约测试 |
  
  ## 行为与兼容
  
@@ -67,10 +69,13 @@
  - **alias 换名不变量**：alias 命中的请求，出站 `body["model"]` 必须等于该渠道的
    alias 物理名。三处渠道级模型覆写（GrokBuild 与 Codex 两条转换路径）已加守卫；
    任何新增的"渠道级模型改写"都要遵守它（见 `7e183b44` 与设计文档 §6 第 9 条）。
+ - **Tauri 返回值字段名**：Tauri **只转换命令参数，不转换返回值**；返回值必须靠
+   `#[serde(rename_all = "camelCase")]`（或 DTO 层）自己保证字段名。已修
+   `ModelAlias` / `RoutingGroup` 两处，并加契约测试防回归（见 `b397db32`）。
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-faaef158/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-b397db32/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
