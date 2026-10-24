@@ -53,6 +53,49 @@ const locales = [
 ] as const;
 
 describe("locale coverage", () => {
+  // 全局键集合一致性：四语必须逐一对应（当前各 3005 键）。
+  //
+  // 现有用例只保证 `pi.*` 被翻译，因此像 `settings.oneClickInstall`
+  // 这种「只存在于某一个语言、且代码从不引用」的孤儿键能长期逃过检查
+  // （见提交 cebf2ace）。这里以 en 为基准做双向集合比对，同时捕获
+  // 「漏译」与「多余/拼写错误」两类问题。
+  it.each(locales)(
+    "has exactly the same key set as en in %s",
+    (_name, tree) => {
+      const translations = flattenStrings(tree as TranslationTree);
+      const missing = [...reference.keys()].filter(
+        (key) => !translations.has(key),
+      );
+      const extra = [...translations.keys()].filter(
+        (key) => !reference.has(key),
+      );
+
+      expect({ missing, extra }).toEqual({ missing: [], extra: [] });
+    },
+  );
+
+  it.each(locales)(
+    "preserves every interpolation variable outside pi.* in %s",
+    (_name, tree) => {
+      const translations = flattenStrings(tree as TranslationTree);
+      // pi.* 已有专门用例；这里补其余全部命名空间，避免占位符写错
+      // 导致运行时显示原文（如把 {{count}} 写成 {{cnt}}）。
+      const mismatched = [...reference].flatMap(([key, expected]) => {
+        if (key.startsWith("pi.") || piKeysOutsideNamespace.has(key)) {
+          return [];
+        }
+        const actual = translations.get(key);
+        return actual !== undefined &&
+          interpolationVariables(actual).join("\0") !==
+            interpolationVariables(expected).join("\0")
+          ? [key]
+          : [];
+      });
+
+      expect(mismatched).toEqual([]);
+    },
+  );
+
   it.each(locales)("covers every Pi translation key in %s", (_name, tree) => {
     const translations = flattenStrings(tree as TranslationTree);
     const missing = [...piReference.keys()].filter(
