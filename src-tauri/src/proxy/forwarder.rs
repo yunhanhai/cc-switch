@@ -1803,7 +1803,33 @@ impl RequestForwarder {
             || codex_chat_base_is_full_endpoint
             || codex_anthropic_base_is_full_endpoint
         {
-            append_query_to_full_url(&base_url, passthrough_query.as_deref())
+            // full-URL 模式下 endpoint 会被丢弃，因此 Gemini 的路径别名要在这里
+            // 补一次改写（否则「过滤生效、换名丢失」）。未命中 alias 或 URL 未钉在
+            // 本次逻辑模型上时返回 None，走原逻辑，行为与引入前一致。
+            let gemini_full_url_alias =
+                if matches!(app_type, AppType::Gemini) && gemini_alias_endpoint.is_some() {
+                    crate::proxy::handler_context::extract_gemini_model_from_path(endpoint)
+                        .and_then(|requested_model| {
+                            rewrite_gemini_full_url_for_alias(
+                                &base_url,
+                                &requested_model,
+                                gemini_alias_endpoint.as_deref(),
+                            )
+                        })
+                } else {
+                    None
+                };
+            match gemini_full_url_alias {
+                Some(rewritten) => {
+                    log::debug!(
+                        "[Gemini] full-URL 模式应用路径别名: {} → {}",
+                        base_url,
+                        rewritten
+                    );
+                    append_query_to_full_url(&rewritten, passthrough_query.as_deref())
+                }
+                None => append_query_to_full_url(&base_url, passthrough_query.as_deref()),
+            }
         } else {
             adapter.build_url(&base_url, &effective_endpoint)
         };
@@ -3727,6 +3753,33 @@ fn append_query_to_full_url(base_url: &str, query: Option<&str>) -> String {
         }
         _ => base_url.to_string(),
     }
+}
+
+/// 让 full-URL 模式的 Gemini 渠道也应用路径别名。
+///
+/// full-URL 模式的语义是"原样使用该 URL"，因此 url 拼装会只保留 `base_url`
+/// 而丢弃 `effective_endpoint`；若该渠道同时命中了 alias，重写结果就会被静默
+/// 忽略，重新出现「选路按逻辑模型过滤、URL 里却仍是逻辑模型名」的错位
+/// （P6 修好了非 full-URL 路径，这一分支当时遗漏）。
+///
+/// 三重守卫，任一不满足即返回 `None`，保证非 alias 流量行为与引入前完全一致：
+/// 1. 本渠道确实命中了 alias（`rewritten_endpoint` 为 `Some`）；
+/// 2. 配置的 URL 里确实存在 `models/<id>` 段；
+/// 3. 该段的模型名仍是本次请求的逻辑模型 —— 若用户把 URL 钉在另一个模型上，
+///    视为有意为之，不擅自改写。
+fn rewrite_gemini_full_url_for_alias(
+    base_url: &str,
+    requested_model: &str,
+    rewritten_endpoint: Option<&str>,
+) -> Option<String> {
+    let physical_model =
+        crate::proxy::handler_context::extract_gemini_model_from_path(rewritten_endpoint?)?;
+    let configured_model =
+        crate::proxy::handler_context::extract_gemini_model_from_path(base_url)?;
+    if configured_model != requested_model {
+        return None;
+    }
+    crate::proxy::handler_context::rewrite_gemini_model_in_path(base_url, &physical_model)
 }
 
 /// Derive the standalone Alpha Search endpoint from a Codex provider configured
@@ -5947,6 +6000,63 @@ mod tests {
             ),
             None,
             "模型名在 body 的 app 不应改写路径"
+        );
+    }
+
+    /// full-URL 模式的 Gemini 渠道：URL 钉在本次逻辑模型上时应换名。
+    #[test]
+    fn full_url_rewrite_replaces_logical_model() {
+        assert_eq!(
+            rewrite_gemini_full_url_for_alias(
+                "https://relay.example.com/v1beta/models/gemini-pro:generateContent?key=k",
+                "gemini-pro",
+                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+            )
+            .as_deref(),
+            Some("https://relay.example.com/v1beta/models/gemini-2.0-flash:generateContent?key=k"),
+            "应把 URL 中的逻辑模型换成该渠道物理名，并保留 query"
+        );
+    }
+
+    /// 未命中 alias（调用方传 None）时必须原样返回 None，让上层走原逻辑。
+    #[test]
+    fn full_url_rewrite_skips_when_alias_not_hit() {
+        assert_eq!(
+            rewrite_gemini_full_url_for_alias(
+                "https://relay.example.com/v1beta/models/gemini-pro:generateContent",
+                "gemini-pro",
+                None,
+            ),
+            None,
+            "未命中 alias 不得改写 full-URL"
+        );
+    }
+
+    /// URL 没钉在本次逻辑模型上（用户有意指向其它模型）时不得改写。
+    #[test]
+    fn full_url_rewrite_skips_other_model_in_url() {
+        assert_eq!(
+            rewrite_gemini_full_url_for_alias(
+                "https://relay.example.com/v1beta/models/pinned-other-model:generateContent",
+                "gemini-pro",
+                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+            ),
+            None,
+            "URL 指向别的模型时视为用户有意为之，不擅自改写"
+        );
+    }
+
+    /// URL 中不含 models 段（用户给的是终点地址）时不得改写。
+    #[test]
+    fn full_url_rewrite_skips_url_without_model_segment() {
+        assert_eq!(
+            rewrite_gemini_full_url_for_alias(
+                "https://relay.example.com/custom/endpoint",
+                "gemini-pro",
+                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+            ),
+            None,
+            "URL 无 models/<id> 段时不猜测、不拼接"
         );
     }
 }
