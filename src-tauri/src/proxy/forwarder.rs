@@ -2037,15 +2037,10 @@ impl RequestForwarder {
         // - 其余 Gemini 分支：`effective_endpoint` 已由 `endpoint_for_routing` 重写，
         //   从它取模型名即为真值。
         if matches!(app_type, AppType::Gemini) {
-            let applied_model = gemini_full_url_applied_model
-                .as_deref()
-                .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
-                .or_else(|| {
-                    gemini_alias_endpoint
-                        .as_deref()
-                        .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
-                });
-            if let Some(target) = applied_model {
+            if let Some(target) = resolve_gemini_outbound_model(
+                gemini_full_url_applied_model.as_deref(),
+                gemini_alias_endpoint.as_deref(),
+            ) {
                 outbound_model = Some(target);
             }
         }
@@ -3771,6 +3766,27 @@ fn append_query_to_full_url(base_url: &str, query: Option<&str>) -> String {
         }
         _ => base_url.to_string(),
     }
+}
+
+/// 决定 Gemini 的 `outbound_model`（真正发往上游的模型名，用于 usage 归因）。
+///
+/// 两个入参都描述"URL 里的模型名"，语义不同，**优先级必须严格**：
+/// - `full_url_applied`：full-URL 模式下三重守卫**真正改写**后的 URL
+///   （未改写时为 `None`）。它最权威——只有它才能证明上游收到的是物理名。
+/// - `alias_endpoint`：非 full-URL 分支由 `endpoint_for_routing` 重写后的
+///   endpoint，在那里它确实决定最终 URL。
+///
+/// 若只看 `alias_endpoint`（曾经的实现），当守卫拒绝改写时归因会声称物理名、
+/// 而实际 URL 仍是逻辑模型名——归因与真实出站请求不一致。
+fn resolve_gemini_outbound_model(
+    full_url_applied: Option<&str>,
+    alias_endpoint: Option<&str>,
+) -> Option<String> {
+    full_url_applied
+        .and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
+        .or_else(|| {
+            alias_endpoint.and_then(crate::proxy::handler_context::extract_gemini_model_from_path)
+        })
 }
 
 /// 让 full-URL 模式的 Gemini 渠道也应用路径别名。
@@ -6076,5 +6092,39 @@ mod tests {
             None,
             "URL 无 models/<id> 段时不猜测、不拼接"
         );
+    }
+
+    /// 归因必须取 full-URL 分支真正生效的那个模型名（最高优先级）。
+    #[test]
+    fn outbound_model_prefers_the_applied_full_url_rewrite() {
+        assert_eq!(
+            resolve_gemini_outbound_model(
+                Some("https://relay.example.com/v1beta/models/gemini-2.0-flash:generateContent"),
+                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+            )
+            .as_deref(),
+            Some("gemini-2.0-flash")
+        );
+    }
+
+    /// full-URL 守卫未改写时，必须回落到 endpoint 派生的名字，
+    /// 不能凭空断言物理名（否则归因与真实出站 URL 不一致）。
+    #[test]
+    fn outbound_model_falls_back_when_full_url_was_not_rewritten() {
+        assert_eq!(
+            resolve_gemini_outbound_model(
+                None,
+                Some("/v1beta/models/gemini-2.0-flash:generateContent"),
+            )
+            .as_deref(),
+            Some("gemini-2.0-flash"),
+            "非 full-URL 分支由 endpoint_for_routing 决定 URL，从它取真值"
+        );
+    }
+
+    /// 两者皆无（未命中 alias）时返回 None，让调用方保留 body 派生的归因。
+    #[test]
+    fn outbound_model_is_none_without_any_rewrite() {
+        assert_eq!(resolve_gemini_outbound_model(None, None), None);
     }
 }
