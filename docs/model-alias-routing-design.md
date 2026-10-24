@@ -310,7 +310,7 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
    > **不变量**：alias 命中的请求，`body["model"]` 在离开 `forward()` 时
    > 必须等于该渠道的 alias 物理名。任何新增的"渠道级模型改写"都要遵守它。
 
-10. **全 proxy 模块 `model` 写入点审计（13 处，零越权）**：
+10. **`proxy` 模块 `model` 写入点审计（13 处，零未记录越权）**：
     `rg '\["model"\]\s*=' src-tauri/src/proxy` 枚举出 13 处写入，逐一判定如下：
 
     | 类别 | 处数 | 判定 |
@@ -336,4 +336,13 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 
     审计同时确认 alias 校验（`model_aliases` DAO）只要求 provider 存在，
     不排除 Copilot 渠道，故二者确实可能同时生效 —— 上述判断正是针对该情形。
+
+    审计边界（诚实声明）：上述 13 处仅覆盖 `src-tauri/src/proxy`。
+    模块外另有 5 处 `["model"] =`，均已核查且**不在 alias 路径上**：
+
+    - `claude_desktop_config.rs:749` —— Claude Desktop 的 route 映射，
+      在 `forwarder` 中通过 `if matches!(app_type, AppType::ClaudeDesktop)`
+      **优先于** alias 分支执行（§6 第 3 条已述 Desktop 未纳入 alias）。
+    - `services/provider/mod.rs` 的 4 处 —— **测试夹具**，写的是 provider
+      配置（`settings_config["agents"][...]`）而非出站请求体。
  
