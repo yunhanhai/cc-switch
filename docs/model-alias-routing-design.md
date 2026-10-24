@@ -253,13 +253,24 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 
 5. **Gemini + full-URL 模式的路径重写（已补全）**：
    `is_full_url == true` 的渠道走 `append_query_to_full_url(&base_url, ...)`，
-   只保留 base_url、丢弃 `effective_endpoint`，P6 的重写在当时该分支不生效，
-   会出现「选路按逻辑模型过滤、URL 里仍是逻辑模型名」。
-   现已由 `rewrite_gemini_full_url_for_alias` 补齐，**三重守卫**保证非 alias 流量
-   行为不变：命中 alias、URL 里确有 `models/<id>` 段、且该段仍是本次逻辑模型
-   （用户把 URL 钉在别的模型上视为有意为之，不改）。缺任一条件即原样返回。
+  只保留 base_url、丢弃 `effective_endpoint`，P6 的重写在当时该分支不生效，
+  会出现「选路按逻辑模型过滤、URL 里仍是逻辑模型名」。
+  现已由 `rewrite_gemini_full_url_for_alias` 补齐，**三重守卫**保证非 alias 流量
+  行为不变：命中 alias、URL 里确有 `models/<id>` 段、且该段仍是本次逻辑模型
+  （用户把 URL 钉在别的模型上视为有意为之，不改）。缺任一条件即原样返回。
 
    备注：Gemini 表单（`GeminiFormFields`）调 `EndpointField` 时未传
    `showFullUrlToggle`，UI 无法为该 app 开启此模式；此修复主要覆盖
-   历史数据与手写 JSON 带 `meta.isFullUrl` 的情形。
+  历史数据与手写 JSON 带 `meta.isFullUrl` 的情形。
+
+6. **Claude + `gemini_native` 格式（已审查，无需改动）**：
+   `gemini_native` 是 Claude app 的一等 `api_format` 选项
+   （见 `ClaudeFormFields` 的下拉项与 `claudeProviderPresets`）。
+   该路径的模型名虽然最终出现在 URL 里，但**来源是 body**：
+   `rewrite_claude_transform_endpoint` 用 `transform_gemini::extract_gemini_model(&mapped_body)`
+   拼出 `/v1beta/models/{model}:generateContent`，而 `mapped_body` 在此前
+   已由 `resolve_alias_model` 按当前渠道重映射。
+   因此「过滤」（Claude 走 `body["model"]`）与「换名」天然成对，
+   P6 的 `matches!(app_type, AppType::Gemini)` 守卫是**有意为之**——
+   若放开该守卫，反而会对同一次请求做第二次换名。
  
