@@ -1,6 +1,6 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `349f00f`。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `ba34c90`。
 > 状态：P1–P6 全部完成，`cargo check` / `cargo test --lib 2816 passed` / `vitest 串行 135 文件 1025 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
@@ -28,6 +28,7 @@
  | — | `4071f39` | 修正文档 20 键一致 |
  | — | `44034d1` | 落盘本草稿 `docs/RELEASE-NOTES-P1-P6.md` |
  | — | `349f00f` | 补 `groupModelAliases` 前端单测（4 用例，面板渠道行序/排序/字段投影） |
+ | — | `ba34c90` | 同步本发版说明至 `349f00f`（含测试说明与交付路径） |
  
  ## 行为与兼容
  
@@ -36,11 +37,11 @@
  - **回滚**：`select_providers(..., None)` 等价旧行为；删表不影响既有表。
  - **观测**：跳过渠道打 `跳过渠道 X：未声明模型 M`（debug）；命中打 `model alias: alias → target (渠道 Y)`。
  
- ## 交付件
+## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-349f00f/`（`v3.20.1..HEAD` 共 60 个 patch，其中 P1–P6 及收尾 12 个，`git am` 可靠还原）
- - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，`verify` 通过，`HEAD 349f00f`；`clone` 因本仓库浅历史/缺祖先受限，不影响主交付）
- - 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
+- 主交付：`D:\dev-cache\cc-switch-patches-ba34c90/`（`v3.20.1..HEAD` 共 61 个 patch，其中 P1–P6 及收尾 13 个；已用 `git am` 全量演练，还原树哈希与源分支逐字节一致）
+- 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史，`HEAD ba34c90`；本机已 `fetch --unshallow` 修复浅克隆，`git clone` 演练通过且 commit hash 完全一致）
+- 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
 
  ## 测试说明
 
