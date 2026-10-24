@@ -1,6 +1,6 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `c2ac2295`。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `4928e85e`。
 > 状态：P1–P6 全部完成，`cargo test --lib 2831 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
@@ -42,6 +42,9 @@
  | — | `844169c8` | 记录连通性检测与 alias 无关的审查结论（只探 base_url，不涉模型名/熔断器） |
  | — | `73c1abcf` / `1cf66bee` / `d6164e5d` | **修复归因契约**：`outbound_model` 改取最终 URL 真值（前两次按 alias 记账推断在 full-URL 守卫拒绝时会错报物理名），并抽出 `resolve_gemini_outbound_model` + 4 用例 |
  | — | `c2ac2295` | 设计文档固化 `outbound_model` 真值来源契约（第 8 条） |
+ | — | `ef1af4a3` | 审计无调用点的 CRUD 入口：DAO 层全部在用（夹具/安全阀断言），命令层保留并写明理由 |
+ | — | `7e183b44` | **修复**：三处渠道模型覆写（GrokBuild + Codex Chat/Anthropic）在 alias 命中时不再覆写，避免冲掉刚换好的物理名 |
+ | — | `4928e85e` | 固化「alias 不得被渠道级改写覆盖」不变量（设计文档 §6 第 9 条）并交叉引用相关测试 |
  
  ## 行为与兼容
  
@@ -57,11 +60,14 @@
    `models/<id>` 段、该段仍是本次逻辑模型）；任一不满足即保持原 URL（见 `2fdbdf9f`）。
  - **计费归因真值契约**：`outbound_model`（供 usage 归因）必须取自真实出站载体——
     body-based app 取定稿 `filtered_body["model"]`，Gemini 取最终拼装的 `url`；
-    **不得**从 alias 记账推断（见 `d6164e5d` 与设计文档 §6 第 8 条）。
+   **不得**从 alias 记账推断（见 `d6164e5d` 与设计文档 §6 第 8 条）。
+ - **alias 换名不变量**：alias 命中的请求，出站 `body["model"]` 必须等于该渠道的
+   alias 物理名。三处渠道级模型覆写（GrokBuild 与 Codex 两条转换路径）已加守卫；
+   任何新增的"渠道级模型改写"都要遵守它（见 `7e183b44` 与设计文档 §6 第 9 条）。
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-c2ac2295/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-4928e85e/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
