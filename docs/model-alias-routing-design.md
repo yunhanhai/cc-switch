@@ -277,7 +277,23 @@ app 保持一致。P5 的临时退化与前端禁用已在 P6 移除。
 7. **连通性检测与 alias 无关（已审查，无需改动）**：
    `services/stream_check.rs` 的语义是"只探 `base_url` 可达性"——
    GET 一次 base_url，收到任意 HTTP 响应即算可达，**不发真实模型请求**
-   （`model_used` 恒为空），且**绝不触碰故障转移熔断器**（见该文件头设计说明）。
+  （`model_used` 恒为空），且**绝不触碰故障转移熔断器**（见该文件头设计说明）。
    因此它既不需要 alias 换名，也不会因 alias 的选路过滤而误判：
    "可达性"与"模型名是否正确"是两件事，后者由真实流量的熔断器回答。
+
+8. **计费归因 `outbound_model` 必须以「最终 URL / 定稿 body」为唯一真值**：
+   该字段供 usage 归因使用（优先级：上游回显 → `outbound_model` → `request_model`），
+   契约是"真正发往上游的模型名"。历史上有过三次修正（`73c1abcf` → `1cf66bee`
+   → `d6164e5d`），前两次都试图按「alias 是否命中 / 是否改写」**推断**，
+   在 full-URL 守卫拒绝改写时会声称物理名，而 URL 实际仍是逻辑名或被钉住的模型。
+   现实现为：
+
+   - 非 Gemini（含 Claude + `gemini_native`）：取**定稿后** `filtered_body["model"]`
+     —— body 就是它们的真实出站载体；
+   - Gemini：取**最终拼装出的 `url`** 中的 `models/<id>`（`resolve_gemini_outbound_model`），
+     它对所有分支（`endpoint_for_routing` 重写 / full-URL 守卫改写 / 均未生效）都权威。
+
+   边界确认：Gemini 原生请求体不含 `model` 字段，故 URL 无模型段时（list 端点）
+   通用 body 刷新不会赋值，归因自然回落到 `request_model`（`with_model_from_uri`
+   已从 URI 解析），语义正确。
  
