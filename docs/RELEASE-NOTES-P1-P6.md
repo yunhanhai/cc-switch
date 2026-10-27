@@ -1,6 +1,6 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `e21fe965`。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `5822eca3`（本草稿同步至该提交）。
 > 状态：P1–P6 全部完成；后续追加 Claude→Codex 转换与集成测试基建修复（见"追加篇章"）。
 > `cargo test --lib 2836 passed` / 集成 128 / 前端 `vitest 串行 139 文件 1068 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
