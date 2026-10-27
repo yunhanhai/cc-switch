@@ -113,12 +113,14 @@ export interface ConvertedCodexProvider
 /**
  * 构造转换后的 Codex Provider 对象（不含 id/createdAt，由 add mutation 生成）。
  *
- * 展示性元数据（icon/category/官网/备注）延续原供应商——它们描述的是同一个
+ * 展示性元数据（icon/category/官网）延续原供应商——它们描述的是同一个
  * 渠道商；名字加 " (Codex)" 后缀以便在两个列表中区分；sortIndex 不延续，
  * 由 Codex 列表按其自身排序规则落位。meta.apiFormat = "anthropic" 与
  * config 里的 wire_api 双保险：providerNeedsRouting / 后端桥接判定都认显式
- * 声明，切换该供应商时会提示先启动本地路由。转换不可行（无端点/无 Key）返回
- * undefined。
+ * 声明，切换该供应商时会提示先启动本地路由。notes 追加桥接运行条件——
+ * 成功提示会说"已转换"，但产物必须开本地路由才能工作，把这一事实持久化到
+ * 供应商卡片上，而不是只靠切换时的一次性警告。转换不可行（无端点/无 Key）
+ * 返回 undefined。
  */
 export const buildConvertedCodexProvider = (
   provider: Provider,
@@ -132,7 +134,7 @@ export const buildConvertedCodexProvider = (
   websiteUrl: provider.websiteUrl,
   category: provider.category,
   sortIndex: undefined,
-  notes: provider.notes,
+  notes: appendBridgeRuntimeNote(provider.notes, provider.name),
   icon: provider.icon,
   iconColor: provider.iconColor,
   meta: {
@@ -140,3 +142,17 @@ export const buildConvertedCodexProvider = (
     ...(provider.meta ? provider.meta : {}),
   },
 });
+
+const BRIDGE_RUNTIME_NOTE =
+  "由 Claude 供应商转换而来；使用时需先启动本地路由（wire_api=anthropic 桥接）。";
+
+/** 在原 notes 基础上追加桥接运行条件；已有则不重复（幂等） */
+export const appendBridgeRuntimeNote = (
+  notes: string | undefined,
+  sourceName: string,
+): string | undefined => {
+  const note = `${sourceName} ${BRIDGE_RUNTIME_NOTE}`.trim();
+  if (notes?.includes(BRIDGE_RUNTIME_NOTE)) return notes;
+  if (!notes?.trim()) return note;
+  return `${notes.trim()}\n${note}`;
+};

@@ -916,7 +916,7 @@ function App() {
   };
 
   // Claude 卡片专属：把该供应商的 API 设置（端点 + API Key）转换为 Codex 供应商。
-  // 转换不改变原 Claude 供应商；Codex 侧用默认模型名（模型语义不跨渠道）。
+  // 转换不改变原 Claude 供应商；产物声明 wire_api=anthropic，靠本地路由桥接。
   const addCodexProviderMutation = useAddProviderMutation("codex");
   const handleConvertToCodex = async (provider: Provider) => {
     const conversion = convertClaudeProviderToCodex(provider);
@@ -930,6 +930,31 @@ function App() {
       return;
     }
 
+    // 防重：同源供应商已转换过则不再生成第二份（含相同密钥的）配置副本。
+    // 依据：Codex 列表里存在 name === "{源名} (Codex)" 且 auth 密钥相同的供应商。
+    const codexProviders = await queryClient.ensureQueryData({
+      queryKey: ["providers", "codex"],
+      queryFn: () => providersApi.getAll("codex"),
+    });
+    const convertedName = `${provider.name} (Codex)`;
+    const convertedKey = conversion.auth.OPENAI_API_KEY;
+    const alreadyConverted = Object.values(codexProviders).some(
+      (existing) =>
+        existing.name === convertedName &&
+        (existing.settingsConfig as Record<string, any>)?.auth
+          ?.OPENAI_API_KEY === convertedKey,
+    );
+    if (alreadyConverted) {
+      toast.info(
+        t("provider.convertToCodexDuplicate", {
+          name: provider.name,
+          defaultValue:
+            "「{{name}}」已转换过（Codex 列表中的同名供应商），未重复创建",
+        }),
+      );
+      return;
+    }
+
     try {
       await addCodexProviderMutation.mutateAsync(
         buildConvertedCodexProvider(provider, conversion),
@@ -937,7 +962,8 @@ function App() {
       toast.success(
         t("provider.convertToCodexSuccess", {
           name: provider.name,
-          defaultValue: "已把「{{name}}」的 API 设置转换为 Codex 供应商",
+          defaultValue:
+            "已把「{{name}}」的 API 设置转换为 Codex 供应商（使用时需先启动本地路由）",
         }),
         { closeButton: true },
       );

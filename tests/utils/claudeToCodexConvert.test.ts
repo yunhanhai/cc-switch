@@ -191,10 +191,29 @@ describe("buildConvertedCodexProvider", () => {
 
     expect(codexProvider.websiteUrl).toBe("https://kimi.com");
     expect(codexProvider.category).toBe("cn_official");
-    expect(codexProvider.notes).toBe("团队主账号");
     expect(codexProvider.icon).toBe("kimi");
     expect(codexProvider.iconColor).toBe("#00A67E");
     expect(codexProvider.sortIndex).toBeUndefined();
+  });
+
+  it("appends the bridge runtime condition to notes", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider.notes).toContain("团队主账号");
+    expect(codexProvider.notes).toContain("需先启动本地路由");
+  });
+
+  it("does not duplicate the bridge note when already present (idempotent)", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const once = buildConvertedCodexProvider(fullProvider, conversion);
+    const convertedProvider = { ...fullProvider, notes: once.notes };
+    const twice = buildConvertedCodexProvider(
+      convertedProvider,
+      conversion,
+    ).notes;
+
+    expect(twice).toBe(once.notes);
   });
 
   it("declares the anthropic api format so routing prompts and bridging engage", () => {
