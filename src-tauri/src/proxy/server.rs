@@ -662,4 +662,232 @@ mod tests {
             "full URL"
         );
     }
+
+    // End-to-end runtime check for the Claude→Codex converted-provider shape:
+    // a real ProxyServer forwards a Codex Responses request through the real
+    // forwarder to a mock Anthropic Messages upstream, and we assert the wire
+    // shape the upstream actually receives (path rewrite, version header,
+    // credential swap, Anthropic body, no Codex fingerprints).
+    #[tokio::test]
+    async fn converted_codex_provider_reaches_anthropic_upstream_in_messages_shape() {
+        struct CapturedAnthropicRequest {
+            path: String,
+            authorization: Option<String>,
+            anthropic_version: Option<String>,
+            accept: Option<String>,
+            fingerprint_headers: Vec<String>,
+            body: Value,
+        }
+
+        let captured = Arc::new(Mutex::new(Vec::<CapturedAnthropicRequest>::new()));
+        let mock_app = Router::new().route(
+            "/v1/messages",
+            post({
+                let captured = captured.clone();
+                move |request: axum::extract::Request| {
+                    let captured = captured.clone();
+                    async move {
+                        let (parts, body) = request.into_parts();
+                        let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
+                            .await
+                            .expect("read mock request body");
+                        let fingerprint_headers = parts
+                            .headers
+                            .keys()
+                            .map(|name| name.as_str().to_ascii_lowercase())
+                            .filter(|name| {
+                                matches!(
+                                    name.as_str(),
+                                    "originator"
+                                        | "session_id"
+                                        | "x-stainless-lang"
+                                        | "openai-beta"
+                                        | "x-codex-window-id"
+                                )
+                            })
+                            .collect();
+                        captured.lock().await.push(CapturedAnthropicRequest {
+                            path: parts.uri.path().to_string(),
+                            authorization: parts
+                                .headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|value| value.to_str().ok())
+                                .map(ToString::to_string),
+                            anthropic_version: parts
+                                .headers
+                                .get("anthropic-version")
+                                .and_then(|value| value.to_str().ok())
+                                .map(ToString::to_string),
+                            accept: parts
+                                .headers
+                                .get(header::ACCEPT)
+                                .and_then(|value| value.to_str().ok())
+                                .map(ToString::to_string),
+                            fingerprint_headers,
+                            body: serde_json::from_slice(&body_bytes)
+                                .expect("parse mock request body"),
+                        });
+
+                        // A minimal valid Anthropic Messages response; the Codex-side
+                        // response transform is covered by unit tests, so JSON is fine.
+                        let payload = json!({
+                            "id": "msg_1",
+                            "type": "message",
+                            "role": "assistant",
+                            "model": "kimi-k2-turbo-preview",
+                            "content": [{ "type": "text", "text": "pong" }],
+                            "stop_reason": "end_turn",
+                            "usage": {
+                                "input_tokens": 1,
+                                "output_tokens": 1
+                            }
+                        });
+                        (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "application/json")],
+                            serde_json::to_string(&payload).expect("serialize mock response"),
+                        )
+                    }
+                }
+            }),
+        );
+        let mock_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind mock anthropic upstream");
+        let mock_addr = mock_listener.local_addr().expect("mock upstream address");
+        let mock_handle = tokio::spawn(async move {
+            axum::serve(mock_listener, mock_app)
+                .await
+                .expect("serve mock anthropic upstream");
+        });
+
+        let db = Arc::new(Database::memory().expect("memory database"));
+        // The exact shape the conversion produces: converted endpoint + key +
+        // Anthropic model name in the top-level model, wire_api = "anthropic"
+        // in TOML, and meta.apiFormat = "anthropic".
+        let provider = Provider::with_id(
+            "kimi-codex-converted".to_string(),
+            "Kimi (Codex)".to_string(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "converted-upstream-key" },
+                "config": format!(
+                    "model_provider = \"custom\"\n\
+                     model = \"kimi-k2-turbo-preview\"\n\
+                     model_reasoning_effort = \"high\"\n\
+                     disable_response_storage = true\n\n\
+                     [model_providers.custom]\n\
+                     name = \"Kimi\"\n\
+                     base_url = \"http://{mock_addr}\"\n\
+                     wire_api = \"anthropic\"\n\
+                     requires_openai_auth = true\n"
+                ),
+                "modelCatalog": { "models": [] }
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider)
+            .expect("save converted provider");
+        db.set_current_provider("codex", &provider.id)
+            .expect("select converted provider");
+
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                non_streaming_timeout: 10,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        let proxy_info = proxy.start().await.expect("start test proxy");
+        let client = reqwest::Client::new();
+
+        // What the Codex CLI sends to cc-switch: a native Responses request.
+        let response = client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/responses",
+                proxy_info.port
+            ))
+            .header(header::AUTHORIZATION, "Bearer converted-upstream-key")
+            .header("originator", "codex_cli_rs")
+            .header("x-stainless-lang", "rust")
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model": "kimi-k2-turbo-preview",
+                "max_output_tokens": 1024,
+                "instructions": "You are a helpful assistant.",
+                "input": [
+                    { "role": "user", "content": [{ "type": "input_text", "text": "Hello" }] }
+                ]
+            }))
+            .send()
+            .await
+            .expect("send responses request");
+
+        assert_eq!(response.status(), StatusCode::OK, "proxy round-trip");
+        let response_text = response.text().await.expect("read proxied response");
+        let response_body: Value =
+            serde_json::from_str(&response_text).expect("parse proxied response");
+        // The proxy converts the Anthropic reply back into a Responses-shaped
+        // body for Codex (object: "response", output[].type = "message" with
+        // output_text) — proof the round trip preserves semantics.
+        assert_eq!(response_body["object"], "response");
+        assert_eq!(response_body["status"], "completed");
+        assert_eq!(
+            response_body["output"][0]["content"][0]["type"],
+            "output_text"
+        );
+        assert_eq!(response_body["output"][0]["content"][0]["text"], "pong");
+
+        proxy.stop().await.expect("stop test proxy");
+        mock_handle.abort();
+
+        let captured = captured.lock().await;
+        assert_eq!(captured.len(), 1, "exactly one upstream request");
+        let upstream = &captured[0];
+
+        // Path rewritten from Codex's /responses to Anthropic /v1/messages.
+        assert_eq!(upstream.path, "/v1/messages");
+        // anthropic-version supplied (client's value passes through).
+        assert_eq!(upstream.anthropic_version.as_deref(), Some("2023-06-01"));
+        // Credential swapped to the provider's stored key via Bearer
+        // (meta.apiKeyField unset → default ANTHROPIC_AUTH_TOKEN strategy).
+        assert_eq!(
+            upstream.authorization.as_deref(),
+            Some("Bearer converted-upstream-key")
+        );
+        // Accept normalized to application/json (Codex sends event-stream).
+        assert_eq!(upstream.accept.as_deref(), Some("application/json"));
+        // No Codex/OpenAI fingerprint headers leak to the Anthropic gateway.
+        assert!(
+            upstream.fingerprint_headers.is_empty(),
+            "fingerprint headers leaked: {:?}",
+            upstream.fingerprint_headers
+        );
+        // Body is Anthropic Messages shape: max_tokens required, system hoisted
+        // from instructions (the cache injector upgrades the string to text
+        // blocks with a leading ephemeral cache_control breakpoint), messages
+        // rebuilt from input.
+        assert_eq!(upstream.body["model"], "kimi-k2-turbo-preview");
+        assert_eq!(upstream.body["max_tokens"], 1024);
+        assert_eq!(
+            upstream.body["system"][0]["type"],
+            "text"
+        );
+        assert_eq!(
+            upstream.body["system"][0]["text"],
+            "You are a helpful assistant."
+        );
+        assert_eq!(
+            upstream.body["system"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert_eq!(upstream.body["messages"][0]["role"], "user");
+        assert_eq!(
+            upstream.body["messages"][0]["content"][0]["type"],
+            "text"
+        );
+        assert!(upstream.body.get("instructions").is_none());
+    }
 }
