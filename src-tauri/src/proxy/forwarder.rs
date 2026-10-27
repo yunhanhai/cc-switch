@@ -2587,7 +2587,7 @@ impl RequestForwarder {
         {
             ordered_headers.append(
                 "anthropic-version",
-                http::HeaderValue::from_static("2023-06-01"),
+                http::HeaderValue::from_static(ANTHROPIC_API_VERSION),
             );
         }
 
@@ -3438,6 +3438,12 @@ fn rewrite_codex_responses_endpoint_to_chat(endpoint: &str) -> (String, Option<S
 const CLAUDE_CODE_USER_AGENT: &str = "claude-cli/1.0.119 (external, cli)";
 const CLAUDE_CODE_SYSTEM_IDENTITY: &str =
     "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/// The Anthropic Messages API version string sent when the client does not
+/// supply its own `anthropic-version`. Pinned by Anthropic's official docs
+/// (docs.anthropic.com → API versioning); the contract test in
+/// `transform_codex_anthropic` guards it so an accidental edit breaks CI.
+pub(crate) const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
 /// Insert the Claude Code identity as the first line before the `system` field in
 /// the Anthropic request body.
@@ -4965,6 +4971,15 @@ mod tests {
         assert!(
             codex_anthropic_error_envelope_message(br#"{"type":"message","content":[]}"#).is_none()
         );
+    }
+
+    // Contract: the anthropic-version fallback must match the value documented in
+    // Anthropic's official API-versioning docs. Both the Claude transform path and
+    // the Codex→Anthropic bridge send this when the client omits the header; a
+    // wrong value hard-400s on every Anthropic-compatible gateway.
+    #[test]
+    fn anthropic_api_version_contract() {
+        assert_eq!(super::ANTHROPIC_API_VERSION, "2023-06-01");
     }
 
     #[test]
