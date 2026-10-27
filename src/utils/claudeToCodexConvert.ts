@@ -49,6 +49,53 @@ wire_api = "anthropic"
 requires_openai_auth = true`;
 };
 
+/**
+ * 从 Anthropic 兼容端点推导 OpenAI 协议候选端点（双协议探测用）。
+ *
+ * 各渠道的 Anthropic 兼容路径无统一标准（`/anthropic`、`/claude` 等），
+ * 此处只处理可安全剥离的已知后缀：剥掉后若 URL 仍非空则作为候选；
+ * 无法推导（纯 origin 或未知路径形态）返回 undefined，调用方放弃直连。
+ */
+export const deriveOpenAiBaseUrlFromAnthropic = (
+  anthropicBaseUrl: string,
+): string | undefined => {
+  const trimmed = anthropicBaseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) return undefined;
+  for (const suffix of ["/anthropic", "/claude", "/claude-code", "/messages"]) {
+    if (trimmed.toLowerCase().endsWith(suffix)) {
+      const candidate = trimmed.slice(0, -suffix.length);
+      // 剥离后必须仍有 host 部分（http(s)://...）
+      if (/^https?:\/\/.+/.test(candidate)) return candidate;
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * 生成 Codex 直连 config.toml（wire_api = "responses"，经上游 OpenAI 端点）。
+ *
+ * 仅在双协议探测命中时使用：上游自己讲 Responses 协议，无需本地路由桥接。
+ */
+export const generateDirectCodexConfig = (
+  providerName: string,
+  openAiBaseUrl: string,
+  modelName: string = CODEX_DEFAULT_MODEL,
+): string => {
+  const configText = (value: string) => tomlBasicString(value);
+
+  return `model_provider = "custom"
+model = ${configText(modelName)}
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = ${configText(providerName)}
+base_url = ${configText(openAiBaseUrl)}
+wire_api = "responses"
+requires_openai_auth = true`;
+};
+
 /** 从 Claude 供应商的 env 读取自定义端点；官方直连（无端点）返回 undefined */
 export const extractClaudeBaseUrl = (
   provider: Provider,
@@ -66,7 +113,9 @@ export interface ConvertClaudeToCodexOptions {
 }
 
 /** 从 Claude env 里读主模型名（ANTHROPIC_MODEL），供桥接路径作为上游模型 */
-const extractClaudeModel = (provider: Provider): string | undefined => {
+export const extractClaudeModelName = (
+  provider: Provider,
+): string | undefined => {
   const config = provider.settingsConfig as Record<string, any>;
   const model = config?.env?.ANTHROPIC_MODEL;
   if (typeof model !== "string") return undefined;
@@ -95,7 +144,9 @@ export const convertClaudeProviderToCodex = (
   const config = generateCodexConfigFromClaudeEndpoint(
     provider.name,
     baseUrl,
-    options.modelName ?? extractClaudeModel(provider) ?? CODEX_DEFAULT_MODEL,
+    options.modelName ??
+      extractClaudeModelName(provider) ??
+      CODEX_DEFAULT_MODEL,
   );
 
   return {
@@ -153,6 +204,54 @@ export const appendBridgeRuntimeNote = (
 ): string | undefined => {
   const note = `${sourceName} ${BRIDGE_RUNTIME_NOTE}`.trim();
   if (notes?.includes(BRIDGE_RUNTIME_NOTE)) return notes;
+  if (!notes?.trim()) return note;
+  return `${notes.trim()}\n${note}`;
+};
+
+/**
+ * 双协议探测命中的直连产物形态：wire_api = "responses"，无需本地路由。
+ */
+export interface ConvertedCodexProviderOptions {
+  /** 探测模式："bridge"（默认，走本地路由）或 "direct"（上游原生 Responses） */
+  mode?: "bridge" | "direct";
+}
+
+export const buildConvertedCodexProviderWithMode = (
+  provider: Provider,
+  conversion: ClaudeToCodexConversion,
+  options: ConvertedCodexProviderOptions = {},
+): ConvertedCodexProvider => {
+  if (options.mode === "direct") {
+    // 直连产物：上游自己讲 Responses 协议；不声明 anthropic apiFormat
+    // （providerNeedsRouting 因此不要求本地路由）。
+    return {
+      name: `${provider.name} (Codex)`,
+      settingsConfig: {
+        auth: conversion.auth,
+        config: conversion.config,
+      },
+      websiteUrl: provider.websiteUrl,
+      category: provider.category,
+      sortIndex: undefined,
+      notes: appendDirectRuntimeNote(provider.notes, provider.name),
+      icon: provider.icon,
+      iconColor: provider.iconColor,
+      meta: provider.meta ? { ...provider.meta } : undefined,
+    };
+  }
+  return buildConvertedCodexProvider(provider, conversion);
+};
+
+const DIRECT_RUNTIME_NOTE =
+  "由 Claude 供应商转换而来（直连模式：上游提供 OpenAI 兼容端点，无需本地路由）。";
+
+/** 直连产物的 notes 标注；已有则不重复（幂等） */
+export const appendDirectRuntimeNote = (
+  notes: string | undefined,
+  sourceName: string,
+): string | undefined => {
+  const note = `${sourceName} ${DIRECT_RUNTIME_NOTE}`.trim();
+  if (notes?.includes(DIRECT_RUNTIME_NOTE)) return notes;
   if (!notes?.trim()) return note;
   return `${notes.trim()}\n${note}`;
 };

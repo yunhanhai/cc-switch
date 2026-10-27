@@ -147,6 +147,7 @@
     "duplicate": "複製",
     "convertToCodex": "Codex プロバイダーに変換",
     "convertToCodexSuccess": "「{{name}}」の API 設定を Codex プロバイダーに変換しました（使用前にローカルルーティングを起動してください）",
+    "convertToCodexSuccessDirect": "「{{name}}」の API 設定を Codex プロバイダーに変換しました（直結モード：ローカルルーティング不要）",
     "convertToCodexDuplicate": "「{{name}}」は既に変換済みです（同名の Codex プロバイダーが存在するため、重複作成しませんでした）",
     "convertToCodexUnsupported": "このプロバイダーにはカスタムエンドポイントまたは API キーがないため、Codex に変換できません",
     "sortUpdateFailed": "並び順の更新に失敗しました",

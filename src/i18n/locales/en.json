@@ -147,6 +147,7 @@
     "duplicate": "Duplicate",
     "convertToCodex": "Convert to Codex provider",
     "convertToCodexSuccess": "Converted \"{{name}}\" API settings into a Codex provider (start the local proxy before using it)",
+    "convertToCodexSuccessDirect": "Converted \"{{name}}\" API settings into a Codex provider (direct mode — no local proxy needed)",
     "convertToCodexDuplicate": "\"{{name}}\" was already converted (the same-named Codex provider exists); nothing was duplicated",
     "convertToCodexUnsupported": "This provider has no custom endpoint or API key, so it cannot be converted to Codex",
     "sortUpdateFailed": "Failed to update sort order",

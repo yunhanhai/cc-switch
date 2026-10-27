@@ -147,6 +147,7 @@
     "duplicate": "複製",
     "convertToCodex": "轉換為 Codex 供應商",
     "convertToCodexSuccess": "已將「{{name}}」的 API 設定轉換為 Codex 供應商（使用前需先啟動本機路由）",
+    "convertToCodexSuccessDirect": "已將「{{name}}」的 API 設定轉換為 Codex 供應商（直連模式，無需本機路由）",
     "convertToCodexDuplicate": "「{{name}}」已轉換過（Codex 清單中已有同名供應商），未重複建立",
     "convertToCodexUnsupported": "該供應商缺少自訂端點或 API 金鑰，無法轉換為 Codex",
     "sortUpdateFailed": "排序更新失敗",

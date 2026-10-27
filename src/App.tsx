@@ -57,9 +57,14 @@ import {
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { deepClone } from "@/utils/deepClone";
 import {
-  buildConvertedCodexProvider,
+  buildConvertedCodexProviderWithMode,
   convertClaudeProviderToCodex,
+  deriveOpenAiBaseUrlFromAnthropic,
+  extractClaudeBaseUrl,
+  extractClaudeModelName,
+  generateDirectCodexConfig,
 } from "@/utils/claudeToCodexConvert";
+import { fetchModelsForConfig } from "@/lib/api/model-fetch";
 import { cn } from "@/lib/utils";
 import {
   isWindows,
@@ -916,7 +921,9 @@ function App() {
   };
 
   // Claude 卡片专属：把该供应商的 API 设置（端点 + API Key）转换为 Codex 供应商。
-  // 转换不改变原 Claude 供应商；产物声明 wire_api=anthropic，靠本地路由桥接。
+  // 转换不改变原 Claude 供应商。默认产物 wire_api=anthropic 靠本地路由桥接；
+  // 若双协议探测命中（上游同时提供 OpenAI 兼容端点），改生成 wire_api=responses
+  // 的直连产物，省掉本地路由依赖。
   const addCodexProviderMutation = useAddProviderMutation("codex");
   const handleConvertToCodex = async (provider: Provider) => {
     const conversion = convertClaudeProviderToCodex(provider);
@@ -955,16 +962,59 @@ function App() {
       return;
     }
 
+    // 双协议探测：Anthropic 端点若带已知兼容后缀（/anthropic 等），剥掉后对
+    // OpenAI 候选端点做一次 /v1/models 探测；返回非空模型列表即认为上游
+    // 同时讲 Responses 协议 → 生成直连产物。任何失败静默回退桥接产物。
+    let mode: "bridge" | "direct" = "bridge";
+    const anthropicBaseUrl = extractClaudeBaseUrl(provider);
+    const openAiCandidate = anthropicBaseUrl
+      ? deriveOpenAiBaseUrlFromAnthropic(anthropicBaseUrl)
+      : undefined;
+    if (anthropicBaseUrl && openAiCandidate) {
+      try {
+        const models = await fetchModelsForConfig(
+          openAiCandidate,
+          conversion.auth.OPENAI_API_KEY,
+        );
+        if (models.length > 0) {
+          mode = "direct";
+        }
+      } catch {
+        // 探测失败（网关不提供 OpenAI 端点 / 网络异常）→ 保持桥接产物
+      }
+    }
+
+    const codexProvider =
+      mode === "direct"
+        ? buildConvertedCodexProviderWithMode(
+            provider,
+            {
+              auth: conversion.auth,
+              config: generateDirectCodexConfig(
+                provider.name,
+                openAiCandidate!,
+                extractClaudeModelName(provider) ?? undefined,
+              ),
+            },
+            { mode },
+          )
+        : buildConvertedCodexProviderWithMode(provider, conversion, { mode });
+
     try {
-      await addCodexProviderMutation.mutateAsync(
-        buildConvertedCodexProvider(provider, conversion),
-      );
+      await addCodexProviderMutation.mutateAsync(codexProvider);
       toast.success(
-        t("provider.convertToCodexSuccess", {
-          name: provider.name,
-          defaultValue:
-            "已把「{{name}}」的 API 设置转换为 Codex 供应商（使用时需先启动本地路由）",
-        }),
+        t(
+          mode === "direct"
+            ? "provider.convertToCodexSuccessDirect"
+            : "provider.convertToCodexSuccess",
+          {
+            name: provider.name,
+            defaultValue:
+              mode === "direct"
+                ? "已把「{{name}}」的 API 设置转换为 Codex 供应商（直连模式，无需本地路由）"
+                : "已把「{{name}}」的 API 设置转换为 Codex 供应商（使用时需先启动本地路由）",
+          },
+        ),
         { closeButton: true },
       );
     } catch {
