@@ -1,7 +1,8 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `b397db32`。
-> 状态：P1–P6 全部完成，`cargo test --lib 2833 passed` / `vitest 串行 135 文件 1031 用例` / `typecheck` / `format` 全绿，`git status` 干净。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `e21fe965`。
+> 状态：P1–P6 全部完成；后续追加 Claude→Codex 转换与集成测试基建修复（见"追加篇章"）。
+> `cargo test --lib 2836 passed` / 集成 128 / 前端 `vitest 串行 139 文件 1068 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
  ## 摘要
  
@@ -50,6 +51,43 @@
  | — | `faaef158` | 补全审计边界：模块外 5 处已核查且不在 alias 路径；措辞由"零越权"改为"零未记录越权" |
  | — | `bcf151d0` | 发版说明同步至 `faaef158`（写入点审计留痕） |
  | — | `b397db32` | **修复（独立于 alias 的既有缺陷）**：`ModelAlias` 与 `RoutingGroup` 系列缺 serde rename，Tauri 返回值是 snake_case 而前端读 camelCase，导致 UI 中 `appType`/`providerId`/`targetModel`/`sortOrder` 等**静默为 undefined**；补 `rename_all = "camelCase"` + 2 条契约测试 |
+ | — | `ffedc2c7` | 发版说明同步至 `b397db32`（serde 命名修复） |
+
+ ## 追加篇章 A：集成测试基建修复（`afcb678d`）
+
+ 此前 `src-tauri/tests/` 12 个集成测试文件**从未运行过**，两层障碍一次清除：
+
+ 1. **rustc 编译崩溃**：编译大测试目标（`support.rs`/`provider_service.rs`）时栈溢出
+    （`STATUS_STACK_BUFFER_OVERRUN`，exit 0xc0000409）。解法：`RUST_MIN_STACK=33554432`（32 MB）。
+ 2. **路径错位（根因）**：`build.rs` 无条件注入 `cc_switch_dev_build`，而 `cfg(test)`
+    只对 lib 自身单元测试为真——集成测试编译 lib 时走 `.cc-switch-dev` 布局，夹具按
+    `.cc-switch` 读写。修复：`config.rs` 新增集中判定 `uses_dev_isolated_layout()`
+    （= dev 构建 && 非 `#[cfg(test)]` && 非 `CC_SWITCH_TEST_HOME` 沙盒），全部 16 处
+    dev 隔离分支（目录/端口 15721↔15722/scheme）从编译期 `#[cfg]` 改为运行时判定。
+    **dev 版正常运行的路径/端口/scheme 行为完全不变**。
+
+ 结果：集成 128 用例全绿（12 文件）；`tests/skill_sync.rs` 的 symlink 用例按仓库既有
+ 模式在无 SeCreateSymbolicLinkPrivilege 的 Windows 上优雅跳过（错误 1314）。
+
+ ## 追加篇章 B：Claude → Codex 供应商一键转换（`079791a7`..`e21fe965`）
+
+ Claude 第三方供应商卡片上的 ⇄ 按钮，把端点 + API Key + 模型名转换为 Codex 供应商。
+ **协议依据**（上游源码取证）：`openai/codex` 的 `WireApi` 枚举只认 `"responses"` 与
+ `"anthropic"`（`chat` 已于 2026-02 移除），故转换产物 `wire_api = "anthropic"` 是
+ 目标 CLI 的官方一等公民配置。完整协议审计与运行条件见
+ `docs/claude-to-codex-conversion.md`。关键提交：
+
+ | 提交 | 内容 |
+ | --- | --- |
+ | `079791a7` | 功能落地：转换按钮（仅第三方卡片）+ payload 构造 + 四语 |
+ | `a30d5c4b` | **协议修复**：写 `wire_api = "anthropic"` + `meta.apiFormat`（原 `"responses"` 会对 Anthropic 网关发 `/responses` 必然 404） |
+ | `e6d67d9e` | **模型搬运**：搬源 `ANTHROPIC_MODEL` 为 config 顶层 model（桥接路径会覆写请求模型为此值） |
+ | `08f05e9c` | `ANTHROPIC_API_VERSION`（`2023-06-01`）抽为共享常量 + 契约测试 |
+ | `23c7d165` | 防重（同名同密钥不重复创建）+ 成功 toast 与 notes 声明"需先启动本地路由" |
+ | `a2679a59` / `eea6417d` | **运行时证据**：两个回环端到端测试（真实 ProxyServer + 真实 forwarder → mock Anthropic 上游），wire 级断言路径重写/版本头/凭证交换/Accept 归一化/零指纹泄漏/system 升级/响应回转，含流式 SSE 事件生命周期 |
+ | `0b3e08dc` | **双协议探测**：Anthropic 端点带已知兼容后缀时剥离并探测 OpenAI 候选 `/v1/models`，命中则生成 `wire_api="responses"` 直连产物（无需本地路由），失败静默回退桥接 |
+
+ 测试：转换 20 例 + 直连模式 11 例 + UI 门控 6 例 + 回环端到端 2 例 + locale 守卫。
  
  ## 行为与兼容
  
@@ -75,18 +113,19 @@
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-b397db32/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-e21fe965/`（`git format-patch v3.20.1..HEAD`，106 patch，`git am` 可完整还原）
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
- - 两者均已演练：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
+ - 两者均已演练（2026-10-27）：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
  - 远端：`origin` 为上游 `farion1231/cc-switch`，当前账号 `yunhanhai` 直接 `push` 为 403 属预期 fork 流程；`gh` 未安装，需 `gh auth login` 后 `fork + push + 建 PR`。
- - **i18n 一致性**：四语现各 3005 键、完全等值；`localeCoverage.test.ts` 已加全局守卫，
+ - **i18n 一致性**：四语完全等值；`localeCoverage.test.ts` 已加全局守卫，
    今后漏译或多余/拼错键会被 CI 直接拦下（见 `2daeba47`）。
 
  ## 测试说明
 
- - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时（实测并行 env 381–545s vs 串行 108s），放宽 `--testTimeout` 无效；该文件在 `v3.20.1..HEAD` 内零改动。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-24：135 文件 / 1031 用例全绿）。
+ - 前端全量默认并行会误报：`tests/integration/App.test.tsx` 的 2 个用例因 jsdom 环境并行开销超时，放宽 `--testTimeout` 无效。判定真伪请用 `npx vitest run --no-file-parallelism`（2026-10-27：139 文件 / 1068 用例全绿）。
  - 另有 i18n 全局守卫用例（`tests/config/localeCoverage.test.ts`，15 例，含四语键集合与占位符一致性）。
+ - **集成测试**：`$env:RUST_MIN_STACK = "33554432"` 后 `cargo test --tests` 可跑全部 12 文件（128 用例；rustc 编译大测试目标会栈溢出，见追加篇章 A）。
  - **P1–P6 覆盖矩阵**（P6 的「过滤」与「换名」两半均有端到端测试）：
 
   | 环节 | 位置 | 用例数 | 关键断言 |
