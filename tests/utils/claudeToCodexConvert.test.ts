@@ -69,14 +69,30 @@ describe("convertClaudeProviderToCodex", () => {
     expect(conversion?.auth.OPENAI_API_KEY).toBe("sk-api-key");
   });
 
-  it("keeps the Codex default model instead of copying the Anthropic model name", () => {
+  it("carries the Anthropic model name as the upstream model for the bridged gateway", () => {
     const conversion = convertClaudeProviderToCodex(claudeProvider());
 
-    expect(conversion?.config).toMatch(/^model = "gpt-5\.6-sol"$/m);
-    expect(conversion?.config).not.toContain("kimi-k2-turbo-preview");
+    // 桥接后请求模型会被覆写为 config 顶层 model；Anthropic 协议网关认识的
+    // 是自家模型名，因此源 ANTHROPIC_MODEL 是正确的搬运对象。
+    expect(conversion?.config).toMatch(/^model = "kimi-k2-turbo-preview"$/m);
   });
 
-  it("honors an explicit model name override", () => {
+  it("falls back to the Codex default model when ANTHROPIC_MODEL is absent", () => {
+    const conversion = convertClaudeProviderToCodex(
+      claudeProvider({
+        settingsConfig: {
+          env: {
+            ANTHROPIC_BASE_URL: "https://api.example.com",
+            ANTHROPIC_AUTH_TOKEN: "sk-x",
+          },
+        },
+      }),
+    );
+
+    expect(conversion?.config).toMatch(/^model = "gpt-5\.6-sol"$/m);
+  });
+
+  it("honors an explicit model name override over ANTHROPIC_MODEL", () => {
     const conversion = convertClaudeProviderToCodex(claudeProvider(), {
       modelName: "gpt-5-codex",
     });

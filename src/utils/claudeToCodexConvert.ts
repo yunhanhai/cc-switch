@@ -5,8 +5,10 @@
 // Codex 原生说 Responses——直连必然 404。转换因此固定 wire_api = "anthropic"，
 // 由 CC Switch 本地路由做 Responses ⇄ Anthropic 桥接（判定链
 // codex_provider_uses_anthropic 只认显式 wire_api / meta.apiFormat，绝不猜测
-// base_url）。模型名语义不同（Anthropic 系 vs GPT 系），不随转换搬运，保留
-// Codex 侧预设的默认模型（与 codexProviderPresets / deeplink 导入一致）。
+// base_url）。桥接路径上 forwarder 的 apply_codex_upstream_model 会把请求模型
+// 覆写为 config 顶层 model（不在 modelCatalog 时），因此这里把源供应商的
+// ANTHROPIC_MODEL 搬为顶层 model——网关是 Anthropic 协议，自家模型名才是它
+// 认识的名字；缺省回退 Codex 通用默认。
 import type { Provider } from "@/types";
 import { getApiKeyFromConfig } from "@/utils/providerConfigUtils";
 
@@ -59,9 +61,18 @@ export const extractClaudeBaseUrl = (
 };
 
 export interface ConvertClaudeToCodexOptions {
-  /** Codex 侧使用的模型名；缺省用仓库预设默认 */
+  /** Codex 侧使用的模型名；缺省优先用源 ANTHROPIC_MODEL，否则用仓库预设默认 */
   modelName?: string;
 }
+
+/** 从 Claude env 里读主模型名（ANTHROPIC_MODEL），供桥接路径作为上游模型 */
+const extractClaudeModel = (provider: Provider): string | undefined => {
+  const config = provider.settingsConfig as Record<string, any>;
+  const model = config?.env?.ANTHROPIC_MODEL;
+  if (typeof model !== "string") return undefined;
+  const trimmed = model.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
 
 /**
  * 把 Claude 供应商的 API 设置转换为 Codex 的 settingsConfig。
@@ -84,7 +95,7 @@ export const convertClaudeProviderToCodex = (
   const config = generateCodexConfigFromClaudeEndpoint(
     provider.name,
     baseUrl,
-    options.modelName,
+    options.modelName ?? extractClaudeModel(provider) ?? CODEX_DEFAULT_MODEL,
   );
 
   return {
