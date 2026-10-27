@@ -32,7 +32,9 @@ describe("convertClaudeProviderToCodex", () => {
       'base_url = "https://api.kimi.com/anthropic"',
     );
     expect(conversion?.config).toContain('name = "Kimi"');
-    expect(conversion?.config).toContain('wire_api = "responses"');
+    // Claude 端点说的是 Anthropic Messages 协议，必须显式声明让本地路由桥接；
+    // 用 "responses" 会对 Anthropic 网关发 /responses 而直接 404。
+    expect(conversion?.config).toContain('wire_api = "anthropic"');
     expect(conversion?.config).toContain("requires_openai_auth = true");
   });
 
@@ -177,6 +179,22 @@ describe("buildConvertedCodexProvider", () => {
     expect(codexProvider.icon).toBe("kimi");
     expect(codexProvider.iconColor).toBe("#00A67E");
     expect(codexProvider.sortIndex).toBeUndefined();
+  });
+
+  it("declares the anthropic api format so routing prompts and bridging engage", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider.meta?.apiFormat).toBe("anthropic");
+  });
+
+  it("does not let a stale source meta.apiFormat override the anthropic declaration", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    // 全量展开源 meta 时 anthropic 必须排在前、不可被覆盖
+    expect(Object.keys(codexProvider.meta ?? {})[0]).toBe("apiFormat");
+    expect(codexProvider.meta?.apiFormat).toBe("anthropic");
   });
 
   it("omits the source provider's identity fields (id/createdAt)", () => {

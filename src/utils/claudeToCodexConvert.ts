@@ -1,8 +1,12 @@
 // Claude → Codex 供应商配置转换
 //
-// 一个渠道商（base_url + API key）在 Claude Code 与 Codex 之间是可复用的；
-// 模型名语义不同（Anthropic 系 vs GPT 系），不随转换搬运，保留 Codex 侧
-// 预设的默认模型（与 codexProviderPresets / deeplink 导入的行为一致）。
+// 一个渠道商的 API Key 在 Claude Code 与 Codex 之间可复用。注意协议语义：
+// Claude 供应商的 base_url 是 Anthropic Messages 端点（/v1/messages），而
+// Codex 原生说 Responses——直连必然 404。转换因此固定 wire_api = "anthropic"，
+// 由 CC Switch 本地路由做 Responses ⇄ Anthropic 桥接（判定链
+// codex_provider_uses_anthropic 只认显式 wire_api / meta.apiFormat，绝不猜测
+// base_url）。模型名语义不同（Anthropic 系 vs GPT 系），不随转换搬运，保留
+// Codex 侧预设的默认模型（与 codexProviderPresets / deeplink 导入一致）。
 import type { Provider } from "@/types";
 import { getApiKeyFromConfig } from "@/utils/providerConfigUtils";
 
@@ -39,7 +43,7 @@ disable_response_storage = true
 [model_providers.custom]
 name = ${configText(providerName)}
 base_url = ${configText(baseUrl)}
-wire_api = "responses"
+wire_api = "anthropic"
 requires_openai_auth = true`;
 };
 
@@ -100,7 +104,10 @@ export interface ConvertedCodexProvider
  *
  * 展示性元数据（icon/category/官网/备注）延续原供应商——它们描述的是同一个
  * 渠道商；名字加 " (Codex)" 后缀以便在两个列表中区分；sortIndex 不延续，
- * 由 Codex 列表按其自身排序规则落位。转换不可行（无端点/无 Key）返回 undefined。
+ * 由 Codex 列表按其自身排序规则落位。meta.apiFormat = "anthropic" 与
+ * config 里的 wire_api 双保险：providerNeedsRouting / 后端桥接判定都认显式
+ * 声明，切换该供应商时会提示先启动本地路由。转换不可行（无端点/无 Key）返回
+ * undefined。
  */
 export const buildConvertedCodexProvider = (
   provider: Provider,
@@ -117,4 +124,8 @@ export const buildConvertedCodexProvider = (
   notes: provider.notes,
   icon: provider.icon,
   iconColor: provider.iconColor,
+  meta: {
+    apiFormat: "anthropic",
+    ...(provider.meta ? provider.meta : {}),
+  },
 });
