@@ -63,10 +63,11 @@ TOML `wire_api`，按此顺序），绝不从 base_url 猜测——猜测极易�
 
 - **必须先启动本地路由**：转换产物写入了 `meta.apiFormat`，切换时前端会提示；
   成功 toast 与供应商 notes 也携带该条件。
-- **运行时证据已具备（回环级）**：`server.rs` 的
-  `converted_codex_provider_reaches_anthropic_upstream_in_messages_shape` 用真实
-  ProxyServer + 真实 forwarder 对 loopback mock Anthropic 上游完成了一次完整 HTTP
-  往返，wire 级断言全部通过（路径/版本头/凭证/Accept/指纹/system 升级/响应回转）。
+- **运行时证据已具备（回环级，含流式）**：`server.rs` 两个回环测试——
+  非流式（`converted_codex_provider_reaches_anthropic_upstream_in_messages_shape`）
+  与流式（`converted_codex_provider_streams_anthropic_sse_back_as_responses_sse`，
+  mock 上游回 Anthropic SSE 事件流，客户端收到 Responses SSE：
+  `response.created` → `output_text.delta` → `completed`）。wire 级断言全部通过。
   仍未做的只有"真实第三方网关 + 真实 Codex CLI"级验证，需密钥与真机，留待日常使用检验。
 - **认证头默认 Bearer**（`Authorization: Bearer`）。网关若只收 `x-api-key`，
   在编辑表单（Anthropic 格式 → 认证字段）改为 `ANTHROPIC_API_KEY` 即可；
