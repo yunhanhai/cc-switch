@@ -41,6 +41,7 @@ import {
 } from "@/lib/api";
 import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
 import { useProviderActions } from "@/hooks/useProviderActions";
+import { useAddProviderMutation } from "@/lib/query";
 import { openclawKeys, useOpenClawHealth } from "@/hooks/useOpenClaw";
 import { hermesKeys, useOpenHermesWebUI } from "@/hooks/useHermes";
 import { hermesApi } from "@/lib/api/hermes";
@@ -55,6 +56,7 @@ import {
 } from "@/utils/errorUtils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { deepClone } from "@/utils/deepClone";
+import { convertClaudeProviderToCodex } from "@/utils/claudeToCodexConvert";
 import { cn } from "@/lib/utils";
 import {
   isWindows,
@@ -910,6 +912,49 @@ function App() {
     await addProvider(duplicatedProvider);
   };
 
+  // Claude 卡片专属：把该供应商的 API 设置（端点 + API Key）转换为 Codex 供应商。
+  // 转换不改变原 Claude 供应商；Codex 侧用默认模型名（模型语义不跨渠道）。
+  const addCodexProviderMutation = useAddProviderMutation("codex");
+  const handleConvertToCodex = async (provider: Provider) => {
+    const conversion = convertClaudeProviderToCodex(provider);
+    if (!conversion) {
+      toast.error(
+        t("provider.convertToCodexUnsupported", {
+          defaultValue:
+            "该供应商缺少自定义端点或 API Key，无法转换为 Codex 供应商",
+        }),
+      );
+      return;
+    }
+
+    const codexProvider: Omit<Provider, "id" | "createdAt"> = {
+      name: `${provider.name} (Codex)`,
+      settingsConfig: {
+        auth: conversion.auth,
+        config: conversion.config,
+      },
+      websiteUrl: provider.websiteUrl,
+      category: provider.category,
+      sortIndex: undefined,
+      notes: provider.notes,
+      icon: provider.icon,
+      iconColor: provider.iconColor,
+    };
+
+    try {
+      await addCodexProviderMutation.mutateAsync(codexProvider);
+      toast.success(
+        t("provider.convertToCodexSuccess", {
+          name: provider.name,
+          defaultValue: "已把「{{name}}」的 API 设置转换为 Codex 供应商",
+        }),
+        { closeButton: true },
+      );
+    } catch {
+      // 错误提示由 mutation 统一处理
+    }
+  };
+
   const confirmActionMessage = useMemo(() => {
     if (!confirmAction) return "";
 
@@ -1158,6 +1203,7 @@ function App() {
                           : undefined
                       }
                       onDuplicate={handleDuplicateProvider}
+                      onConvertToCodex={handleConvertToCodex}
                       onConfigureUsage={setUsageProvider}
                       onOpenWebsite={handleOpenWebsite}
                       onOpenTerminal={

@@ -69,6 +69,8 @@ interface ProviderCardProps {
   onConfigureUsage: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onDuplicate: (provider: Provider) => void;
+  /** Claude 卡片专属：把该供应商的 API 设置转换为 Codex 供应商 */
+  onConvertToCodex?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
@@ -196,6 +198,7 @@ export function ProviderCard({
   onConfigureUsage,
   onOpenWebsite,
   onDuplicate,
+  onConvertToCodex,
   onTest,
   onOpenTerminal,
   isTesting,
@@ -769,6 +772,13 @@ export function ProviderCard({
               onSwitch={() => onSwitch(provider)}
               onEdit={() => onEdit(provider)}
               onDuplicate={() => onDuplicate(provider)}
+              onConvertToCodex={
+                // 只对有自定义端点的 Claude 第三方供应商开放：官方直连没有
+                // base_url 可转换，转换无意义。
+                appId === "claude" && onConvertToCodex && !isOfficial
+                  ? () => onConvertToCodex(provider)
+                  : undefined
+              }
               onTest={
                 // 连通检测对第三方/自定义/Copilot/Codex-OAuth 供应商开放（这些正是旧的
                 // 真实请求探测会误报、而可达性探测能正确处理的对象）。官方供应商

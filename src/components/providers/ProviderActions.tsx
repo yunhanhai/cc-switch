@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowRightLeft,
   BarChart3,
   Check,
   ChevronDown,
@@ -41,6 +42,8 @@ interface ProviderActionsProps {
   onSwitch: () => void;
   onEdit: () => void;
   onDuplicate?: () => void;
+  /** Claude 卡片专属：把该供应商的 API 设置转换为 Codex 供应商 */
+  onConvertToCodex?: () => void;
   onTest?: () => void;
   onConfigureUsage?: () => void;
   onDelete: () => void;
@@ -83,6 +86,7 @@ export function ProviderActions({
   onSwitch,
   onEdit,
   onDuplicate,
+  onConvertToCodex,
   onTest,
   onConfigureUsage,
   onDelete,
@@ -409,6 +413,22 @@ export function ProviderActions({
             className={iconButtonClass}
           >
             <Copy className="h-4 w-4" />
+          </Button>
+        )}
+
+        {onConvertToCodex && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onConvertToCodex}
+            aria-label={t("provider.convertToCodex")}
+            title={t("provider.convertToCodex")}
+            className={cn(
+              iconButtonClass,
+              "hover:text-sky-600 dark:hover:text-sky-400",
+            )}
+          >
+            <ArrowRightLeft className="h-4 w-4" />
           </Button>
         )}
 

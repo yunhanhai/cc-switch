@@ -71,6 +71,8 @@ interface ProviderListProps {
   onDisableOmo?: () => void;
   onDisableOmoSlim?: () => void;
   onDuplicate: (provider: Provider) => void;
+  /** Claude 卡片专属：把该供应商的 API 设置转换为 Codex 供应商 */
+  onConvertToCodex?: (provider: Provider) => void;
   onConfigureUsage?: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onOpenTerminal?: (provider: Provider) => void;
@@ -95,6 +97,7 @@ export function ProviderList({
   onDisableOmo,
   onDisableOmoSlim,
   onDuplicate,
+  onConvertToCodex,
   onConfigureUsage,
   onOpenWebsite,
   onOpenTerminal,
@@ -615,6 +618,9 @@ export function ProviderList({
                 onDisableOmo={onDisableOmo}
                 onDisableOmoSlim={onDisableOmoSlim}
                 onDuplicate={onDuplicate}
+                onConvertToCodex={
+                  appId === "claude" ? onConvertToCodex : undefined
+                }
                 onConfigureUsage={onConfigureUsage}
                 onOpenWebsite={onOpenWebsite}
                 onOpenTerminal={onOpenTerminal}
@@ -882,6 +888,8 @@ interface SortableProviderCardProps {
   onDisableOmo?: () => void;
   onDisableOmoSlim?: () => void;
   onDuplicate: (provider: Provider) => void;
+  /** Claude 卡片专属：把该供应商的 API 设置转换为 Codex 供应商 */
+  onConvertToCodex?: (provider: Provider) => void;
   onConfigureUsage?: (provider: Provider) => void;
   onOpenWebsite: (url: string) => void;
   onOpenTerminal?: (provider: Provider) => void;
@@ -923,6 +931,7 @@ function SortableProviderCard({
   onDisableOmo,
   onDisableOmoSlim,
   onDuplicate,
+  onConvertToCodex,
   onConfigureUsage,
   onOpenWebsite,
   onOpenTerminal,
@@ -1003,6 +1012,7 @@ function SortableProviderCard({
           onDisableOmo={onDisableOmo}
           onDisableOmoSlim={onDisableOmoSlim}
           onDuplicate={onDuplicate}
+          onConvertToCodex={onConvertToCodex}
           onConfigureUsage={
             onConfigureUsage
               ? (item) => onConfigureUsage(item)
