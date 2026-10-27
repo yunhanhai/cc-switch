@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildConvertedCodexProvider,
   convertClaudeProviderToCodex,
   extractClaudeBaseUrl,
   generateCodexConfigFromClaudeEndpoint,
@@ -134,5 +135,55 @@ describe("convertClaudeProviderToCodex", () => {
     convertClaudeProviderToCodex(provider);
 
     expect(JSON.stringify(provider)).toBe(snapshot);
+  });
+});
+
+describe("buildConvertedCodexProvider", () => {
+  const fullProvider = claudeProvider({
+    id: "claude-kimi",
+    createdAt: 1700000000000,
+    sortIndex: 7,
+    websiteUrl: "https://kimi.com",
+    category: "cn_official",
+    notes: "团队主账号",
+    icon: "kimi",
+    iconColor: "#00A67E",
+  });
+
+  it("carries conversion output into the Codex settingsConfig", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider.settingsConfig.auth).toEqual({
+      OPENAI_API_KEY: "sk-kimi-key",
+    });
+    expect(codexProvider.settingsConfig.config).toBe(conversion.config);
+  });
+
+  it("suffixed the name with (Codex) for list disambiguation", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider.name).toBe("Kimi (Codex)");
+  });
+
+  it("carries display metadata but not sortIndex", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider.websiteUrl).toBe("https://kimi.com");
+    expect(codexProvider.category).toBe("cn_official");
+    expect(codexProvider.notes).toBe("团队主账号");
+    expect(codexProvider.icon).toBe("kimi");
+    expect(codexProvider.iconColor).toBe("#00A67E");
+    expect(codexProvider.sortIndex).toBeUndefined();
+  });
+
+  it("omits the source provider's identity fields (id/createdAt)", () => {
+    const conversion = convertClaudeProviderToCodex(fullProvider)!;
+    const codexProvider = buildConvertedCodexProvider(fullProvider, conversion);
+
+    expect(codexProvider).not.toHaveProperty("id");
+    expect(codexProvider).not.toHaveProperty("createdAt");
   });
 });

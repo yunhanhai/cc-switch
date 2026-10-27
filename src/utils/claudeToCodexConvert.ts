@@ -88,3 +88,33 @@ export const convertClaudeProviderToCodex = (
     config,
   };
 };
+
+/** App.tsx::handleConvertToCodex 构造新 Codex Provider 时延续的字段来源 */
+export interface ConvertedCodexProvider
+  extends Omit<Provider, "id" | "createdAt"> {
+  settingsConfig: { auth: Record<string, any>; config: string };
+}
+
+/**
+ * 构造转换后的 Codex Provider 对象（不含 id/createdAt，由 add mutation 生成）。
+ *
+ * 展示性元数据（icon/category/官网/备注）延续原供应商——它们描述的是同一个
+ * 渠道商；名字加 " (Codex)" 后缀以便在两个列表中区分；sortIndex 不延续，
+ * 由 Codex 列表按其自身排序规则落位。转换不可行（无端点/无 Key）返回 undefined。
+ */
+export const buildConvertedCodexProvider = (
+  provider: Provider,
+  conversion: ClaudeToCodexConversion,
+): ConvertedCodexProvider => ({
+  name: `${provider.name} (Codex)`,
+  settingsConfig: {
+    auth: conversion.auth,
+    config: conversion.config,
+  },
+  websiteUrl: provider.websiteUrl,
+  category: provider.category,
+  sortIndex: undefined,
+  notes: provider.notes,
+  icon: provider.icon,
+  iconColor: provider.iconColor,
+});

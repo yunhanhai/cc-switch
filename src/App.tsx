@@ -56,7 +56,10 @@ import {
 } from "@/utils/errorUtils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { deepClone } from "@/utils/deepClone";
-import { convertClaudeProviderToCodex } from "@/utils/claudeToCodexConvert";
+import {
+  buildConvertedCodexProvider,
+  convertClaudeProviderToCodex,
+} from "@/utils/claudeToCodexConvert";
 import { cn } from "@/lib/utils";
 import {
   isWindows,
@@ -927,22 +930,10 @@ function App() {
       return;
     }
 
-    const codexProvider: Omit<Provider, "id" | "createdAt"> = {
-      name: `${provider.name} (Codex)`,
-      settingsConfig: {
-        auth: conversion.auth,
-        config: conversion.config,
-      },
-      websiteUrl: provider.websiteUrl,
-      category: provider.category,
-      sortIndex: undefined,
-      notes: provider.notes,
-      icon: provider.icon,
-      iconColor: provider.iconColor,
-    };
-
     try {
-      await addCodexProviderMutation.mutateAsync(codexProvider);
+      await addCodexProviderMutation.mutateAsync(
+        buildConvertedCodexProvider(provider, conversion),
+      );
       toast.success(
         t("provider.convertToCodexSuccess", {
           name: provider.name,
