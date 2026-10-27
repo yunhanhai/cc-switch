@@ -890,4 +890,141 @@ mod tests {
         );
         assert!(upstream.body.get("instructions").is_none());
     }
+
+    // Streaming variant of the round trip: the Codex CLI almost always sends
+    // stream:true, so exercise the SSE path end to end — the mock upstream
+    // replies with an Anthropic SSE event stream, and the client must receive
+    // a Responses SSE stream (response.created → output_text.delta → completed).
+    #[tokio::test]
+    async fn converted_codex_provider_streams_anthropic_sse_back_as_responses_sse() {
+        // A minimal but valid Anthropic SSE stream: message_start, one text
+        // block (start/delta/stop), message_delta with stop_reason, message_stop.
+        let anthropic_sse: Arc<str> = concat!(
+            "event: message_start\n",
+            r#"data: {"type":"message_start","message":{"id":"msg_s1","type":"message","role":"assistant","model":"kimi-k2-turbo-preview","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}"#,
+            "\n\n",
+            "event: content_block_start\n",
+            r#"data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            "\n\n",
+            "event: content_block_delta\n",
+            r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"stream pong"}}"#,
+            "\n\n",
+            "event: content_block_stop\n",
+            r#"data: {"type":"content_block_stop","index":0}"#,
+            "\n\n",
+            "event: message_delta\n",
+            r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}"#,
+            "\n\n",
+            "event: message_stop\n",
+            r#"data: {"type":"message_stop"}"#,
+            "\n\n",
+        )
+        .into();
+
+        let mock_app = Router::new().route(
+            "/v1/messages",
+            post(move || {
+                let anthropic_sse = anthropic_sse.clone();
+                async move {
+                    (
+                        StatusCode::OK,
+                        [
+                            (header::CONTENT_TYPE, "text/event-stream"),
+                            (header::CACHE_CONTROL, "no-cache"),
+                        ],
+                        anthropic_sse.to_string(),
+                    )
+                }
+            }),
+        );
+        let mock_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind mock anthropic upstream");
+        let mock_addr = mock_listener.local_addr().expect("mock upstream address");
+        let mock_handle = tokio::spawn(async move {
+            axum::serve(mock_listener, mock_app)
+                .await
+                .expect("serve mock anthropic upstream");
+        });
+
+        let db = Arc::new(Database::memory().expect("memory database"));
+        let provider = Provider::with_id(
+            "kimi-codex-converted-streaming".to_string(),
+            "Kimi (Codex)".to_string(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "converted-upstream-key" },
+                "config": format!(
+                    "model_provider = \"custom\"\n\
+                     model = \"kimi-k2-turbo-preview\"\n\
+                     model_reasoning_effort = \"high\"\n\
+                     disable_response_storage = true\n\n\
+                     [model_providers.custom]\n\
+                     name = \"Kimi\"\n\
+                     base_url = \"http://{mock_addr}\"\n\
+                     wire_api = \"anthropic\"\n\
+                     requires_openai_auth = true\n"
+                )
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider)
+            .expect("save converted provider");
+        db.set_current_provider("codex", &provider.id)
+            .expect("select converted provider");
+
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                non_streaming_timeout: 10,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        let proxy_info = proxy.start().await.expect("start test proxy");
+        let client = reqwest::Client::new();
+
+        // stream:true in the body is what drives the SSE branch.
+        let response = client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/responses",
+                proxy_info.port
+            ))
+            .header(header::AUTHORIZATION, "Bearer converted-upstream-key")
+            .json(&json!({
+                "model": "kimi-k2-turbo-preview",
+                "max_output_tokens": 1024,
+                "stream": true,
+                "input": [
+                    { "role": "user", "content": [{ "type": "input_text", "text": "Hello" }] }
+                ]
+            }))
+            .send()
+            .await
+            .expect("send streaming responses request");
+
+        assert_eq!(response.status(), StatusCode::OK, "streaming round-trip");
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .expect("content type")
+            .to_string();
+        assert!(
+            content_type.contains("text/event-stream"),
+            "expected SSE content type, got {content_type}"
+        );
+        let sse_body = response.text().await.expect("read SSE stream");
+
+        proxy.stop().await.expect("stop test proxy");
+        mock_handle.abort();
+
+        // The proxied SSE stream must carry the Responses event lifecycle and
+        // the text payload from the Anthropic deltas.
+        assert!(sse_body.contains("event: response.created"));
+        assert!(sse_body.contains("event: response.output_text.delta"));
+        assert!(sse_body.contains("stream pong"));
+        assert!(sse_body.contains("event: response.completed"));
+    }
 }
