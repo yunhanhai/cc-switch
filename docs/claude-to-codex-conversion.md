@@ -52,7 +52,7 @@ TOML `wire_api`，按此顺序），绝不从 base_url 猜测——猜测极易�
 | 思考参数 | `effort_to_thinking_budget` | effort→budget 映射；签名思考块跨轮保真（`ccswitch-anthropic-thinking-v1:` 信封） | 10+ 例 |
 | SSE 聚合 | `anthropic_sse` 系列 | message/tool_use 增量聚合、错误事件 | 6+ 例 |
 | 指纹头 | `is_codex_client_fingerprint_header` | Codex/OpenAI 指纹头（`originator`/`x-stainless-*` 等）不漏给 Anthropic 网关 | 1 例（denylist） |
-| Accept 归一化 | header 循环 | Codex 的 `text/event-stream` → `application/json`（严格网关 406 防御） | —（内嵌） |
+| Accept 归一化 | header 循环 | Codex 的 `text/event-stream` → `application/json`（严格网关 406 防御） | 回环端到端 1 例 |
 | anthropic-version | `ANTHROPIC_API_VERSION` 常量 | 客户端缺省时补 `2023-06-01`（契约测试钉住） | 1 例（契约） |
 | Claude Code 伪装 | `impersonateClaudeCode` | **默认关**，仅显式开启（防指纹泄漏到通用网关）；开时注入 UA/x-app/系统身份行 | 3 例（幂等） |
 
