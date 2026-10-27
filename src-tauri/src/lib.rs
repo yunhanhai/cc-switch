@@ -249,7 +249,7 @@ fn handle_deeplink_url(
     focus_main_window: bool,
     source: &str,
 ) -> bool {
-    let scheme_prefix = if cfg!(all(cc_switch_dev_build, not(test))) {
+    let scheme_prefix = if crate::config::uses_dev_isolated_layout() {
         "ccswitch-dev://"
     } else {
         "ccswitch://"
@@ -1838,7 +1838,7 @@ pub fn run() {
                             url_for_log(&url_str)
                         );
 
-                        let scheme_prefix = if cfg!(all(cc_switch_dev_build, not(test))) {
+                        let scheme_prefix = if crate::config::uses_dev_isolated_layout() {
                             "ccswitch-dev://"
                         } else {
                             "ccswitch://"

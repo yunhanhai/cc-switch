@@ -413,12 +413,9 @@ pub fn get_codex_config_dir() -> PathBuf {
         return custom;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    if crate::config::uses_dev_isolated_layout() {
         crate::config::get_app_config_dir().join(".codex")
-    }
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    {
+    } else {
         get_home_dir().join(".codex")
     }
 }

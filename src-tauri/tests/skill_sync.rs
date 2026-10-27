@@ -18,13 +18,24 @@ fn write_skill(dir: &std::path::Path, name: &str) {
 }
 
 #[cfg(unix)]
-fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
+fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) -> bool {
     std::os::unix::fs::symlink(src, dest).expect("create symlink");
+    true
 }
 
 #[cfg(windows)]
-fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
-    std::os::windows::fs::symlink_dir(src, dest).expect("create symlink");
+fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) -> bool {
+    // 无 SeCreateSymbolicLinkPrivilege 的 Windows 环境无法创建符号链接；
+    // 返回 false 让调用方跳过该用例而非误报失败
+    // （与 codex_config / session_usage_grokbuild 的既有模式一致）。
+    match std::os::windows::fs::symlink_dir(src, dest) {
+        Ok(()) => true,
+        Err(err) if err.raw_os_error() == Some(1314) => {
+            eprintln!("skipped: symlink privilege not held on Windows");
+            false
+        }
+        Err(err) => panic!("symlink: {err}"),
+    }
 }
 
 #[test]
@@ -133,8 +144,12 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
 
     let opencode_skills_dir = home.join(".config").join("opencode").join("skills");
     fs::create_dir_all(&opencode_skills_dir).expect("create opencode skills dir");
-    symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
-    symlink_dir(&orphan_skill, &opencode_skills_dir.join("orphan-skill"));
+    let created_disabled = symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
+    let created_orphan = symlink_dir(&orphan_skill, &opencode_skills_dir.join("orphan-skill"));
+    if !created_disabled || !created_orphan {
+        // Windows 无符号链接特权：无法构造待清理的 symlink 场景，跳过本用例
+        return;
+    }
 
     let state = create_test_state().expect("create test state");
     state

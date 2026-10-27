@@ -43,7 +43,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             listen_address: "127.0.0.1".to_string(),
-            listen_port: if cfg!(all(cc_switch_dev_build, not(test))) {
+            listen_port: if crate::config::uses_dev_isolated_layout() {
                 15722
             } else {
                 15721

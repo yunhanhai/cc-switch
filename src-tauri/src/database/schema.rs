@@ -182,8 +182,7 @@ impl Database {
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-            #[cfg(all(cc_switch_dev_build, not(test)))]
-            {
+            if crate::config::uses_dev_isolated_layout() {
                 // 一次性端口迁移：把旧开发库的 15721 拉到 15722。
                 // 用 settings 标记确保只跑一次——用户此后在 UI 里选择的
                 // 任何端口（包括改回 15721）都不会再被启动迁移覆盖。

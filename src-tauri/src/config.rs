@@ -39,23 +39,18 @@ pub fn get_claude_config_dir() -> PathBuf {
         return custom;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
-        return get_home_dir().join(".cc-switch-dev").join(".claude");
+    if uses_dev_isolated_layout() {
+        get_home_dir().join(".cc-switch-dev").join(".claude")
+    } else {
+        get_home_dir().join(".claude")
     }
-
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    get_home_dir().join(".claude")
 }
 
 /// 默认 Claude MCP 配置文件路径 (~/.claude.json)
 pub fn get_default_claude_mcp_path() -> PathBuf {
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    if uses_dev_isolated_layout() {
         get_app_config_dir().join(".claude.json")
-    }
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    {
+    } else {
         get_home_dir().join(".claude.json")
     }
 }
@@ -212,16 +207,42 @@ pub fn get_claude_settings_path() -> PathBuf {
     settings
 }
 
-/// 获取应用配置目录路径 (~/.cc-switch)
+/// 判断当前是否处于测试/沙盒环境（即 `CC_SWITCH_TEST_HOME` 已设置且非空）。
+///
+/// 开发版（`cc_switch_dev_build`）默认使用与正式版隔离的目录布局
+/// （`.cc-switch-dev`、独立 scheme、独立端口），以保证开发版与正式版可
+/// 同时运行。但集成测试编译 lib 时 `cfg(test)` 不成立，导致 dev 布局
+/// 分支生效，而测试夹具按正常布局（`.cc-switch`）铺目录，两边路径错位。
+///
+/// `CC_SWITCH_TEST_HOME` 仅由集成测试夹具（`tests/support.rs`）设置，
+/// 正常用户环境永远不会有它，因此以它作为“测试环境”的判定信号，
+/// 让测试进程内的 lib 沿用正常布局，与夹具保持一致。
+pub fn is_test_sandbox_environment() -> bool {
+    std::env::var("CC_SWITCH_TEST_HOME")
+        .ok()
+        .is_some_and(|home| !home.trim().is_empty())
+}
+
+/// 开发版隔离布局是否生效。
+///
+/// 仅在 dev 构建、非 `#[cfg(test)]` 编译、且不在测试沙盒进程中时成立。
+/// 所有 `#[cfg(all(cc_switch_dev_build, not(test)))]` 的布局分支都应改用
+/// 本函数判定，避免集成测试的路径错位。
+pub fn uses_dev_isolated_layout() -> bool {
+    cfg!(all(cc_switch_dev_build, not(test))) && !is_test_sandbox_environment()
+}
+
+/// 获取应用配置目录路径 (~/.cc-switch；开发版隔离布局下为 ~/.cc-switch-dev)
 pub fn get_app_config_dir() -> PathBuf {
     if let Some(custom) = crate::app_store::get_app_config_dir_override() {
         return custom;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    let default_dir = get_home_dir().join(".cc-switch-dev");
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    let default_dir = get_home_dir().join(".cc-switch");
+    let default_dir = if uses_dev_isolated_layout() {
+        get_home_dir().join(".cc-switch-dev")
+    } else {
+        get_home_dir().join(".cc-switch")
+    };
 
     // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
     // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。

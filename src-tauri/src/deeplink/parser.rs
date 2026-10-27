@@ -19,7 +19,7 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
 
     // Validate scheme
     let scheme = url.scheme();
-    let expected_scheme = if cfg!(all(cc_switch_dev_build, not(test))) {
+    let expected_scheme = if crate::config::uses_dev_isolated_layout() {
         "ccswitch-dev"
     } else {
         "ccswitch"

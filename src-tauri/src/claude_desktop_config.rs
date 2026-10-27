@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[cfg(any(target_os = "macos", all(windows, not(cc_switch_dev_build)), test))]
+#[cfg(any(target_os = "macos", windows, test))]
 use crate::config::get_home_dir;
 use crate::config::{atomic_write, delete_file, read_json_file, write_json_file};
 use crate::database::Database;
@@ -1216,43 +1216,25 @@ fn is_supported_platform() -> bool {
 
 #[allow(clippy::needless_return)]
 fn current_platform_paths() -> Result<ClaudeDesktopPaths, AppError> {
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    // dev 沙盒分支已改为运行时判定：隔离布局下配置收敛到 app_config_dir 下，
+    // 测试/正式布局沿用原平台路径解析（TempHome 重定向 LOCALAPPDATA/HOME）。
+    if crate::config::uses_dev_isolated_layout() {
         let root = crate::config::get_app_config_dir().join(".claude-desktop");
         return Ok(paths_from_dirs(root.join("Claude"), root.join("Claude-3p")));
     }
 
-    #[cfg(test)]
-    {
-        // 测试构建沿用原始平台路径解析（TempHome 重定向 LOCALAPPDATA/HOME），
-        // 保证与生产（非 dev 构建）行为一致；dev 沙盒分支已被 not(test) 排除。
-        #[cfg(windows)]
-        {
-            let local_app_data = windows_local_app_data_dir();
-            return Ok(windows_paths_from_local_app_data(&local_app_data));
-        }
-        #[cfg(target_os = "macos")]
-        {
-            return Ok(macos_paths_from_home(&get_home_dir()));
-        }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        {
-            Err(unsupported_platform_error())
-        }
-    }
-
-    #[cfg(all(target_os = "macos", not(cc_switch_dev_build)))]
-    {
-        return Ok(macos_paths_from_home(&get_home_dir()));
-    }
-
-    #[cfg(all(windows, not(cc_switch_dev_build)))]
+    #[cfg(windows)]
     {
         let local_app_data = windows_local_app_data_dir();
         return Ok(windows_paths_from_local_app_data(&local_app_data));
     }
 
-    #[cfg(all(not(any(target_os = "macos", windows)), not(cc_switch_dev_build)))]
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(macos_paths_from_home(&get_home_dir()));
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         Err(unsupported_platform_error())
     }
@@ -1264,14 +1246,14 @@ fn macos_paths_from_home(home: &Path) -> ClaudeDesktopPaths {
     paths_from_dirs(app_support.join("Claude"), app_support.join("Claude-3p"))
 }
 
-#[cfg(all(windows, any(not(cc_switch_dev_build), test)))]
+#[cfg(windows)]
 fn windows_local_app_data_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| get_home_dir().join("AppData").join("Local"))
 }
 
-#[cfg(all(windows, any(not(cc_switch_dev_build), test)))]
+#[cfg(windows)]
 fn windows_paths_from_local_app_data(local_app_data: &Path) -> ClaudeDesktopPaths {
     let normal_dir = pick_windows_claude_dir(local_app_data, false)
         .unwrap_or_else(|| local_app_data.join("Claude"));
@@ -1280,7 +1262,7 @@ fn windows_paths_from_local_app_data(local_app_data: &Path) -> ClaudeDesktopPath
     paths_from_dirs(normal_dir, threep_dir)
 }
 
-#[cfg(all(windows, any(not(cc_switch_dev_build), test)))]
+#[cfg(windows)]
 fn pick_windows_claude_dir(local_app_data: &Path, threep: bool) -> Option<PathBuf> {
     let exact_name = if threep { "Claude-3p" } else { "Claude" };
     let exact = local_app_data.join(exact_name);

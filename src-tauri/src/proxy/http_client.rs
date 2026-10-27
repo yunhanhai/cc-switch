@@ -40,7 +40,7 @@ fn get_proxy_port() -> u16 {
         .get()
         .and_then(|lock| lock.read().ok())
         .map(|port| *port)
-        .unwrap_or(if cfg!(all(cc_switch_dev_build, not(test))) {
+        .unwrap_or(if crate::config::uses_dev_isolated_layout() {
             15722
         } else {
             15721

@@ -3,7 +3,7 @@
 //! Pi owns account login and the active provider/model in `settings.json`.
 //! CC Switch only manages explicit provider entries in `models.json`.
 
-use crate::config::{atomic_write_private, get_home_dir};
+use crate::config::atomic_write_private;
 use crate::error::AppError;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -38,18 +38,24 @@ pub(crate) fn get_pi_agent_dir() -> Result<PathBuf, AppError> {
         .expect("lock Pi test directory")
         .clone()
     {
-        return resolve_pi_agent_dir(Some(path), None, get_home_dir().join(".pi").join("agent"));
+        return resolve_pi_agent_dir(
+            Some(path),
+            None,
+            crate::config::get_home_dir().join(".pi").join("agent"),
+        );
     }
 
     resolve_pi_agent_dir(
         crate::settings::get_pi_override_dir(),
         std::env::var_os("PI_CODING_AGENT_DIR"),
-        if cfg!(all(cc_switch_dev_build, not(test))) {
+        if cfg!(test) || crate::config::is_test_sandbox_environment() {
+            crate::config::get_home_dir().join(".pi").join("agent")
+        } else if crate::config::uses_dev_isolated_layout() {
             crate::config::get_app_config_dir()
                 .join(".pi")
                 .join("agent")
         } else {
-            get_home_dir().join(".pi").join("agent")
+            crate::config::get_home_dir().join(".pi").join("agent")
         },
     )
 }

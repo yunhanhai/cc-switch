@@ -37,20 +37,10 @@ pub fn get_openclaw_dir() -> PathBuf {
         return override_dir;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    if crate::config::uses_dev_isolated_layout() {
         crate::config::get_app_config_dir().join(".openclaw")
-    }
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    {
-        #[cfg(all(cc_switch_dev_build, not(test)))]
-        {
-            crate::config::get_app_config_dir().join(".openclaw")
-        }
-        #[cfg(any(not(cc_switch_dev_build), test))]
-        {
-            crate::config::get_home_dir().join(".openclaw")
-        }
+    } else {
+        crate::config::get_home_dir().join(".openclaw")
     }
 }
 

@@ -2,7 +2,6 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
-#[cfg(any(not(cc_switch_dev_build), test))]
 use crate::config::get_home_dir;
 use crate::config::write_text_file;
 use crate::error::AppError;
@@ -30,12 +29,9 @@ pub fn get_grok_config_dir() -> PathBuf {
         return custom;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    if crate::config::uses_dev_isolated_layout() {
         crate::config::get_app_config_dir().join(".grok")
-    }
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    {
+    } else {
         get_home_dir().join(".grok")
     }
 }

@@ -1,4 +1,3 @@
-#[cfg(any(not(cc_switch_dev_build), test))]
 use crate::config::get_home_dir;
 use crate::config::write_text_file;
 use crate::error::AppError;
@@ -13,12 +12,9 @@ pub fn get_gemini_dir() -> PathBuf {
         return custom;
     }
 
-    #[cfg(all(cc_switch_dev_build, not(test)))]
-    {
+    if crate::config::uses_dev_isolated_layout() {
         crate::config::get_app_config_dir().join(".gemini")
-    }
-    #[cfg(any(not(cc_switch_dev_build), test))]
-    {
+    } else {
         get_home_dir().join(".gemini")
     }
 }
