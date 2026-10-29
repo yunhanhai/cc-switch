@@ -805,10 +805,7 @@ mod tests {
 
         // What the Codex CLI sends to cc-switch: a native Responses request.
         let response = client
-            .post(format!(
-                "http://127.0.0.1:{}/v1/responses",
-                proxy_info.port
-            ))
+            .post(format!("http://127.0.0.1:{}/v1/responses", proxy_info.port))
             .header(header::AUTHORIZATION, "Bearer converted-upstream-key")
             .header("originator", "codex_cli_rs")
             .header("x-stainless-lang", "rust")
@@ -871,10 +868,7 @@ mod tests {
         // rebuilt from input.
         assert_eq!(upstream.body["model"], "kimi-k2-turbo-preview");
         assert_eq!(upstream.body["max_tokens"], 1024);
-        assert_eq!(
-            upstream.body["system"][0]["type"],
-            "text"
-        );
+        assert_eq!(upstream.body["system"][0]["type"], "text");
         assert_eq!(
             upstream.body["system"][0]["text"],
             "You are a helpful assistant."
@@ -884,10 +878,7 @@ mod tests {
             "ephemeral"
         );
         assert_eq!(upstream.body["messages"][0]["role"], "user");
-        assert_eq!(
-            upstream.body["messages"][0]["content"][0]["type"],
-            "text"
-        );
+        assert_eq!(upstream.body["messages"][0]["content"][0]["type"], "text");
         assert!(upstream.body.get("instructions").is_none());
     }
 
@@ -987,10 +978,7 @@ mod tests {
 
         // stream:true in the body is what drives the SSE branch.
         let response = client
-            .post(format!(
-                "http://127.0.0.1:{}/v1/responses",
-                proxy_info.port
-            ))
+            .post(format!("http://127.0.0.1:{}/v1/responses", proxy_info.port))
             .header(header::AUTHORIZATION, "Bearer converted-upstream-key")
             .json(&json!({
                 "model": "kimi-k2-turbo-preview",
@@ -1026,5 +1014,167 @@ mod tests {
         assert!(sse_body.contains("event: response.output_text.delta"));
         assert!(sse_body.contains("stream pong"));
         assert!(sse_body.contains("event: response.completed"));
+    }
+    // Direct-mode variant (dual-protocol probe result): the converted provider
+    // declares wire_api = "responses" and no anthropic apiFormat, so the proxy
+    // must forward a native Responses request to a Responses upstream verbatim —
+    // no /v1/messages rewrite, no anthropic-version, no body transform.
+    #[tokio::test]
+    async fn converted_codex_provider_in_direct_mode_passes_responses_through() {
+        #[derive(Debug)]
+        struct CapturedDirectRequest {
+            path: String,
+            authorization: Option<String>,
+            anthropic_version: Option<String>,
+            body: Value,
+        }
+
+        let captured = Arc::new(Mutex::new(Vec::<CapturedDirectRequest>::new()));
+        let mock_app = Router::new().route(
+            "/v1/responses",
+            post({
+                let captured = captured.clone();
+                move |request: axum::extract::Request| {
+                    let captured = captured.clone();
+                    async move {
+                        let (parts, body) = request.into_parts();
+                        let body_bytes = axum::body::to_bytes(body, 1024 * 1024)
+                            .await
+                            .expect("read mock request body");
+                        captured.lock().await.push(CapturedDirectRequest {
+                            path: parts.uri.path().to_string(),
+                            authorization: parts
+                                .headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|value| value.to_str().ok())
+                                .map(ToString::to_string),
+                            anthropic_version: parts
+                                .headers
+                                .get("anthropic-version")
+                                .and_then(|value| value.to_str().ok())
+                                .map(ToString::to_string),
+                            body: serde_json::from_slice(&body_bytes)
+                                .expect("parse mock request body"),
+                        });
+
+                        let payload = json!({
+                            "id": "resp_direct_1",
+                            "object": "response",
+                            "status": "completed",
+                            "model": "kimi-k2-turbo-preview",
+                            "output": [{
+                                "id": "resp_direct_1_msg_0",
+                                "type": "message",
+                                "status": "completed",
+                                "role": "assistant",
+                                "content": [{ "type": "output_text", "text": "direct pong", "annotations": [] }]
+                            }],
+                            "usage": { "input_tokens": 1, "output_tokens": 1, "total_tokens": 2 }
+                        });
+                        (
+                            StatusCode::OK,
+                            [(header::CONTENT_TYPE, "application/json")],
+                            serde_json::to_string(&payload).expect("serialize mock response"),
+                        )
+                    }
+                }
+            }),
+        );
+        let mock_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind mock responses upstream");
+        let mock_addr = mock_listener.local_addr().expect("mock upstream address");
+        let mock_handle = tokio::spawn(async move {
+            axum::serve(mock_listener, mock_app)
+                .await
+                .expect("serve mock responses upstream");
+        });
+
+        let db = Arc::new(Database::memory().expect("memory database"));
+        // Exactly what the dual-protocol probe produces: wire_api = "responses"
+        // and NO meta.apiFormat, so providerNeedsRouting stays false.
+        let provider = Provider::with_id(
+            "kimi-codex-direct".to_string(),
+            "Kimi (Codex)".to_string(),
+            json!({
+                "auth": { "OPENAI_API_KEY": "direct-upstream-key" },
+                "config": format!(
+                    "model_provider = \"custom\"\n\
+                     model = \"kimi-k2-turbo-preview\"\n\
+                     model_reasoning_effort = \"high\"\n\
+                     disable_response_storage = true\n\n\
+                     [model_providers.custom]\n\
+                     name = \"Kimi\"\n\
+                     base_url = \"http://{mock_addr}/v1\"\n\
+                     wire_api = \"responses\"\n\
+                     requires_openai_auth = true\n"
+                )
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider)
+            .expect("save direct provider");
+        db.set_current_provider("codex", &provider.id)
+            .expect("select direct provider");
+
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                non_streaming_timeout: 10,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        let proxy_info = proxy.start().await.expect("start test proxy");
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("http://127.0.0.1:{}/v1/responses", proxy_info.port))
+            .header(header::AUTHORIZATION, "Bearer direct-upstream-key")
+            .json(&json!({
+                "model": "kimi-k2-turbo-preview",
+                "max_output_tokens": 1024,
+                "input": [
+                    { "role": "user", "content": [{ "type": "input_text", "text": "Hello" }] }
+                ]
+            }))
+            .send()
+            .await
+            .expect("send direct responses request");
+
+        assert_eq!(response.status(), StatusCode::OK, "direct round-trip");
+        let response_body: Value = response.json().await.expect("read proxied response");
+        assert_eq!(response_body["object"], "response");
+        assert_eq!(
+            response_body["output"][0]["content"][0]["text"],
+            "direct pong"
+        );
+
+        proxy.stop().await.expect("stop test proxy");
+        mock_handle.abort();
+
+        let captured = captured.lock().await;
+        assert_eq!(captured.len(), 1, "exactly one upstream request");
+        let upstream = &captured[0];
+
+        // Direct mode must NOT rewrite to the Anthropic endpoint.
+        assert_eq!(upstream.path, "/v1/responses");
+        // ...and must NOT inject Anthropic protocol headers.
+        assert!(
+            upstream.anthropic_version.is_none(),
+            "direct mode must not send anthropic-version"
+        );
+        // Credential still swapped to the provider's stored key.
+        assert_eq!(
+            upstream.authorization.as_deref(),
+            Some("Bearer direct-upstream-key")
+        );
+        // Body forwarded as Responses shape (not converted to Messages).
+        assert_eq!(upstream.body["model"], "kimi-k2-turbo-preview");
+        assert!(upstream.body.get("input").is_some());
+        assert!(upstream.body.get("messages").is_none());
+        assert!(upstream.body.get("max_tokens").is_none());
     }
 }
