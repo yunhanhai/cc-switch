@@ -83,7 +83,9 @@ TOML `wire_api`，按此顺序），绝不从 base_url 猜测——猜测极易�
   后缀对 OpenAI 候选端点做一次 `GET /v1/models` 探测；返回非空模型列表则生成
   `wire_api = "responses"` 的直连产物（无需本地路由），notes 与成功 toast 均声明
   直连模式。探测失败静默回退桥接产物。保守剥离：裸 origin 与未知路径形态
-  返回 undefined，绝不猜测。
+  返回 undefined，绝不猜测。**命中判定要求源模型出现在探测列表中**（`shouldUpgradeToDirectMode`）——
+   网关的 OpenAI 端点可能服务另一套模型，仅“列表非空”就直连会指向上游不认识的
+   模型，比桥接更糟；列表为空 / 源模型缺失 / 不匹配一律保持桥接。
 
 ## 5. 素材来源
 
