@@ -63,6 +63,7 @@ import {
   extractClaudeBaseUrl,
   extractClaudeModelName,
   generateDirectCodexConfig,
+  shouldUpgradeToDirectMode,
 } from "@/utils/claudeToCodexConvert";
 import { fetchModelsForConfig } from "@/lib/api/model-fetch";
 import { cn } from "@/lib/utils";
@@ -976,7 +977,11 @@ function App() {
           openAiCandidate,
           conversion.auth.OPENAI_API_KEY,
         );
-        if (models.length > 0) {
+        // 仅"端点有模型"不够：还要求源模型在该端点可用（详见
+        // shouldUpgradeToDirectMode 的注释——否则直连会指向不存在的模型）。
+        if (
+          shouldUpgradeToDirectMode(models, extractClaudeModelName(provider))
+        ) {
           mode = "direct";
         }
       } catch {

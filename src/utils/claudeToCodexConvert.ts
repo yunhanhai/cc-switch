@@ -245,6 +245,30 @@ export const buildConvertedCodexProviderWithMode = (
 const DIRECT_RUNTIME_NOTE =
   "由 Claude 供应商转换而来（直连模式：上游提供 OpenAI 兼容端点，无需本地路由）。";
 
+/**
+ * 判断双协议探测结果是否值得升级为直连产物。
+ *
+ * 关键点：**仅"端点可达且有模型"不足以直连**——网关的 OpenAI 端点可能服务
+ * 完全另一套模型（例如 Anthropic 兼容侧是 claude-*，OpenAI 侧是 gpt-*）。
+ * 若源模型不在该端点列表中，直连产物会指向一个上游不认识的模型，
+ * 比桥接更糟（桥接至少把请求送到正确的 Anthropic 端点）。因此要求
+ * 源模型名出现在列表里才算命中。
+ *
+ * 列表项兼容两种常见形状：`{id}`（OpenAI /v1/models 标准）与纯字符串。
+ * 比较时忽略大小写与首尾空白——不同网关的 id 大小写习惯并不统一。
+ */
+export const shouldUpgradeToDirectMode = (
+  models: ReadonlyArray<{ id?: string } | string> | undefined | null,
+  sourceModel: string | undefined,
+): boolean => {
+  if (!models || models.length === 0) return false;
+  const wanted = sourceModel?.trim().toLowerCase();
+  if (!wanted) return false;
+  return models.some((entry) => {
+    const id = typeof entry === "string" ? entry : entry?.id;
+    return typeof id === "string" && id.trim().toLowerCase() === wanted;
+  });
+};
 /** 直连产物的 notes 标注；已有则不重复（幂等） */
 export const appendDirectRuntimeNote = (
   notes: string | undefined,

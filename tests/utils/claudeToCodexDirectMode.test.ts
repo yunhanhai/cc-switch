@@ -3,6 +3,7 @@ import {
   appendDirectRuntimeNote,
   deriveOpenAiBaseUrlFromAnthropic,
   generateDirectCodexConfig,
+  shouldUpgradeToDirectMode,
 } from "@/utils/claudeToCodexConvert";
 
 describe("deriveOpenAiBaseUrlFromAnthropic", () => {
@@ -91,5 +92,57 @@ describe("appendDirectRuntimeNote", () => {
   it("is idempotent — does not duplicate the direct note", () => {
     const once = appendDirectRuntimeNote(undefined, "Kimi");
     expect(appendDirectRuntimeNote(once, "Kimi")).toBe(once);
+  });
+});
+
+describe("shouldUpgradeToDirectMode", () => {
+  const models = [{ id: "kimi-k2-turbo-preview" }, { id: "kimi-k1" }];
+
+  it("upgrades when the source model is served by the OpenAI endpoint", () => {
+    expect(shouldUpgradeToDirectMode(models, "kimi-k2-turbo-preview")).toBe(
+      true,
+    );
+  });
+
+  it("does NOT upgrade when the endpoint only serves other models", () => {
+    // 这正是修复的缺口：端点可达且有模型，但源模型不在其中 →
+    // 直连会指向上游不认识的模型，必须保持桥接。
+    expect(shouldUpgradeToDirectMode(models, "claude-sonnet-4")).toBe(false);
+  });
+
+  it("does NOT upgrade when there is no source model to verify", () => {
+    expect(shouldUpgradeToDirectMode(models, undefined)).toBe(false);
+    expect(shouldUpgradeToDirectMode(models, "  ")).toBe(false);
+  });
+
+  it("does NOT upgrade for an empty or missing model list", () => {
+    expect(shouldUpgradeToDirectMode([], "kimi-k2-turbo-preview")).toBe(false);
+    expect(shouldUpgradeToDirectMode(undefined, "kimi-k2-turbo-preview")).toBe(
+      false,
+    );
+    expect(shouldUpgradeToDirectMode(null, "kimi-k2-turbo-preview")).toBe(
+      false,
+    );
+  });
+
+  it("matches case-insensitively and ignores surrounding whitespace", () => {
+    expect(shouldUpgradeToDirectMode(models, "  Kimi-K2-Turbo-Preview ")).toBe(
+      true,
+    );
+  });
+
+  it("accepts plain string entries as well as {id} objects", () => {
+    expect(
+      shouldUpgradeToDirectMode(
+        ["kimi-k2-turbo-preview"],
+        "kimi-k2-turbo-preview",
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores entries without a usable id", () => {
+    expect(
+      shouldUpgradeToDirectMode([{}, { id: "" }], "kimi-k2-turbo-preview"),
+    ).toBe(false);
   });
 });
