@@ -295,10 +295,37 @@ pub struct AppProxyConfig {
     /// 429 等待重试的最长等待时间（秒），超过则放弃等待、切换下一家 Provider
     #[serde(default = "default_rate_limit_max_wait_secs")]
     pub rate_limit_max_wait_secs: u32,
+    /// 同一 Provider 在「首字节返回前」失败时的额外重试次数。
+    ///
+    /// 与 `max_retries` 正交：`max_retries` 数的是「最多换几家 Provider」，
+    /// 本字段数的是「同一家再多试几次」。0 = 不重试（默认，与升级前行为一致）。
+    /// 重试不消耗 `attempted_providers` 配额，也不写熔断器健康度——前者是
+    /// 「换家」的预算，后者衡量 Provider 健康，一次成功前的内部重试不算多次失败。
+    #[serde(default = "default_same_provider_retries")]
+    pub same_provider_retries: u32,
+    /// 同一 Provider 重试的退避基数（毫秒）：第 n 次等待 base * 2^(n-1)，受上限约束
+    #[serde(default = "default_same_provider_retry_backoff_ms")]
+    pub same_provider_retry_backoff_ms: u32,
+    /// 同一 Provider 重试的退避上限（毫秒）
+    #[serde(default = "default_same_provider_retry_max_backoff_ms")]
+    pub same_provider_retry_max_backoff_ms: u32,
 }
 
 fn default_rate_limit_max_wait_secs() -> u32 {
     120
+}
+
+/// 默认不重试：升级前后行为完全一致，需要时由用户在面板里显式开启。
+fn default_same_provider_retries() -> u32 {
+    0
+}
+
+fn default_same_provider_retry_backoff_ms() -> u32 {
+    1000
+}
+
+fn default_same_provider_retry_max_backoff_ms() -> u32 {
+    8000
 }
 
 /// 整流器配置

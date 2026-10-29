@@ -199,6 +199,20 @@ fn schema_migration_sets_user_version_when_missing() {
         Database::get_user_version(&conn).expect("read version after"),
         SCHEMA_VERSION
     );
+    // 全新安装走的正是这条路径（建表后 user_version=0，再跑完整迁移链）。
+    // 中途的 v13→v14 会重建 proxy_config 并丢掉定制列，必须由 ensure_custom_columns 补回。
+    for column in [
+        "rate_limit_retry_enabled",
+        "rate_limit_max_wait_secs",
+        "same_provider_retries",
+        "same_provider_retry_backoff_ms",
+        "same_provider_retry_max_backoff_ms",
+    ] {
+        assert!(
+            Database::has_column(&conn, "proxy_config", column).expect("check column"),
+            "全新安装后 proxy_config.{column} 必须存在"
+        );
+    }
 }
 
 #[test]
@@ -250,6 +264,47 @@ fn custom_rate_limit_columns_reach_an_already_current_database() {
             "proxy_config.{column} 必须在已是当前版本的库上也被补齐"
         );
     }
+}
+
+/// 同一 Provider 重试的三列走同一条定制列补齐路径（不递增 SCHEMA_VERSION），
+/// 已是当前版本的老库也要补上，且旧配置读出的是「不重试」的默认值。
+#[test]
+fn same_provider_retry_columns_reach_an_already_current_database() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create tables");
+
+    let columns = [
+        "same_provider_retries",
+        "same_provider_retry_backoff_ms",
+        "same_provider_retry_max_backoff_ms",
+    ];
+    for column in columns {
+        conn.execute(
+            &format!("ALTER TABLE proxy_config DROP COLUMN {column}"),
+            [],
+        )
+        .expect("drop column to emulate a database without it");
+    }
+    Database::set_user_version(&conn, SCHEMA_VERSION).expect("mark as current version");
+
+    Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
+
+    for column in columns {
+        assert!(
+            Database::has_column(&conn, "proxy_config", column).expect("check column"),
+            "proxy_config.{column} 必须在已是当前版本的库上也被补齐"
+        );
+    }
+    let defaults: (i64, i64, i64) = conn
+        .query_row(
+            "SELECT same_provider_retries, same_provider_retry_backoff_ms,
+                    same_provider_retry_max_backoff_ms
+             FROM proxy_config WHERE app_type = ?1",
+            params!["claude"],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read backfilled defaults");
+    assert_eq!(defaults, (0, 1000, 8000));
 }
 
 #[test]

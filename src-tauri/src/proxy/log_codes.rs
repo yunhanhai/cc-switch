@@ -35,6 +35,8 @@ pub mod fwd {
     pub const PROVIDER_FAILED_RETRY: &str = "FWD-001";
     pub const ALL_PROVIDERS_FAILED: &str = "FWD-002";
     pub const SINGLE_PROVIDER_FAILED: &str = "FWD-003";
+    /// 同一 Provider 在响应交付前失败，退避后重试同一家
+    pub const PROVIDER_SAME_RETRY: &str = "FWD-004";
 }
 
 /// 故障转移日志码

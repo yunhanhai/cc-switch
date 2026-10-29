@@ -192,6 +192,15 @@ pub struct RequestForwarder {
     rate_limit_retry_enabled: bool,
     /// 429 等待重试的最长等待时间（秒）。超过则不等待、走故障转移。
     rate_limit_max_wait_secs: u64,
+    /// 同一 Provider 在响应交付前失败时的额外重试次数（0 = 不重试）。
+    ///
+    /// 与 `max_attempts` 正交：后者数的是「最多换几家」，这里数的是「同一家再试几次」。
+    /// 由 `with_same_provider_retry` 注入并夹到 `MAX_SAME_PROVIDER_RETRIES` 以内。
+    same_provider_retries: u32,
+    /// 同一 Provider 重试的退避基数（毫秒）：第 n 次等待 base * 2^(n-1)
+    same_provider_retry_backoff_ms: u64,
+    /// 同一 Provider 重试的单次等待上限（毫秒）
+    same_provider_retry_max_backoff_ms: u64,
     /// model alias 索引（alias, provider_id) -> 该渠道的物理模型名。
     ///
     /// 由 `RequestContext::create_forwarder` 在请求入口一次性读入，转发时在内存里查。
@@ -293,6 +302,11 @@ impl RequestForwarder {
             max_attempts,
             rate_limit_retry_enabled,
             rate_limit_max_wait_secs,
+            // 默认不重试同一家：由请求入口按配置注入（见 with_same_provider_retry），
+            // 其余构造点（含测试）行为与引入前一致。
+            same_provider_retries: 0,
+            same_provider_retry_backoff_ms: 0,
+            same_provider_retry_max_backoff_ms: 0,
             // 默认不启用 model alias：由请求入口按需注入（见 create_forwarder）。
             // 这样所有既有构造点（含测试）无需改动，行为与引入前一致。
             model_alias_index: None,
@@ -315,6 +329,37 @@ impl RequestForwarder {
         self.model_alias_index = Some(index);
         self.model_alias_app_type = app_type;
         self
+    }
+
+    /// 注入「同一 Provider 失败后重试」配置。
+    ///
+    /// 配置来自数据库，可能经 SQL 备份导入绕过前端校验，这里统一夹住上限：
+    /// 次数不超过 `MAX_SAME_PROVIDER_RETRIES`，单次等待不超过
+    /// `MAX_SAME_PROVIDER_RETRY_BACKOFF_MS`，避免异常配置把请求挂住很久。
+    pub fn with_same_provider_retry(
+        mut self,
+        retries: u32,
+        backoff_ms: u32,
+        max_backoff_ms: u32,
+    ) -> Self {
+        self.same_provider_retries = retries.min(Self::MAX_SAME_PROVIDER_RETRIES);
+        self.same_provider_retry_backoff_ms =
+            u64::from(backoff_ms).min(Self::MAX_SAME_PROVIDER_RETRY_BACKOFF_MS);
+        self.same_provider_retry_max_backoff_ms =
+            u64::from(max_backoff_ms).min(Self::MAX_SAME_PROVIDER_RETRY_BACKOFF_MS);
+        self
+    }
+
+    /// 测试用：读出注入后的重试预算
+    /// `(max_attempts, same_provider_retries, backoff_ms, max_backoff_ms)`。
+    #[cfg(test)]
+    pub(crate) fn retry_budget(&self) -> (usize, u32, u64, u64) {
+        (
+            self.max_attempts,
+            self.same_provider_retries,
+            self.same_provider_retry_backoff_ms,
+            self.same_provider_retry_max_backoff_ms,
+        )
     }
 
     /// 解析某渠道上该逻辑模型应使用的物理名。
@@ -634,10 +679,13 @@ impl RequestForwarder {
                 status.current_provider_id = Some(provider.id.clone());
             }
 
-            // 转发请求（每个 Provider 只尝试一次，重试由客户端控制）
-            // 429 限流等待重试是唯一例外：开关开启时对同一 Provider 等待重试，
-            // 不消耗 attempted_providers 配额（它不是 provider 故障，是节奏控制）。
+            // 转发请求。默认每个 Provider 只尝试一次，两种例外会对同一家重发，
+            // 都不消耗 attempted_providers 配额：
+            // - 429 限流等待重试（rate_limit_retry_enabled）：节奏控制，不是 provider 故障；
+            // - 同一 Provider 退避重试（same_provider_retries）：瞬时故障先重试本家再换家。
+            // 两者计数互相独立；熔断器只在本循环结束后按最终结果记录一次。
             let mut rate_limit_attempt: u32 = 0;
+            let mut same_provider_attempt: u32 = 0;
             let forward_outcome = loop {
                 match self
                     .forward(
@@ -713,7 +761,29 @@ impl RequestForwarder {
                             }
                         }
                     }
-                    Err(e) => break Err(e),
+                    Err(e) => {
+                        // 重试边界：只在 forward() 返回 Err 时重发。forward() 返回 Ok 之前
+                        // 下游客户端还没收到任何字节（流式请求也要等首个 chunk 到达才返回），
+                        // 所以这里重发是安全的。返回 Ok 之后流中途出错时数据已交给客户端、
+                        // 无法撤回，保持报错由客户端决定——不要在 response_processor 的
+                        // 透传流里加重试，也不要拼接半截内容续写。
+                        let next_attempt = same_provider_attempt + 1;
+                        let Some(wait_ms) =
+                            self.same_provider_retry_wait_ms(&e, provider, next_attempt)
+                        else {
+                            break Err(e);
+                        };
+                        same_provider_attempt = next_attempt;
+                        log::warn!(
+                            "[{app_type_str}] [{}] Provider {} 请求失败，{wait_ms}ms 后重试同一供应商（第 {same_provider_attempt}/{} 次）: {}",
+                            log_fwd::PROVIDER_SAME_RETRY,
+                            provider.name,
+                            self.same_provider_retries,
+                            summarize_proxy_error(&e)
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+                        continue;
+                    }
                 }
             };
 
@@ -3143,6 +3213,49 @@ impl RequestForwarder {
     /// 超限后放弃等待，错误走故障转移分类（换下一家 provider）。
     const MAX_RATE_LIMIT_RETRIES: u32 = 10;
 
+    /// 同一 Provider 重试次数上限（与前端 0-10 的输入范围一致）。
+    const MAX_SAME_PROVIDER_RETRIES: u32 = 10;
+
+    /// 同一 Provider 重试的单次等待上限（毫秒，与前端 0-60000 的输入范围一致）。
+    const MAX_SAME_PROVIDER_RETRY_BACKOFF_MS: u64 = 60_000;
+
+    /// 同一 Provider 重试决策：第 `attempt` 次重试（从 1 起）是否进行、等待多久。
+    ///
+    /// 三道门同时满足才重试：
+    /// 1. `categorize_proxy_error` 判为 Retryable（复用既有分类，不可重试的客户端错误
+    ///    照旧直接返回）；
+    /// 2. `is_transient_for_same_provider` 认为原样重发同一家有机会成功；
+    /// 3. 不是整流器能处理的错误。中转常把 thinking 签名/budget 错误包成 5xx 返回，
+    ///    原样重发必然再错，应直接交给循环外的整流逻辑改写请求体后重试。
+    ///
+    /// 返回 `Some(等待毫秒)` 表示重试，`None` 表示按原逻辑处理该错误（整流、换下一家或返回）。
+    fn same_provider_retry_wait_ms(
+        &self,
+        error: &ProxyError,
+        provider: &Provider,
+        attempt: u32,
+    ) -> Option<u64> {
+        if attempt > self.same_provider_retries {
+            return None;
+        }
+        if self.categorize_proxy_error(error, provider) != ErrorCategory::Retryable
+            || !is_transient_for_same_provider(error)
+        {
+            return None;
+        }
+        let message = extract_error_message(error);
+        if should_rectify_thinking_signature(message.as_deref(), &self.rectifier_config)
+            || should_rectify_thinking_budget(message.as_deref(), &self.rectifier_config)
+        {
+            return None;
+        }
+        Some(same_provider_backoff_ms(
+            self.same_provider_retry_backoff_ms,
+            self.same_provider_retry_max_backoff_ms,
+            attempt,
+        ))
+    }
+
     /// 429 等待重试决策：本次限流是否值得等待后重试同一 Provider。
     ///
     /// - 开关关闭 → 不等待
@@ -3279,6 +3392,40 @@ fn rate_limit_cooling_for_rate_limited(error: &ProxyError) -> u64 {
             ..
         } if *secs > 0 => (*secs).min(120),
         _ => 30,
+    }
+}
+
+/// 同一 Provider 重试的退避时长（毫秒）：第 `attempt` 次（从 1 起）等待
+/// `base * 2^(attempt-1)`，不超过 `max`。
+///
+/// 与 429 的 `rate_limit_wait_secs` 风格一致但独立实现：429 尊重 Retry-After，
+/// 这里是纯退避。移位次数夹到 6（最多 64 倍）、乘法饱和，大次数不会溢出。
+fn same_provider_backoff_ms(base_ms: u64, max_ms: u64, attempt: u32) -> u64 {
+    let shift = attempt.saturating_sub(1).min(6);
+    base_ms.saturating_mul(1u64 << shift).min(max_ms)
+}
+
+/// 原样重发同一家 Provider 是否有机会成功（白名单）。
+///
+/// `categorize_proxy_error` 的 Retryable 回答的是「换一家可能成功吗」，所以
+/// 401/402/403/404 等也算 Retryable（另一家可能持有不同的 key、余额或模型）。对同一家
+/// 原样重发，这类确定性失败只会原样复现、白白拖延换家，因此这里只放行瞬时故障：
+/// 连接失败，以及上游 408/409/425 与 5xx。
+///
+/// 明确不放行的：
+/// - 超时：这次已经等满了超时时长，同一家再等一轮只会把失败耗时翻倍（故障转移关闭时
+///   单次兜底 600s），非流式读 body 超时还会让上游重复生成、重复计费。换家仍照旧；
+/// - 429：由 rate_limit_retry_enabled 的等待重试单独管理；
+/// - 额度耗尽、认证/配置错误、响应转换失败：同一份凭证、配置和请求体重发结果不变。
+///
+/// 新增的 ProxyError 变体默认不重试，需要时在这里显式列入。
+fn is_transient_for_same_provider(error: &ProxyError) -> bool {
+    match error {
+        ProxyError::ForwardFailed(_) | ProxyError::ProviderUnhealthy(_) => true,
+        ProxyError::UpstreamError { status, .. } => {
+            matches!(*status, 408 | 409 | 425 | 500..=599)
+        }
+        _ => false,
     }
 }
 
@@ -4267,6 +4414,7 @@ mod tests {
     use http::StatusCode;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     fn test_provider_with_type(provider_type: Option<&str>) -> Provider {
@@ -4314,6 +4462,9 @@ mod tests {
             max_attempts: 1,
             rate_limit_retry_enabled: false,
             rate_limit_max_wait_secs: 120,
+            same_provider_retries: 0,
+            same_provider_retry_backoff_ms: 0,
+            same_provider_retry_max_backoff_ms: 0,
             model_alias_index: None,
             model_alias_app_type: "",
         }
@@ -5646,6 +5797,296 @@ mod tests {
         assert_eq!(fwd.rate_limit_wait_secs(Some(1), max), Some(1));
         assert_eq!(fwd.rate_limit_wait_secs(Some(1), max + 1), None);
         assert_eq!(fwd.rate_limit_wait_secs(None, max + 1), None);
+    }
+
+    // ── 同一 Provider 重试 ──────────────────────────────────────────────
+
+    fn forwarder_with_same_provider_retry(retries: u32) -> RequestForwarder {
+        // 退避取 1ms，让驱动真实重试循环的测试不必真的等待
+        test_forwarder(Duration::from_secs(10), Duration::from_secs(10))
+            .with_same_provider_retry(retries, 1, 1)
+    }
+
+    fn upstream_error(status: u16) -> ProxyError {
+        ProxyError::UpstreamError { status, body: None }
+    }
+
+    /// 本地 mock 上游：前 `failures` 次请求返回 503，之后返回 200。
+    /// 返回上游地址与命中计数，用来断言实际发出了几次请求。
+    async fn spawn_flaky_upstream(
+        failures: usize,
+    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        // 与 lib.rs 的 setup 一致：hyper 直连路径构建 TLS connector 时依赖进程级
+        // CryptoProvider，单测进程里没人装过它。重复安装返回 Err，忽略即可。
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        // fallback 接住任意路径：只数命中次数，不依赖适配器拼出的具体 URL
+        let app = axum::Router::new().fallback(move || {
+            let counter = counter.clone();
+            async move {
+                if counter.fetch_add(1, Ordering::SeqCst) < failures {
+                    (StatusCode::SERVICE_UNAVAILABLE, "overloaded")
+                } else {
+                    (StatusCode::OK, r#"{"type":"message","content":[]}"#)
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind mock upstream");
+        let addr = listener.local_addr().expect("mock upstream address");
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve mock upstream");
+        });
+        (format!("http://{addr}"), hits, handle)
+    }
+
+    fn claude_provider_at(id: &str, base_url: &str) -> Provider {
+        Provider::with_id(
+            id.to_string(),
+            id.to_string(),
+            json!({ "env": {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_AUTH_TOKEN": "test-token"
+            }}),
+            None,
+        )
+    }
+
+    async fn send_messages(
+        fwd: &RequestForwarder,
+        providers: Vec<Provider>,
+    ) -> Result<ForwardResult, ForwardError> {
+        fwd.forward_with_retry(
+            &AppType::Claude,
+            http::Method::POST,
+            "/v1/messages",
+            json!({ "model": "test-model", "max_tokens": 8, "messages": [] }),
+            HeaderMap::new(),
+            Extensions::new(),
+            providers,
+        )
+        .await
+    }
+
+    #[test]
+    fn same_provider_retry_backoff_is_capped() {
+        // 默认 1s 起翻倍、8s 封顶：1s, 2s, 4s, 8s, 8s
+        let waits: Vec<u64> = (1..=5)
+            .map(|attempt| same_provider_backoff_ms(1000, 8000, attempt))
+            .collect();
+        assert_eq!(waits, vec![1000, 2000, 4000, 8000, 8000]);
+        // 基数本身超过上限时取上限
+        assert_eq!(same_provider_backoff_ms(5000, 3000, 1), 3000);
+        // 移位夹到 64 倍、乘法饱和：极端次数与极端基数都不溢出
+        assert_eq!(same_provider_backoff_ms(1, u64::MAX, u32::MAX), 64);
+        assert_eq!(same_provider_backoff_ms(u64::MAX, u64::MAX, 7), u64::MAX);
+    }
+
+    #[test]
+    fn same_provider_retry_skips_non_retryable_error() {
+        let fwd = forwarder_with_same_provider_retry(3);
+        let provider = test_provider_with_type(None);
+        let no_retry = [
+            // categorize_proxy_error 判为 NonRetryable 的客户端错误：照旧直接返回
+            upstream_error(400),
+            upstream_error(405),
+            upstream_error(406),
+            upstream_error(422),
+            // Retryable（可换家）但对同一家是确定性失败：不重试本家，直接换家
+            upstream_error(401),
+            upstream_error(402), // 余额不足（DeepSeek / OpenRouter 等）
+            upstream_error(403),
+            upstream_error(404),
+            upstream_error(410),
+            upstream_error(451),
+            ProxyError::AuthError("bad key".to_string()),
+            ProxyError::ConfigError("missing base_url".to_string()),
+            ProxyError::TransformError("unsupported request shape".to_string()),
+            ProxyError::BillingExhausted("quota".to_string()),
+            // 超时已经等满一轮，同一家再等只会翻倍失败耗时
+            ProxyError::Timeout("upstream timed out".to_string()),
+            // 429 由 rate_limit_retry 单独管理，不走同一 Provider 重试
+            ProxyError::RateLimited {
+                retry_after_secs: None,
+                body: None,
+            },
+        ];
+        for error in &no_retry {
+            assert_eq!(
+                fwd.same_provider_retry_wait_ms(error, &provider, 1),
+                None,
+                "{error} 不应重试同一 Provider"
+            );
+        }
+    }
+
+    #[test]
+    fn same_provider_retry_covers_transient_errors_within_budget() {
+        let fwd = forwarder_with_same_provider_retry(2);
+        let provider = test_provider_with_type(None);
+        let transient = [
+            upstream_error(500),
+            upstream_error(502),
+            upstream_error(503),
+            upstream_error(524),
+            upstream_error(529),
+            upstream_error(408),
+            upstream_error(409),
+            upstream_error(425),
+            ProxyError::ForwardFailed("connection refused".to_string()),
+        ];
+        for error in &transient {
+            assert_eq!(
+                fwd.same_provider_retry_wait_ms(error, &provider, 1),
+                Some(1)
+            );
+            assert_eq!(
+                fwd.same_provider_retry_wait_ms(error, &provider, 2),
+                Some(1)
+            );
+            // 配额用完后不再重试，交回故障转移逻辑
+            assert_eq!(
+                fwd.same_provider_retry_wait_ms(error, &provider, 3),
+                None,
+                "{error} 第 3 次应超出 retries=2 的配额"
+            );
+        }
+    }
+
+    #[test]
+    fn same_provider_retry_zero_disables_retry() {
+        // 次数为 0（数据库默认值，见 dao 的 round_trip 测试）时与引入前一致：
+        // 即使是瞬时故障也不重试同一家
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1))
+            .with_same_provider_retry(0, 1000, 8000);
+        let provider = test_provider_with_type(None);
+        assert_eq!(
+            fwd.same_provider_retry_wait_ms(&upstream_error(503), &provider, 1),
+            None
+        );
+    }
+
+    #[test]
+    fn same_provider_retry_leaves_rectifiable_errors_to_rectifier() {
+        // 中转把 thinking 签名错误包成 500：原样重发必然再错，应直接交给整流器
+        let error = ProxyError::UpstreamError {
+            status: 500,
+            body: Some("Invalid 'signature' in 'thinking' block".to_string()),
+        };
+        let provider = test_provider_with_type(None);
+
+        let fwd = forwarder_with_same_provider_retry(2);
+        assert_eq!(fwd.same_provider_retry_wait_ms(&error, &provider, 1), None);
+
+        // 整流器关闭时整流不会发生，这个 500 按普通瞬时故障重试
+        let mut fwd = forwarder_with_same_provider_retry(2);
+        fwd.rectifier_config.enabled = false;
+        assert_eq!(
+            fwd.same_provider_retry_wait_ms(&error, &provider, 1),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn same_provider_retry_config_is_clamped() {
+        // 数据库里的异常值（如 SQL 导入绕过前端校验）被夹到上限，不会把请求挂住
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1))
+            .with_same_provider_retry(u32::MAX, u32::MAX, u32::MAX);
+        assert_eq!(
+            fwd.same_provider_retries,
+            RequestForwarder::MAX_SAME_PROVIDER_RETRIES
+        );
+        assert_eq!(
+            fwd.same_provider_retry_backoff_ms,
+            RequestForwarder::MAX_SAME_PROVIDER_RETRY_BACKOFF_MS
+        );
+        assert_eq!(
+            fwd.same_provider_retry_max_backoff_ms,
+            RequestForwarder::MAX_SAME_PROVIDER_RETRY_BACKOFF_MS
+        );
+    }
+
+    #[tokio::test]
+    async fn same_provider_retry_stops_after_configured_attempts() {
+        let (base_url, hits, upstream) = spawn_flaky_upstream(usize::MAX).await;
+        let fwd = forwarder_with_same_provider_retry(2);
+
+        let result = send_messages(&fwd, vec![claude_provider_at("only", &base_url)]).await;
+
+        let error = match result {
+            Ok(_) => panic!("上游一直 503，请求应失败"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(error.error, ProxyError::UpstreamError { status: 503, .. }),
+            "最终错误应是上游 503，实际: {}",
+            error.error
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 3, "首次 + 2 次重试 = 3 次请求");
+
+        // 内部重试不写熔断器：3 次请求只记 1 次失败（按最终结果记录一次）
+        let stats = fwd
+            .router
+            .get_circuit_breaker_stats("only", "claude")
+            .await
+            .expect("最终失败应记录熔断结果");
+        assert_eq!(stats.failed_requests, 1);
+        assert_eq!(stats.consecutive_failures, 1);
+
+        upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn same_provider_retry_recovers_transient_failure() {
+        // 前两次 503、第三次成功：retries=2 时客户端拿到成功响应
+        let (base_url, hits, upstream) = spawn_flaky_upstream(2).await;
+        let mut fwd = forwarder_with_same_provider_retry(2);
+        fwd.current_provider_id_at_start = "only".to_string();
+
+        let result = send_messages(&fwd, vec![claude_provider_at("only", &base_url)]).await;
+
+        match result {
+            Ok(forwarded) => {
+                assert_eq!(forwarded.provider.id, "only");
+                assert_eq!(forwarded.response.status(), StatusCode::OK);
+            }
+            Err(error) => panic!("第三次应成功，实际失败: {}", error.error),
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+        upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn same_provider_retry_does_not_consume_attempted_providers() {
+        let (primary_url, primary_hits, primary) = spawn_flaky_upstream(usize::MAX).await;
+        let (backup_url, backup_hits, backup) = spawn_flaky_upstream(0).await;
+        // max_attempts=2：最多换两家。若同家重试也计入配额，primary 重试一次就会把
+        // 配额用完、backup 永远轮不到；正确行为是 primary 用完 3 次后再换 backup。
+        let mut fwd = forwarder_with_same_provider_retry(2);
+        fwd.max_attempts = 2;
+        // 起始供应商设为最终成功的那家，避免成功后触发 try_switch 改动设置
+        fwd.current_provider_id_at_start = "backup".to_string();
+
+        let providers = vec![
+            claude_provider_at("primary", &primary_url),
+            claude_provider_at("backup", &backup_url),
+        ];
+        let result = send_messages(&fwd, providers).await;
+
+        match result {
+            Ok(forwarded) => assert_eq!(forwarded.provider.id, "backup"),
+            Err(error) => panic!("primary 重试用尽后应换到 backup: {}", error.error),
+        }
+        assert_eq!(primary_hits.load(Ordering::SeqCst), 3);
+        assert_eq!(backup_hits.load(Ordering::SeqCst), 1);
+
+        primary.abort();
+        backup.abort();
     }
 
     #[test]

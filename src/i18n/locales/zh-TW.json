@@ -3032,7 +3032,11 @@
       "maxRetriesHint": "請求失敗時的重試次數（0-10）",
       "streamingFirstByteHint": "等待首個資料區塊的最大時間，範圍 1-120 秒，預設 60 秒",
       "streamingIdleHint": "資料區塊之間的最大間隔，範圍 60-600 秒，填 0 停用（防止中途卡住）",
-      "nonStreamingHint": "非串流請求的總逾時時間，範圍 60-1200 秒，預設 600 秒（10 分鐘）"
+      "nonStreamingHint": "非串流請求的總逾時時間，範圍 60-1200 秒，預設 600 秒（10 分鐘）",
+      "sameProviderRetries": "同一供應商重試次數",
+      "sameProviderRetriesHint": "連線失敗或上游 5xx 時，先等待後重試同一供應商，最多幾次（0-10，0 為關閉）；等待從初始值起每次加倍，不超過最長等待。逾時不重試同一供應商（已等滿一輪）。與「最大重試次數」不同：後者是切換到其他供應商的次數。關閉故障轉移時同樣生效。",
+      "sameProviderRetryBackoffMs": "重試初始等待（毫秒）",
+      "sameProviderRetryMaxBackoffMs": "重試最長等待（毫秒）"
     },
     "logging": {
       "enabled": "日誌紀錄已啟用",

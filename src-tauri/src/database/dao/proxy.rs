@@ -229,7 +229,9 @@ impl Database {
                         max_retries, streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                         circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                         circuit_error_rate_threshold, circuit_min_requests,
-                        rate_limit_retry_enabled, rate_limit_max_wait_secs
+                        rate_limit_retry_enabled, rate_limit_max_wait_secs,
+                        same_provider_retries, same_provider_retry_backoff_ms,
+                        same_provider_retry_max_backoff_ms
                  FROM proxy_config WHERE app_type = ?1",
                 [app_type],
                 |row| {
@@ -248,6 +250,9 @@ impl Database {
                         circuit_min_requests: row.get::<_, i32>(11)? as u32,
                         rate_limit_retry_enabled: row.get::<_, i32>(12)? != 0,
                         rate_limit_max_wait_secs: row.get::<_, i32>(13)? as u32,
+                        same_provider_retries: row.get::<_, i32>(14)? as u32,
+                        same_provider_retry_backoff_ms: row.get::<_, i32>(15)? as u32,
+                        same_provider_retry_max_backoff_ms: row.get::<_, i32>(16)? as u32,
                     })
                 },
             )
@@ -274,6 +279,9 @@ impl Database {
                     circuit_min_requests: 10,
                     rate_limit_retry_enabled: false,
                     rate_limit_max_wait_secs: 120,
+                    same_provider_retries: 0,
+                    same_provider_retry_backoff_ms: 1000,
+                    same_provider_retry_max_backoff_ms: 8000,
                 })
             }
             Err(e) => Err(AppError::Database(e.to_string())),
@@ -302,6 +310,9 @@ impl Database {
                 circuit_min_requests = ?12,
                 rate_limit_retry_enabled = ?13,
                 rate_limit_max_wait_secs = ?14,
+                same_provider_retries = ?15,
+                same_provider_retry_backoff_ms = ?16,
+                same_provider_retry_max_backoff_ms = ?17,
                 updated_at = datetime('now')
              WHERE app_type = ?1",
             rusqlite::params![
@@ -323,6 +334,9 @@ impl Database {
                     0
                 },
                 config.rate_limit_max_wait_secs as i32,
+                config.same_provider_retries as i32,
+                config.same_provider_retry_backoff_ms as i32,
+                config.same_provider_retry_max_backoff_ms as i32,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -934,6 +948,7 @@ impl Database {
 mod tests {
     use crate::database::Database;
     use crate::error::AppError;
+    use crate::proxy::types::AppProxyConfig;
 
     #[tokio::test]
     async fn test_default_cost_multiplier_round_trip() -> Result<(), AppError> {
@@ -945,6 +960,34 @@ mod tests {
         db.set_default_cost_multiplier("claude", "1.5").await?;
         let updated = db.get_default_cost_multiplier("claude").await?;
         assert_eq!(updated, "1.5");
+
+        Ok(())
+    }
+
+    /// 三个值互不相同，SELECT 与 UPDATE 的列序号一旦错位就会读错。
+    #[tokio::test]
+    async fn test_same_provider_retry_config_round_trip() -> Result<(), AppError> {
+        let db = Database::memory()?;
+
+        let config = db.get_proxy_config_for_app("claude").await?;
+        assert_eq!(config.same_provider_retries, 0, "默认不重试");
+        assert_eq!(config.same_provider_retry_backoff_ms, 1000);
+        assert_eq!(config.same_provider_retry_max_backoff_ms, 8000);
+        let rate_limit_max_wait_secs = config.rate_limit_max_wait_secs;
+
+        db.update_proxy_config_for_app(AppProxyConfig {
+            same_provider_retries: 3,
+            same_provider_retry_backoff_ms: 250,
+            same_provider_retry_max_backoff_ms: 4000,
+            ..config
+        })
+        .await?;
+
+        let updated = db.get_proxy_config_for_app("claude").await?;
+        assert_eq!(updated.same_provider_retries, 3);
+        assert_eq!(updated.same_provider_retry_backoff_ms, 250);
+        assert_eq!(updated.same_provider_retry_max_backoff_ms, 4000);
+        assert_eq!(updated.rate_limit_max_wait_secs, rate_limit_max_wait_secs);
 
         Ok(())
     }

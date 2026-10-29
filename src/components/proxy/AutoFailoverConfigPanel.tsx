@@ -36,6 +36,9 @@ export function AutoFailoverConfigPanel({
     circuitMinRequests: "10",
     rateLimitRetryEnabled: false,
     rateLimitMaxWaitSecs: "120",
+    sameProviderRetries: "0",
+    sameProviderRetryBackoffMs: "1000",
+    sameProviderRetryMaxBackoffMs: "8000",
   });
 
   useEffect(() => {
@@ -55,6 +58,13 @@ export function AutoFailoverConfigPanel({
         circuitMinRequests: String(config.circuitMinRequests),
         rateLimitRetryEnabled: config.rateLimitRetryEnabled ?? false,
         rateLimitMaxWaitSecs: String(config.rateLimitMaxWaitSecs ?? 120),
+        sameProviderRetries: String(config.sameProviderRetries ?? 0),
+        sameProviderRetryBackoffMs: String(
+          config.sameProviderRetryBackoffMs ?? 1000,
+        ),
+        sameProviderRetryMaxBackoffMs: String(
+          config.sameProviderRetryMaxBackoffMs ?? 8000,
+        ),
       });
     }
   }, [config]);
@@ -81,6 +91,9 @@ export function AutoFailoverConfigPanel({
       circuitErrorRateThreshold: { min: 0, max: 100 },
       circuitMinRequests: { min: 5, max: 100 },
       rateLimitMaxWaitSecs: { min: 5, max: 600 },
+      sameProviderRetries: { min: 0, max: 10 },
+      sameProviderRetryBackoffMs: { min: 0, max: 60000 },
+      sameProviderRetryMaxBackoffMs: { min: 0, max: 60000 },
     };
 
     // 解析原始值
@@ -95,6 +108,11 @@ export function AutoFailoverConfigPanel({
       circuitErrorRateThreshold: parseNum(formData.circuitErrorRateThreshold),
       circuitMinRequests: parseNum(formData.circuitMinRequests),
       rateLimitMaxWaitSecs: parseNum(formData.rateLimitMaxWaitSecs),
+      sameProviderRetries: parseNum(formData.sameProviderRetries),
+      sameProviderRetryBackoffMs: parseNum(formData.sameProviderRetryBackoffMs),
+      sameProviderRetryMaxBackoffMs: parseNum(
+        formData.sameProviderRetryMaxBackoffMs,
+      ),
     };
 
     // 校验是否超出范围（NaN 也视为无效）
@@ -159,6 +177,27 @@ export function AutoFailoverConfigPanel({
       ranges.rateLimitMaxWaitSecs,
       t("proxy.autoFailover.rateLimitMaxWait", "限流等待上限"),
     );
+    checkRange(
+      raw.sameProviderRetries,
+      ranges.sameProviderRetries,
+      t("proxy.autoFailover.sameProviderRetries", "同一供应商重试次数"),
+    );
+    checkRange(
+      raw.sameProviderRetryBackoffMs,
+      ranges.sameProviderRetryBackoffMs,
+      t(
+        "proxy.autoFailover.sameProviderRetryBackoffMs",
+        "重试初始等待（毫秒）",
+      ),
+    );
+    checkRange(
+      raw.sameProviderRetryMaxBackoffMs,
+      ranges.sameProviderRetryMaxBackoffMs,
+      t(
+        "proxy.autoFailover.sameProviderRetryMaxBackoffMs",
+        "重试最长等待（毫秒）",
+      ),
+    );
 
     if (errors.length > 0) {
       toast.error(
@@ -186,6 +225,9 @@ export function AutoFailoverConfigPanel({
         circuitMinRequests: raw.circuitMinRequests,
         rateLimitRetryEnabled: formData.rateLimitRetryEnabled,
         rateLimitMaxWaitSecs: raw.rateLimitMaxWaitSecs,
+        sameProviderRetries: raw.sameProviderRetries,
+        sameProviderRetryBackoffMs: raw.sameProviderRetryBackoffMs,
+        sameProviderRetryMaxBackoffMs: raw.sameProviderRetryMaxBackoffMs,
       });
       toast.success(
         t("proxy.autoFailover.configSaved", "自动故障转移配置已保存"),
@@ -215,6 +257,13 @@ export function AutoFailoverConfigPanel({
         circuitMinRequests: String(config.circuitMinRequests),
         rateLimitRetryEnabled: config.rateLimitRetryEnabled ?? false,
         rateLimitMaxWaitSecs: String(config.rateLimitMaxWaitSecs ?? 120),
+        sameProviderRetries: String(config.sameProviderRetries ?? 0),
+        sameProviderRetryBackoffMs: String(
+          config.sameProviderRetryBackoffMs ?? 1000,
+        ),
+        sameProviderRetryMaxBackoffMs: String(
+          config.sameProviderRetryMaxBackoffMs ?? 8000,
+        ),
       });
     }
   };
@@ -303,6 +352,84 @@ export function AutoFailoverConfigPanel({
                 )}
               </p>
             </div>
+          </div>
+
+          {/* 同一供应商重试 */}
+          <div className="space-y-2 pt-2 border-t border-white/10">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor={`sameProviderRetries-${appType}`}>
+                  {t(
+                    "proxy.autoFailover.sameProviderRetries",
+                    "同一供应商重试次数",
+                  )}
+                </Label>
+                <Input
+                  id={`sameProviderRetries-${appType}`}
+                  type="number"
+                  min="0"
+                  max="10"
+                  value={formData.sameProviderRetries}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      sameProviderRetries: e.target.value,
+                    })
+                  }
+                  disabled={isDisabled}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`sameProviderRetryBackoff-${appType}`}>
+                  {t(
+                    "proxy.autoFailover.sameProviderRetryBackoffMs",
+                    "重试初始等待（毫秒）",
+                  )}
+                </Label>
+                <Input
+                  id={`sameProviderRetryBackoff-${appType}`}
+                  type="number"
+                  min="0"
+                  max="60000"
+                  value={formData.sameProviderRetryBackoffMs}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      sameProviderRetryBackoffMs: e.target.value,
+                    })
+                  }
+                  disabled={isDisabled}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`sameProviderRetryMaxBackoff-${appType}`}>
+                  {t(
+                    "proxy.autoFailover.sameProviderRetryMaxBackoffMs",
+                    "重试最长等待（毫秒）",
+                  )}
+                </Label>
+                <Input
+                  id={`sameProviderRetryMaxBackoff-${appType}`}
+                  type="number"
+                  min="0"
+                  max="60000"
+                  value={formData.sameProviderRetryMaxBackoffMs}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      sameProviderRetryMaxBackoffMs: e.target.value,
+                    })
+                  }
+                  disabled={isDisabled}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "proxy.autoFailover.sameProviderRetriesHint",
+                "连接失败或上游 5xx 时，先等待后重试同一供应商，最多几次（0-10，0 为关闭）；等待从初始值起每次翻倍，不超过最长等待。超时不重试同一供应商（已等满一轮）。与「最大重试次数」不同：后者是切换到其他供应商的次数。关闭故障转移时同样生效。",
+              )}
+            </p>
           </div>
 
           {/* 429 限流等待重试 */}

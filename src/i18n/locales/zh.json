@@ -3032,7 +3032,11 @@
       "maxRetriesHint": "请求失败时的重试次数（0-10）",
       "streamingFirstByteHint": "等待首个数据块的最大时间，范围 1-120 秒，默认 60 秒",
       "streamingIdleHint": "数据块之间的最大间隔，范围 60-600 秒，填 0 禁用（防止中途卡住）",
-      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）"
+      "nonStreamingHint": "非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）",
+      "sameProviderRetries": "同一供应商重试次数",
+      "sameProviderRetriesHint": "连接失败或上游 5xx 时，先等待后重试同一供应商，最多几次（0-10，0 为关闭）；等待从初始值起每次翻倍，不超过最长等待。超时不重试同一供应商（已等满一轮）。与「最大重试次数」不同：后者是切换到其他供应商的次数。关闭故障转移时同样生效。",
+      "sameProviderRetryBackoffMs": "重试初始等待（毫秒）",
+      "sameProviderRetryMaxBackoffMs": "重试最长等待（毫秒）"
     },
     "logging": {
       "enabled": "日志记录已启用",

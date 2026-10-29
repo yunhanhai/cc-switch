@@ -340,6 +340,14 @@ impl RequestContext {
             self.app_config.rate_limit_max_wait_secs as u64,
         )
         .with_model_aliases(model_alias_index, self.app_type_str)
+        // 同一 Provider 重试不随故障转移开关强制归零（与上面的 max_retries 不同）：
+        // 故障转移关闭、只有一家供应商时，一次瞬时失败就直接报错，正是这个配置
+        // 要解决的场景。它只重试同一家，不涉及切换，和「不切换」语义并不冲突。
+        .with_same_provider_retry(
+            self.app_config.same_provider_retries,
+            self.app_config.same_provider_retry_backoff_ms,
+            self.app_config.same_provider_retry_max_backoff_ms,
+        )
     }
 
     /// 获取 Provider 列表（用于故障转移）
@@ -880,6 +888,84 @@ mod tests {
                 "纠正失败必须保留 new 阶段的选路结果，而不是把请求打成错误"
             );
             assert_eq!(ctx.provider.id, "a");
+        }
+    }
+
+    /// `create_forwarder` 的重试预算接线。
+    ///
+    /// 直接构造 `RequestContext`（不经 `new`），因此不读全局设置、无需隔离 HOME。
+    mod same_provider_retry_wiring {
+        use crate::app_config::AppType;
+        use crate::database::Database;
+        use crate::provider::Provider;
+        use crate::proxy::failover_switch::FailoverSwitchManager;
+        use crate::proxy::handler_context::RequestContext;
+        use crate::proxy::provider_router::ProviderRouter;
+        use crate::proxy::providers::{
+            codex_chat_history::CodexChatHistoryStore, gemini_shadow::GeminiShadowStore,
+        };
+        use crate::proxy::server::ProxyState;
+        use crate::proxy::types::{
+            CopilotOptimizerConfig, OptimizerConfig, ProxyConfig, ProxyStatus, RectifierConfig,
+        };
+        use serde_json::json;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use std::time::Instant;
+        use tokio::sync::RwLock;
+
+        fn build_state(db: Arc<Database>) -> ProxyState {
+            ProxyState {
+                db: db.clone(),
+                config: Arc::new(RwLock::new(ProxyConfig::default())),
+                status: Arc::new(RwLock::new(ProxyStatus::default())),
+                start_time: Arc::new(RwLock::new(None)),
+                current_providers: Arc::new(RwLock::new(HashMap::new())),
+                provider_router: Arc::new(ProviderRouter::new(db.clone())),
+                gemini_shadow: Arc::new(GeminiShadowStore::default()),
+                codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
+                app_handle: None,
+                failover_manager: Arc::new(FailoverSwitchManager::new(db)),
+            }
+        }
+
+        /// 故障转移关闭时 max_retries 被强制为 0（只试一家），但同一 Provider 重试
+        /// 必须保留：单供应商、不切换的场景正是这个配置要解决的问题。
+        #[tokio::test]
+        async fn failover_off_keeps_same_provider_retry() {
+            let db = Arc::new(Database::memory().unwrap());
+            let mut app_config = db.get_proxy_config_for_app("claude").await.unwrap();
+            app_config.auto_failover_enabled = false;
+            app_config.max_retries = 3;
+            app_config.same_provider_retries = 2;
+            // 两个退避值取不同的数，参数传反时能被断言发现
+            app_config.same_provider_retry_backoff_ms = 250;
+            app_config.same_provider_retry_max_backoff_ms = 4000;
+            let state = build_state(db);
+            let provider = Provider::with_id("p".to_string(), "p".to_string(), json!({}), None);
+
+            let ctx = RequestContext {
+                start_time: Instant::now(),
+                app_config,
+                provider: provider.clone(),
+                providers: vec![provider],
+                current_provider_id: "p".to_string(),
+                request_model: String::new(),
+                outbound_model: None,
+                tag: "Claude",
+                app_type_str: "claude",
+                app_type: AppType::Claude,
+                session_id: String::new(),
+                session_client_provided: false,
+                rectifier_config: RectifierConfig::default(),
+                optimizer_config: OptimizerConfig::default(),
+                copilot_optimizer_config: CopilotOptimizerConfig::default(),
+            };
+
+            assert_eq!(
+                ctx.create_forwarder(&state).retry_budget(),
+                (1, 2, 250, 4000)
+            );
         }
     }
 }

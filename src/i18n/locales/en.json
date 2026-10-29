@@ -3032,7 +3032,11 @@
       "maxRetriesHint": "Number of retries on request failure (0-10)",
       "streamingFirstByteHint": "Max time to wait for first data chunk, range 1-120s, default 60s",
       "streamingIdleHint": "Max interval between data chunks, range 60-600s, 0 to disable (prevents mid-stream stalls)",
-      "nonStreamingHint": "Total timeout for non-streaming requests, range 60-1200s, default 600s (10 min)"
+      "nonStreamingHint": "Total timeout for non-streaming requests, range 60-1200s, default 600s (10 min)",
+      "sameProviderRetries": "Same-Provider Retries",
+      "sameProviderRetriesHint": "On connection errors or upstream 5xx responses, wait and retry the same provider up to this many times (0-10, 0 = off). The wait starts at the initial value and doubles each time, up to the max. Timeouts are not retried on the same provider, since the full timeout has already elapsed. This differs from Max Retries, which counts switches to other providers. Also applies when failover is off.",
+      "sameProviderRetryBackoffMs": "Initial Retry Wait (ms)",
+      "sameProviderRetryMaxBackoffMs": "Max Retry Wait (ms)"
     },
     "logging": {
       "enabled": "Logging enabled",

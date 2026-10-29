@@ -200,4 +200,10 @@ export interface AppProxyConfig {
   rateLimitRetryEnabled?: boolean;
   /** 429 等待重试最长等待秒数 */
   rateLimitMaxWaitSecs?: number;
+  /** 同一供应商在响应交付前失败时的额外重试次数（0 = 不重试） */
+  sameProviderRetries?: number;
+  /** 同一供应商重试的初始等待毫秒数（之后每次翻倍） */
+  sameProviderRetryBackoffMs?: number;
+  /** 同一供应商重试的单次最长等待毫秒数 */
+  sameProviderRetryMaxBackoffMs?: number;
 }

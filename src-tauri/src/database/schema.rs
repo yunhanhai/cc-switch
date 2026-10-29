@@ -134,6 +134,9 @@ impl Database {
             circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
             circuit_min_requests INTEGER NOT NULL DEFAULT 10,
             rate_limit_retry_enabled INTEGER NOT NULL DEFAULT 0, rate_limit_max_wait_secs INTEGER NOT NULL DEFAULT 120,
+            same_provider_retries INTEGER NOT NULL DEFAULT 0,
+            same_provider_retry_backoff_ms INTEGER NOT NULL DEFAULT 1000,
+            same_provider_retry_max_backoff_ms INTEGER NOT NULL DEFAULT 8000,
             default_cost_multiplier TEXT NOT NULL DEFAULT '1',
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -595,6 +598,11 @@ impl Database {
     /// 每次启动跑一遍的代价只是几次 PRAGMA 查询。
     ///
     /// 新增定制列时把 `(表, 列, 类型)` 加进下面的列表即可，不需要动版本号。
+    ///
+    /// 约束：这里只补「缺失的列」并取默认值。若今后某个迁移用重建表的方式改
+    /// `proxy_config`（如 `migrate_v13_to_v14`），重建会丢掉这些列，用户改过的值随之
+    /// 重置为默认值。目前没有迁移在版本循环之后重建该表，所以安全；新增这类重建时，
+    /// 要把下面的列一并复制进新表。
     fn ensure_custom_columns(conn: &Connection) -> Result<(), AppError> {
         const CUSTOM_COLUMNS: &[(&str, &str, &str)] = &[
             (
@@ -606,6 +614,21 @@ impl Database {
                 "proxy_config",
                 "rate_limit_max_wait_secs",
                 "INTEGER NOT NULL DEFAULT 120",
+            ),
+            (
+                "proxy_config",
+                "same_provider_retries",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
+            (
+                "proxy_config",
+                "same_provider_retry_backoff_ms",
+                "INTEGER NOT NULL DEFAULT 1000",
+            ),
+            (
+                "proxy_config",
+                "same_provider_retry_max_backoff_ms",
+                "INTEGER NOT NULL DEFAULT 8000",
             ),
         ];
 
@@ -1091,6 +1114,9 @@ impl Database {
             circuit_timeout_seconds INTEGER NOT NULL DEFAULT 60, circuit_error_rate_threshold REAL NOT NULL DEFAULT 0.6,
             circuit_min_requests INTEGER NOT NULL DEFAULT 10,
             rate_limit_retry_enabled INTEGER NOT NULL DEFAULT 0, rate_limit_max_wait_secs INTEGER NOT NULL DEFAULT 120,
+            same_provider_retries INTEGER NOT NULL DEFAULT 0,
+            same_provider_retry_backoff_ms INTEGER NOT NULL DEFAULT 1000,
+            same_provider_retry_max_backoff_ms INTEGER NOT NULL DEFAULT 8000,
             default_cost_multiplier TEXT NOT NULL DEFAULT '1',
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             live_takeover_active INTEGER NOT NULL DEFAULT 0,
