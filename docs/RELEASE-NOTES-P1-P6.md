@@ -1,6 +1,8 @@
  # 发版草稿 — 同模型跨渠道无缝切换 P1–P6
  
-> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`），最新 `5822eca3`（本草稿同步至该提交）。
+> 分支：`feature/v3.20.1-custom-routing`（基于 `v3.20.1`）。最新提交以 `git log -1` 为准
+> ——本文档**不再内嵌自身提交哈希**（自指哈希永远滞后：修改头部即改变该提交的哈希）。
+> 交付件目录同样以构建时的 `HEAD` 短哈希动态命名，见 `AGENTS.md`。
 > 状态：P1–P6 全部完成；后续追加 Claude→Codex 转换与集成测试基建修复（见"追加篇章"）。
 > `cargo test --lib 2836 passed` / 集成 128 / 前端 `vitest 串行 139 文件 1068 用例` / `typecheck` / `format` 全绿，`git status` 干净。
  
@@ -69,7 +71,7 @@
  结果：集成 128 用例全绿（12 文件）；`tests/skill_sync.rs` 的 symlink 用例按仓库既有
  模式在无 SeCreateSymbolicLinkPrivilege 的 Windows 上优雅跳过（错误 1314）。
 
- ## 追加篇章 B：Claude → Codex 供应商一键转换（`079791a7`..`e21fe965`）
+ ## 追加篇章 B：Claude → Codex 供应商一键转换（`079791a7` 起）
 
  Claude 第三方供应商卡片上的 ⇄ 按钮，把端点 + API Key + 模型名转换为 Codex 供应商。
  **协议依据**（上游源码取证）：`openai/codex` 的 `WireApi` 枚举只认 `"responses"` 与
@@ -113,7 +115,8 @@
  
  ## 交付件
 
- - 主交付：`D:\dev-cache\cc-switch-patches-e21fe965/`（`git format-patch v3.20.1..HEAD`，106 patch，`git am` 可完整还原）
+ - 主交付：`D:\dev-cache\cc-switch-patches-<HEAD 短哈希>/`（`git format-patch v3.20.1..HEAD`，`git am` 可完整还原）
+  ——目录名随构建时的 `HEAD` 变化，不在此固定（固定即过期）。
  - 备件：`D:\dev-cache\cc-switch-feature-v3.20.1-custom-routing.bundle`（`--all`，含完整历史）
  - 两者均已演练（2026-10-27）：patch 走 `git am` 还原树哈希一致；bundle `git clone` 后 commit hash 完全一致
    （本机已 `fetch --unshallow` 修复浅克隆；`git bundle verify` 对浅仓库会误报，须以真实 `clone` 为准）。
