@@ -63,12 +63,15 @@ TOML `wire_api`，按此顺序），绝不从 base_url 猜测——猜测极易�
 
 - **必须先启动本地路由**：转换产物写入了 `meta.apiFormat`，切换时前端会提示；
   成功 toast 与供应商 notes 也携带该条件。
-- **运行时证据已具备（回环级，含流式）**：`server.rs` 两个回环测试——
-  非流式（`converted_codex_provider_reaches_anthropic_upstream_in_messages_shape`）
-  与流式（`converted_codex_provider_streams_anthropic_sse_back_as_responses_sse`，
+- **运行时证据已具备（回环级，三种形态全覆盖）**：`server.rs` 三个回环测试 ——
+  非流式桥接（`converted_codex_provider_reaches_anthropic_upstream_in_messages_shape`）、
+  流式桥接（`converted_codex_provider_streams_anthropic_sse_back_as_responses_sse`，
   mock 上游回 Anthropic SSE 事件流，客户端收到 Responses SSE：
-  `response.created` → `output_text.delta` → `completed`）。wire 级断言全部通过。
-  仍未做的只有"真实第三方网关 + 真实 Codex CLI"级验证，需密钥与真机，留待日常使用检验。
+  `response.created` → `output_text.delta` → `completed`），以及
+  直连模式（`converted_codex_provider_in_direct_mode_passes_responses_through`：
+  路径停留在 `/v1/responses`、不发 `anthropic-version`、body 保持 Responses 形状）。
+  wire 级断言全部通过。仍未做的只有"真实第三方网关 + 真实 Codex CLI"级验证，
+  需密钥与真机，留待日常使用检验。
 - **认证头默认 Bearer**（`Authorization: Bearer`）。网关若只收 `x-api-key`，
   在编辑表单（Anthropic 格式 → 认证字段）改为 `ANTHROPIC_API_KEY` 即可；
   两者互斥，避免网关收到双认证头 401。
