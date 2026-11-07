@@ -5,26 +5,32 @@ description: |
 labels:
   - bug
 body:
+  - type: markdown
+    attributes:
+      value: |
+        This edition is independently maintained by yunhanhai. Redact API keys, tokens and personal data from all attachments.
+        本版本由 yunhanhai 独立维护，附件请隐藏 API Key、令牌和个人信息。
+
   - type: checkboxes
     attributes:
       label: Self Checks / 自检
       options:
         - label: |
-            I have read the [FAQ](https://github.com/farion1231/cc-switch#faq) section in README.
-            我已阅读 README 中的[常见问题](https://github.com/farion1231/cc-switch#常见问题)。
+            I have read this edition's [README](https://github.com/yunhanhai/cc-switch#readme).
+            我已阅读本版本的 [README](https://github.com/yunhanhai/cc-switch#readme)。
           required: true
         - label: |
-            I have searched for [existing issues](https://github.com/farion1231/cc-switch/issues), including closed ones.
-            我已搜索过[已有的 Issue](https://github.com/farion1231/cc-switch/issues)，包括已关闭的。
+            I have searched for [existing issues](https://github.com/yunhanhai/cc-switch/issues), including closed ones.
+            我已搜索过[已有的 Issue](https://github.com/yunhanhai/cc-switch/issues)，包括已关闭的。
           required: true
 
   - type: input
     attributes:
       label: CC Switch Version / 版本号
       description: |
-        See the Settings page in the app.
-        查看应用设置页面中的版本号。
-      placeholder: "e.g. 3.11.1"
+        See the app settings; also include the commit or download source when available.
+        查看应用设置页面中的版本号，并尽可能注明提交或下载来源。
+      placeholder: "e.g. 3.20.1 + commit hash"
     validations:
       required: true
 

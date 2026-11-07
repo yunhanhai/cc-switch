@@ -5,17 +5,23 @@ description: |
 labels:
   - question
 body:
+  - type: markdown
+    attributes:
+      value: |
+        This edition is independently maintained by yunhanhai. Redact API keys, tokens and personal data from all attachments.
+        本版本由 yunhanhai 独立维护，附件请隐藏 API Key、令牌和个人信息。
+
   - type: checkboxes
     attributes:
       label: Self Checks / 自检
       options:
         - label: |
-            I have read the [FAQ](https://github.com/farion1231/cc-switch#faq) section in README.
-            我已阅读 README 中的[常见问题](https://github.com/farion1231/cc-switch#常见问题)。
+            I have read this edition's [README](https://github.com/yunhanhai/cc-switch#readme).
+            我已阅读本版本的 [README](https://github.com/yunhanhai/cc-switch#readme)。
           required: true
         - label: |
-            I have searched for [existing issues](https://github.com/farion1231/cc-switch/issues), including closed ones.
-            我已搜索过[已有的 Issue](https://github.com/farion1231/cc-switch/issues)，包括已关闭的。
+            I have searched for [existing issues](https://github.com/yunhanhai/cc-switch/issues), including closed ones.
+            我已搜索过[已有的 Issue](https://github.com/yunhanhai/cc-switch/issues)，包括已关闭的。
           required: true
 
   - type: dropdown
@@ -59,6 +65,6 @@ body:
       description: |
         OS, CC Switch version, and any relevant details.
         操作系统、CC Switch 版本及其他相关信息。
-      placeholder: "e.g. macOS 15.4, CC Switch 3.11.1"
+      placeholder: "e.g. macOS 15.4, CC Switch 3.20.1"
     validations:
       required: false

@@ -38,7 +38,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at **farion1231@gmail.com**. All complaints will be reviewed and investigated promptly and fairly.
+This edition is independently maintained by **yunhanhai**, who is responsible for enforcing this code. To report abusive, harassing or otherwise unacceptable behavior, contact the maintainer through the [Gitee profile](https://gitee.com/yunhanhai) or [GitHub profile](https://github.com/yunhanhai) and confirm a private channel before sharing sensitive details. If no contact channel is listed, an issue may ask only for a private contact method. Complaints will be assessed fairly as maintenance time permits.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
@@ -128,7 +128,7 @@ For answers to common questions about this code of conduct, see the FAQ at [http
 
 ## 监督
 
-辱骂、骚扰或其他不可接受的行为可通过 **farion1231@gmail.com** 向负责监督的社区领袖报告。所有投诉都将得到及时和公平的审查和调查。
+本版本由 **yunhanhai** 独立维护，并负责执行本准则。报告辱骂、骚扰或其他不可接受的行为时，请通过维护者的 [Gitee 个人主页](https://gitee.com/yunhanhai)或 [GitHub 个人主页](https://github.com/yunhanhai)联系，确认私密渠道后再提交敏感细节。若主页没有联系方式，可发起仅询问私密联系方式的 Issue。投诉将根据维护时间公平评估。
 
 所有社区领袖都有义务尊重任何事件报告者的隐私和安全。
 

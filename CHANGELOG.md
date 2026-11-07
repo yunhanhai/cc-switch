@@ -1,3 +1,16 @@
+# 本仓库更新记录 / Changes in this distribution
+
+## Unreleased — 仓库定位与开发文档
+
+- 明确 yunhanhai 独立维护的二次开发定位，重写多语言 README 和贡献入口。
+- 保留上游 MIT 版权与 Git 历史，补充本仓库维护者、来源和版本说明。
+- 当前二次开发功能及提交见 [定制开发记录](docs/RELEASE-NOTES-P1-P6.md)；版本与维护计划见 [项目说明](docs/PROJECT.md)。本段不代表安装包已经发布。
+
+---
+
+以下保留导入的上游更新日志，用于追溯继承功能；其中历史下载链接和版本描述属于上游。
+The imported upstream changelog below documents inherited work, not releases published by yunhanhai.
+
 # Changelog
 
 All notable changes to CC Switch will be documented in this file.
