@@ -1,4 +1,4 @@
-# CC Switch · Yunhanhai
+# YunSwitch
 
 Konfigurationsverwaltung und lokales Routing für Claude Code, Codex, Gemini CLI und weitere KI-Werkzeuge, mit laufenden Verbesserungen für mehrere Anbieter.
 
@@ -14,8 +14,8 @@ yunhanhai übernimmt die Pflege und erweitert die vorhandene Konfigurationsverwa
 Künftig sollen auch Ansätze aus weiteren Open-Source-Projekten in die Entwicklung einfließen.
 Herkunft und Lizenz übernommener Codebestandteile werden dokumentiert; Änderungen und Veröffentlichungen dieses Projekts werden eigenständig verwaltet.
 
-- [Repository auf Gitee](https://gitee.com/yunhanhai/cc-switch)
-- [Repository auf GitHub](https://github.com/yunhanhai/cc-switch)
+- [Repository auf Gitee](https://gitee.com/yunhanhai/yunswitch)
+- [Repository auf GitHub](https://github.com/yunhanhai/yunswitch)
 - [Herkunft, Versionierung und Pflegeplan](docs/PROJECT.md)
 
 ## Erweiterungen in diesem Repository
@@ -47,8 +47,8 @@ Benötigt werden Node.js, pnpm, Rust und die Tauri-Entwicklungsumgebung für das
 Die Einzelheiten stehen im [Entwicklungs- und Beitragsleitfaden](CONTRIBUTING.md).
 
 ```bash
-git clone https://gitee.com/yunhanhai/cc-switch.git
-cd cc-switch
+git clone https://gitee.com/yunhanhai/yunswitch.git
+cd yunswitch
 pnpm install --frozen-lockfile
 pnpm dev
 ```

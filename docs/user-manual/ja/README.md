@@ -130,5 +130,5 @@ CC Switch ユーザーマニュアル
 
 Issue や PR でドキュメントの改善にご協力ください：
 
-- [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues)
-- [GitHub Repository](https://github.com/yunhanhai/cc-switch)
+- [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)
+- [GitHub Repository](https://github.com/yunhanhai/yunswitch)

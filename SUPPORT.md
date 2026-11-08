@@ -4,8 +4,8 @@ This edition of CC Switch is independently maintained by **yunhanhai**. Use this
 
 本版本由 **yunhanhai** 独立维护，使用与开发问题请通过本项目渠道反馈：
 
-- [Gitee Issues](https://gitee.com/yunhanhai/cc-switch/issues)
-- [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues)
+- [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues)
+- [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)
 
 Read the [README](README.md) and [Chinese README](README_ZH.md), then search existing issues, including closed ones. On GitHub, choose the bug, feature, documentation or question template that fits your report. If you report on both platforms, cross-link the issues.
 

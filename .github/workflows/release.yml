@@ -605,7 +605,7 @@ jobs:
           body: |
             ## CC Switch ${{ github.ref_name }}
 
-            **Independently maintained by yunhanhai / yunhanhai 独立维护版**: [Gitee](https://gitee.com/yunhanhai/cc-switch) · [GitHub](https://github.com/yunhanhai/cc-switch)
+            **Independently maintained by yunhanhai / yunhanhai 独立维护版**: [Gitee](https://gitee.com/yunhanhai/yunswitch) · [GitHub](https://github.com/yunhanhai/yunswitch)
 
             Claude Code 供应商切换工具
 

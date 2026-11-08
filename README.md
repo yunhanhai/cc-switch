@@ -1,8 +1,8 @@
 <div align="center">
 
-# CC Switch · Yunhanhai
+# YunSwitch
 
-Configuration management and local routing for AI coding tools, with continued improvements for multiple providers and models.
+Configuration and routing manager for AI coding tools.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
@@ -10,7 +10,7 @@ Configuration management and local routing for AI coding tools, with continued i
 
 English | [中文](README_ZH.md) | [日本語](README_JA.md) | [Deutsch](README_DE.md)
 
-[Gitee](https://gitee.com/yunhanhai/cc-switch) · [GitHub](https://github.com/yunhanhai/cc-switch) · [Project notes](docs/PROJECT.md) · [Changelog](CHANGELOG.md)
+[Gitee](https://gitee.com/yunhanhai/yunswitch) · [GitHub](https://github.com/yunhanhai/yunswitch) · [Project notes](docs/PROJECT.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -57,8 +57,8 @@ This existing repository screenshot illustrates provider configuration and local
 
 The source version remains `3.20.1` to continue the existing code version. As checked on 2026-11-08, this repository has no GitHub Release. Build from source for now; independently published packages will be listed in this repository's release channel.
 
-- [Gitee repository](https://gitee.com/yunhanhai/cc-switch)
-- [GitHub Releases](https://github.com/yunhanhai/cc-switch/releases)
+- [Gitee repository](https://gitee.com/yunhanhai/yunswitch)
+- [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
 - [Version and release plan](docs/PROJECT.md)
 
 The typical flow is to add a provider, enable local routing when the client requires it, configure groups and aliases, and inspect the resulting route and usage. Read the relevant guide before using a provider that requires protocol conversion.
@@ -86,13 +86,13 @@ Inherited installation instructions in older manuals and release notes are histo
 | macOS / Linux | Corresponding [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) |
 
 ```bash
-git clone https://gitee.com/yunhanhai/cc-switch.git
-cd cc-switch
+git clone https://gitee.com/yunhanhai/yunswitch.git
+cd yunswitch
 corepack pnpm install --frozen-lockfile
 corepack pnpm dev
 ```
 
-You can also clone `https://github.com/yunhanhai/cc-switch.git`. When using Corepack, prefix the following pnpm commands with `corepack`.
+You can also clone `https://github.com/yunhanhai/yunswitch.git`. When using Corepack, prefix the following pnpm commands with `corepack`.
 
 | Command                                           | Purpose                                              |
 | ------------------------------------------------- | ---------------------------------------------------- |
@@ -108,7 +108,7 @@ Development builds use `CC Switch Dev`, `~/.cc-switch-dev` and proxy port `15722
 
 ## Contributing and next steps
 
-Use [Gitee Issues](https://gitee.com/yunhanhai/cc-switch/issues) or [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code and [SECURITY.md](SECURITY.md) for security reports.
+Use [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) or [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code and [SECURITY.md](SECURITY.md) for security reports.
 
 Planned work includes independent releases and branding, client/provider compatibility checks, and integrations with other projects that clearly record their source and license. See the [maintenance plan](docs/PROJECT.md).
 

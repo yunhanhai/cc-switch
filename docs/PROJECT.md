@@ -2,15 +2,17 @@
 
 ## 项目定位
 
-**CC Switch · Yunhanhai** 是由 [yunhanhai](https://gitee.com/yunhanhai) 独立维护的开源二次开发项目。在 CC Switch 的配置管理与本地代理基础上，重点改善多供应商路由、模型别名、供应商配置转换和请求韧性。
+**YunSwitch** 是由 [yunhanhai](https://gitee.com/yunhanhai) 独立维护的开源二次开发项目。在 CC Switch 的配置管理与本地代理基础上，重点改善多供应商路由、模型别名、供应商配置转换和请求韧性。
+
+正式展示名为 `YunSwitch`，仓库名为 `yunswitch`，中文副标题为「AI 编程工具配置与路由管理」。两个平台通过现有仓库改名延续历史，不重新建仓。
 
 当前由一人维护，后续会结合实际需求吸收其他开源项目的设计与实现。已实现功能、验证结果和待办计划分别记录；参考项目并不自动意味着已经集成其代码。
 
 | 入口     | 地址                                                                                                                          |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Gitee    | <https://gitee.com/yunhanhai/cc-switch>                                                                                       |
-| GitHub   | <https://github.com/yunhanhai/cc-switch>                                                                                      |
-| 问题反馈 | [Gitee Issues](https://gitee.com/yunhanhai/cc-switch/issues) / [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues) |
+| Gitee    | <https://gitee.com/yunhanhai/yunswitch>                                                                                       |
+| GitHub   | <https://github.com/yunhanhai/yunswitch>                                                                                      |
+| 问题反馈 | [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) / [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) |
 | 原始上游 | [farion1231/cc-switch](https://github.com/farion1231/cc-switch)                                                               |
 
 ## 来源与版权
@@ -32,7 +34,7 @@
 
 源码中的 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 当前均为 `3.20.1`，这是沿用的源码版本，不能据此宣称本仓库已经正式发布 v3.20.1 安装包。2026-11-08 核查时，本仓库 GitHub 尚无 Release。
 
-建议首个独立版本采用类似 `3.20.1-yunhanhai.1` 的预发布版本，并在发布前同步三个版本文件、Cargo.lock 中的本包版本、Git 标签与发布说明；后续根据改动采用自己的版本节奏。此建议尚未作为正式版本执行。
+建议首个独立版本采用类似 `3.20.1-yunswitch.1` 的预发布版本，并在发布前同步三个版本文件、Cargo.lock 中的本包版本、Git 标签与发布说明；后续根据改动采用自己的版本节奏。此建议尚未作为正式版本执行。
 
 当前开发配置为：
 
@@ -40,7 +42,7 @@
 - 开发配置目录 `~/.cc-switch-dev`，本地代理端口默认 `15722`，深链 `ccswitch-dev://`。
 - 自动更新配置为关闭，更新地址为空。
 
-当前展示名称用于文档区分。正式品牌、安装包身份、数据目录、深链和更新签名应在发布前一并设计，并提供迁移说明。
+展示名称与仓库名已确定为 YunSwitch；安装包身份、数据目录、深链和更新签名应在发布前一并设计，并提供迁移说明。
 
 ## 仓库维护方式
 
@@ -49,8 +51,8 @@
 本地远端分工：
 
 ```text
-origin    https://gitee.com/yunhanhai/cc-switch.git
-github    https://github.com/yunhanhai/cc-switch.git
+origin    https://gitee.com/yunhanhai/yunswitch.git
+github    https://github.com/yunhanhai/yunswitch.git
 upstream  https://github.com/farion1231/cc-switch.git
 ```
 

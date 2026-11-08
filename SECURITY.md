@@ -1,8 +1,8 @@
 # Security Policy / 安全策略
 
-This policy applies to the edition independently maintained by **yunhanhai**, hosted on [Gitee](https://gitee.com/yunhanhai/cc-switch) and [GitHub](https://github.com/yunhanhai/cc-switch).
+This policy applies to the edition independently maintained by **yunhanhai**, hosted on [Gitee](https://gitee.com/yunhanhai/yunswitch) and [GitHub](https://github.com/yunhanhai/yunswitch).
 
-本策略适用于 **yunhanhai** 独立维护的版本，仓库位于 [Gitee](https://gitee.com/yunhanhai/cc-switch) 和 [GitHub](https://github.com/yunhanhai/cc-switch)。
+本策略适用于 **yunhanhai** 独立维护的版本，仓库位于 [Gitee](https://gitee.com/yunhanhai/yunswitch) 和 [GitHub](https://github.com/yunhanhai/yunswitch)。
 
 ## Maintenance / 维护范围
 
@@ -45,6 +45,6 @@ The project is currently maintained by one person. Review and fixes depend on se
 
 目前由一人维护，评估与修复根据严重程度和可用时间安排，不承诺固定确认或修复期限。披露时间请与维护者协调；发布说明中的致谢应遵循报告者的同意及匿名偏好。
 
-Published fixes will be described in this project's [GitHub Releases](https://github.com/yunhanhai/cc-switch/releases) or [Gitee releases](https://gitee.com/yunhanhai/cc-switch/releases). Consult the actual release notes for the affected and fixed versions.
+Published fixes will be described in this project's [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases) or [Gitee releases](https://gitee.com/yunhanhai/yunswitch/releases). Consult the actual release notes for the affected and fixed versions.
 
-已发布的修复会在本项目的 [GitHub Releases](https://github.com/yunhanhai/cc-switch/releases) 或 [Gitee 发行版](https://gitee.com/yunhanhai/cc-switch/releases)中说明，受影响及已修复版本以具体发布说明为准。
+已发布的修复会在本项目的 [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases) 或 [Gitee 发行版](https://gitee.com/yunhanhai/yunswitch/releases)中说明，受影响及已修复版本以具体发布说明为准。

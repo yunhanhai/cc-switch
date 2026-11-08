@@ -1,8 +1,8 @@
 # Contributing / 贡献指南
 
-This edition of CC Switch is independently maintained by **yunhanhai**. Please submit issues and contributions to this project's [Gitee repository](https://gitee.com/yunhanhai/cc-switch) or [GitHub repository](https://github.com/yunhanhai/cc-switch). Read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+This edition of CC Switch is independently maintained by **yunhanhai**. Please submit issues and contributions to this project's [Gitee repository](https://gitee.com/yunhanhai/yunswitch) or [GitHub repository](https://github.com/yunhanhai/yunswitch). Read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
-本版本由 **yunhanhai** 独立维护。请向本项目的 [Gitee 仓库](https://gitee.com/yunhanhai/cc-switch)或 [GitHub 仓库](https://github.com/yunhanhai/cc-switch)提交问题与贡献，参与前请阅读[行为准则](CODE_OF_CONDUCT.md)。
+本版本由 **yunhanhai** 独立维护。请向本项目的 [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)或 [GitHub 仓库](https://github.com/yunhanhai/yunswitch)提交问题与贡献，参与前请阅读[行为准则](CODE_OF_CONDUCT.md)。
 
 ## Development setup / 开发环境
 
@@ -12,8 +12,8 @@ This edition of CC Switch is independently maintained by **yunhanhai**. Please s
 - [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/), including the native build tools for your OS / 安装对应操作系统的原生构建依赖。
 
 ```bash
-git clone https://gitee.com/yunhanhai/cc-switch.git
-cd cc-switch
+git clone https://gitee.com/yunhanhai/yunswitch.git
+cd yunswitch
 corepack pnpm install --frozen-lockfile
 corepack pnpm dev
 ```

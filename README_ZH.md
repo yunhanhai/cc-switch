@@ -1,8 +1,8 @@
 <div align="center">
 
-# CC Switch · Yunhanhai
+# YunSwitch
 
-AI 编程工具的配置管理与本地路由，面向多供应商与多模型场景持续改进。
+AI 编程工具配置与路由管理，面向多供应商与多模型场景持续改进。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-orange.svg)](https://tauri.app/)
@@ -10,7 +10,7 @@ AI 编程工具的配置管理与本地路由，面向多供应商与多模型�
 
 [English](README.md) | 中文 | [日本語](README_JA.md) | [Deutsch](README_DE.md)
 
-[Gitee](https://gitee.com/yunhanhai/cc-switch) · [GitHub](https://github.com/yunhanhai/cc-switch) · [项目说明](docs/PROJECT.md) · [更新记录](CHANGELOG.md)
+[Gitee](https://gitee.com/yunhanhai/yunswitch) · [GitHub](https://github.com/yunhanhai/yunswitch) · [项目说明](docs/PROJECT.md) · [更新记录](CHANGELOG.md)
 
 </div>
 
@@ -57,8 +57,8 @@ AI 编程工具的配置管理与本地路由，面向多供应商与多模型�
 
 源码中的版本目前仍为 `3.20.1`，用于延续已有代码版本。本仓库 GitHub 在 2026-11-08 核查时尚无正式 Release；请使用源码开发，后续安装包会在本仓库发布入口公布。
 
-- [Gitee 仓库](https://gitee.com/yunhanhai/cc-switch)
-- [GitHub Releases](https://github.com/yunhanhai/cc-switch/releases)
+- [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
+- [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
 - [版本与发布计划](docs/PROJECT.md#当前版本与发布状态)
 
 基本流程：添加供应商配置 → 按客户端需要启用本地路由 → 设置路由分组与模型别名 → 发起请求并查看路由和用量结果。需要协议转换的供应商，请先阅读相应指南。
@@ -88,13 +88,13 @@ AI 编程工具的配置管理与本地路由，面向多供应商与多模型�
 | macOS / Linux | 对应 [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/) |
 
 ```bash
-git clone https://gitee.com/yunhanhai/cc-switch.git
-cd cc-switch
+git clone https://gitee.com/yunhanhai/yunswitch.git
+cd yunswitch
 corepack pnpm install --frozen-lockfile
 corepack pnpm dev
 ```
 
-GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/cc-switch.git`。
+GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git`。
 
 常用命令（使用 Corepack 时，在 `pnpm` 前加 `corepack`）：
 
@@ -112,7 +112,7 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/cc-switch.git
 
 ## 参与与后续计划
 
-问题与建议请提交到 [Gitee Issues](https://gitee.com/yunhanhai/cc-switch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues)，代码贡献请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题按 [SECURITY.md](SECURITY.md) 联系维护者。
+问题与建议请提交到 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)，代码贡献请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题按 [SECURITY.md](SECURITY.md) 联系维护者。
 
 后续重点是独立版本与发布渠道、运行界面与安装标识整理、更多供应商兼容性验证，以及有明确来源记录的跨项目能力整合。具体待办见 [维护计划](docs/PROJECT.md#后续调整)。
 

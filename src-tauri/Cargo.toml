@@ -4,7 +4,7 @@ version = "3.20.1"
 description = "Independently maintained CC Switch distribution with routing groups, model aliases and provider resilience enhancements"
 authors = ["Jason Young", "yunhanhai"]
 license = "MIT"
-repository = "https://github.com/yunhanhai/cc-switch"
+repository = "https://github.com/yunhanhai/yunswitch"
 edition = "2021"
 rust-version = "1.85.0"
 

@@ -130,5 +130,5 @@
 
 欢迎提交 Issue 或 PR 改进文档：
 
-- [GitHub Issues](https://github.com/yunhanhai/cc-switch/issues)
-- [GitHub Repository](https://github.com/yunhanhai/cc-switch)
+- [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)
+- [GitHub Repository](https://github.com/yunhanhai/yunswitch)

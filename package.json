@@ -22,11 +22,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/yunhanhai/cc-switch.git"
+    "url": "https://gitee.com/yunhanhai/yunswitch.git"
   },
-  "homepage": "https://gitee.com/yunhanhai/cc-switch",
+  "homepage": "https://gitee.com/yunhanhai/yunswitch",
   "bugs": {
-    "url": "https://gitee.com/yunhanhai/cc-switch/issues"
+    "url": "https://gitee.com/yunhanhai/yunswitch/issues"
   },
   "license": "MIT",
   "packageManager": "pnpm@10.12.3",

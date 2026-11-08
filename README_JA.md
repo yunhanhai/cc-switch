@@ -1,4 +1,4 @@
-# CC Switch · Yunhanhai
+# YunSwitch
 
 Claude Code、Codex、Gemini CLI などの設定管理とローカルルーティングを、継続的に改善するプロジェクトです。
 
@@ -14,8 +14,8 @@ Claude Code、Codex、Gemini CLI などの設定管理とローカルルーテ�
 今後は、他のオープンソースプロジェクトの設計や機能も参考にしながら改善を進めます。
 取り込むコードの出典とライセンスを記録し、このリポジトリの変更内容とリリースを独立して管理します。
 
-- [Gitee リポジトリ](https://gitee.com/yunhanhai/cc-switch)
-- [GitHub リポジトリ](https://github.com/yunhanhai/cc-switch)
+- [Gitee リポジトリ](https://gitee.com/yunhanhai/yunswitch)
+- [GitHub リポジトリ](https://github.com/yunhanhai/yunswitch)
 - [プロジェクトの出典・バージョン・保守計画](docs/PROJECT.md)
 
 ## 追加開発の内容
@@ -47,8 +47,8 @@ Node.js、pnpm、Rust、および利用する OS の Tauri 開発環境を準備
 詳細は [開発・貢献ガイド](CONTRIBUTING.md) を参照してください。
 
 ```bash
-git clone https://gitee.com/yunhanhai/cc-switch.git
-cd cc-switch
+git clone https://gitee.com/yunhanhai/yunswitch.git
+cd yunswitch
 pnpm install --frozen-lockfile
 pnpm dev
 ```
