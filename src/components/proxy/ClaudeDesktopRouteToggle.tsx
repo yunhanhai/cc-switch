@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
+import { useGlobalProxyConfig } from "@/lib/query/proxy";
 import { cn } from "@/lib/utils";
 
 interface ClaudeDesktopRouteToggleProps {
@@ -13,6 +14,7 @@ export function ClaudeDesktopRouteToggle({
   className,
 }: ClaudeDesktopRouteToggleProps) {
   const { t } = useTranslation();
+  const { data: globalConfig } = useGlobalProxyConfig();
   const {
     isRunning,
     status,
@@ -30,8 +32,12 @@ export function ClaudeDesktopRouteToggle({
       takeoverStatus?.gemini ||
       takeoverStatus?.grokbuild,
   );
-  const routeAddress = status?.address ?? "127.0.0.1";
-  const routePort = status?.port ?? 15722;
+  const routeAddress = isRunning
+    ? (status?.address ?? globalConfig?.listenAddress)
+    : globalConfig?.listenAddress;
+  const routePort = isRunning
+    ? (status?.port ?? globalConfig?.listenPort)
+    : globalConfig?.listenPort;
 
   const handleToggle = async (checked: boolean) => {
     try {
@@ -57,17 +63,20 @@ export function ClaudeDesktopRouteToggle({
     }
   };
 
-  const tooltipText = isRunning
-    ? t("claudeDesktop.route.tooltip.active", {
-        address: routeAddress,
-        port: routePort,
-        defaultValue: `Claude Desktop 本地路由已开启 - ${routeAddress}:${routePort}`,
-      })
-    : t("claudeDesktop.route.tooltip.inactive", {
-        address: routeAddress,
-        port: routePort,
-        defaultValue: `开启 Claude Desktop 本地路由，用于需要模型映射或格式转换的供应商。当前配置地址：${routeAddress}:${routePort}`,
-      });
+  const tooltipText =
+    !routeAddress || !routePort
+      ? t("common.loading", { defaultValue: "加载中..." })
+      : isRunning
+        ? t("claudeDesktop.route.tooltip.active", {
+            address: routeAddress,
+            port: routePort,
+            defaultValue: `Claude Desktop 本地路由已开启 - ${routeAddress}:${routePort}`,
+          })
+        : t("claudeDesktop.route.tooltip.inactive", {
+            address: routeAddress,
+            port: routePort,
+            defaultValue: `开启 Claude Desktop 本地路由，用于需要模型映射或格式转换的供应商。当前配置地址：${routeAddress}:${routePort}`,
+          });
 
   return (
     <div

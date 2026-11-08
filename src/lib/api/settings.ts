@@ -30,6 +30,11 @@ export interface WebDavSyncResult {
   status: string;
 }
 
+export interface RuntimeDirectoryIdentity {
+  defaultAppConfigDir: string;
+  isolatedConfigRoot: string | null;
+}
+
 export const settingsApi = {
   async get(): Promise<Settings> {
     return await invoke("get_settings");
@@ -87,6 +92,10 @@ export const settingsApi = {
 
   async getAppConfigPath(): Promise<string> {
     return await invoke("get_app_config_path");
+  },
+
+  async getRuntimeDirectoryIdentity(): Promise<RuntimeDirectoryIdentity> {
+    return await invoke("get_runtime_directory_identity");
   },
 
   async openAppConfigFolder(): Promise<void> {

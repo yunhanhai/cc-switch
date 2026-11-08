@@ -1,6 +1,6 @@
 //! Deep link URL parser
 //!
-//! Parses ccswitch:// URLs into DeepLinkImportRequest structures.
+//! Parses YunSwitch URLs into DeepLinkImportRequest structures.
 
 use super::utils::validate_url;
 use super::DeepLinkImportRequest;
@@ -8,22 +8,24 @@ use crate::error::AppError;
 use std::collections::HashMap;
 use url::Url;
 
-/// Parse a ccswitch:// URL into a DeepLinkImportRequest
+/// Parse a yunswitch:// URL into a DeepLinkImportRequest
 ///
 /// Expected format:
-/// ccswitch://v1/import?resource={type}&...
+/// yunswitch://v1/import?resource={type}&...
 pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppError> {
+    parse_deeplink_url_with_scheme(url_str, crate::config::deep_link_scheme())
+}
+
+fn parse_deeplink_url_with_scheme(
+    url_str: &str,
+    expected_scheme: &str,
+) -> Result<DeepLinkImportRequest, AppError> {
     // Parse URL
     let url = Url::parse(url_str)
         .map_err(|e| AppError::InvalidInput(format!("Invalid deep link URL: {e}")))?;
 
     // Validate scheme
     let scheme = url.scheme();
-    let expected_scheme = if crate::config::uses_dev_isolated_layout() {
-        "ccswitch-dev"
-    } else {
-        "ccswitch"
-    };
     if scheme != expected_scheme {
         return Err(AppError::InvalidInput(format!(
             "Invalid scheme: expected '{expected_scheme}', got '{scheme}'"
@@ -69,6 +71,29 @@ pub fn parse_deeplink_url(url_str: &str) -> Result<DeepLinkImportRequest, AppErr
         _ => Err(AppError::InvalidInput(format!(
             "Unsupported resource type: {resource}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn identity_parser_accepts_only_the_registered_product_scheme() {
+        let query = "v1/import?resource=provider&app=claude&name=Example";
+        for expected in ["yunswitch", "yunswitch-dev"] {
+            assert!(
+                parse_deeplink_url_with_scheme(&format!("{expected}://{query}"), expected,).is_ok()
+            );
+            for other in ["ccswitch", "ccswitch-dev", "yunswitch", "yunswitch-dev"] {
+                if other == expected {
+                    continue;
+                }
+                let error = parse_deeplink_url_with_scheme(&format!("{other}://{query}"), expected)
+                    .unwrap_err();
+                assert!(error.to_string().contains("Invalid scheme"));
+            }
+        }
     }
 }
 

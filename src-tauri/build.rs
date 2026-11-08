@@ -1,8 +1,10 @@
 fn main() {
-    // This checkout is the isolated development fork. Keep both debug and
-    // release artifacts away from the official app's database and CLI files.
+    // Debug builds isolate CLI configurations from the installed application.
+    // Release builds use YunSwitch's independent production data directory.
     println!("cargo:rustc-check-cfg=cfg(cc_switch_dev_build)");
-    println!("cargo:rustc-cfg=cc_switch_dev_build");
+    if std::env::var("PROFILE").as_deref() == Ok("debug") {
+        println!("cargo:rustc-cfg=cc_switch_dev_build");
+    }
     tauri_build::build();
 
     // Windows: Embed Common Controls v6 manifest for test binaries

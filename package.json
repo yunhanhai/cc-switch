@@ -1,10 +1,10 @@
 {
-  "name": "cc-switch",
-  "version": "3.20.1",
-  "description": "Independently maintained CC Switch distribution with routing groups, model aliases and provider resilience enhancements",
+  "name": "yunswitch",
+  "version": "3.20.1-yunswitch.1",
+  "description": "YunSwitch: configuration and routing manager for AI coding tools, independently maintained from CC Switch",
   "type": "module",
   "scripts": {
-    "dev": "pnpm tauri dev",
+    "dev": "pnpm tauri dev --config src-tauri/tauri.dev.conf.json",
     "build": "pnpm tauri build",
     "tauri": "tauri",
     "dev:renderer": "vite",

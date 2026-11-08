@@ -7,7 +7,7 @@ import React, {
   useRef,
 } from "react";
 import type { UpdateInfo } from "../lib/updater";
-import { checkForUpdate } from "../lib/updater";
+import { checkForUpdate, isAutoUpdateConfigured } from "../lib/updater";
 
 interface UpdateContextValue {
   // 更新状态
@@ -15,6 +15,7 @@ interface UpdateContextValue {
   updateInfo: UpdateInfo | null;
   isChecking: boolean;
   error: string | null;
+  autoUpdateEnabled: boolean;
 
   // 提示状态
   isDismissed: boolean;
@@ -36,6 +37,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDismissed, setIsDismissed] = useState(false);
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false);
 
   // 从 localStorage 读取已关闭的版本
   useEffect(() => {
@@ -66,6 +68,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await checkForUpdate({ timeout: 30000 });
+      setAutoUpdateEnabled(result.status !== "disabled");
 
       if (result.status === "available") {
         setHasUpdate(true);
@@ -87,7 +90,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         setHasUpdate(false);
         setUpdateInfo(null);
         setIsDismissed(false);
-        return false; // 已是最新
+        return false;
       }
     } catch (err) {
       console.error("检查更新失败:", err);
@@ -119,7 +122,12 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // 延迟1秒后检查，避免影响启动体验
     const timer = setTimeout(() => {
-      checkUpdate().catch(console.error);
+      void isAutoUpdateConfigured()
+        .then((enabled) => {
+          setAutoUpdateEnabled(enabled);
+          if (enabled) return checkUpdate();
+        })
+        .catch(console.error);
     }, 1000);
 
     return () => clearTimeout(timer);
@@ -130,6 +138,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
     updateInfo,
     isChecking,
     error,
+    autoUpdateEnabled,
     isDismissed,
     dismissUpdate,
     checkUpdate,

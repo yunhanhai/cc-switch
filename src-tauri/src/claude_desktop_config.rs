@@ -11,8 +11,16 @@ use crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID;
 use crate::error::AppError;
 use crate::provider::{ClaudeDesktopMode, Provider};
 
-pub const PROFILE_ID: &str = "00000000-0000-4000-8000-000000157210";
-pub const PROFILE_NAME: &str = "CC Switch";
+pub const PROFILE_ID: &str = if cfg!(all(cc_switch_dev_build, not(test))) {
+    "9fb27269-93ef-4602-b8be-b5d39f3a79c1"
+} else {
+    "4002ea38-fb46-4e03-a404-f7b60fcd40d8"
+};
+pub const PROFILE_NAME: &str = if cfg!(all(cc_switch_dev_build, not(test))) {
+    "YunSwitch Dev"
+} else {
+    "YunSwitch"
+};
 
 const CONFIG_FILE: &str = "claude_desktop_config.json";
 const CONFIG_LIBRARY_DIR: &str = "configLibrary";

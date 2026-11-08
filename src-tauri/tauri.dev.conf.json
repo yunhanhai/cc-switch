@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "YunSwitch Dev",
+  "identifier": "io.github.yunhanhai.yunswitch.dev",
+  "bundle": {
+    "windows": {
+      "wix": { "upgradeCode": "a18d2d5c-630d-4ba6-b8e4-b3b497d09919" }
+    }
+  },
+  "plugins": {
+    "deep-link": { "desktop": { "schemes": ["yunswitch-dev"] } }
+  }
+}
