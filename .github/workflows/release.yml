@@ -85,11 +85,10 @@ jobs:
             || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
 
       - name: Setup pnpm
-        env:
-          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        uses: pnpm/action-setup@v4
+
+      - name: Verify Node.js and pnpm versions
         run: |
-          corepack enable
-          corepack install
           node --version
           pnpm --version
 
