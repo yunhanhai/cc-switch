@@ -517,8 +517,8 @@ async function exerciseMigration(cdp) {
 
 async function installOrUninstall(action) {
   const log = join(output, action === "/i" ? "install.log" : "uninstall.log");
-  // AUTOLAUNCHAPP must be absent: the string "0" still satisfies MSI's
-  // property-present condition and would start an uninstrumented instance.
+  // Do not pass AUTOLAUNCHAPP: both "0" and an empty trailing assignment
+  // can be interpreted as a present property and launch an extra instance.
   const result = await execFileAsync(
     "msiexec.exe",
     [
@@ -528,7 +528,6 @@ async function installOrUninstall(action) {
       "/norestart",
       "/l*v",
       log,
-      "AUTOLAUNCHAPP=",
       "WIXUI_EXITDIALOGOPTIONALCHECKBOX=0",
     ],
     {
