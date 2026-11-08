@@ -45,7 +45,7 @@ Run Rust checks from `src-tauri`:
 cd src-tauri
 cargo fmt --check
 cargo clippy
-cargo test
+cargo test --locked -j 1
 ```
 
 ## Issues and pull requests / 问题与贡献

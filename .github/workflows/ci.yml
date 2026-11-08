@@ -154,7 +154,9 @@ jobs:
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml -- -D warnings
 
       - name: Run tests
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+        # The library emits staticlib/cdylib/rlib; serialize test compilation to
+        # avoid stale or mismatched library artifacts in integration targets.
+        run: cargo test --locked -j 1 --manifest-path src-tauri/Cargo.toml
 
   backend-windows-wsl2:
     name: Backend Checks (Windows + WSL2 home)

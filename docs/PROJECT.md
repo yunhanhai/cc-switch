@@ -48,7 +48,7 @@
 
 两边稳定开发线与默认分支统一为 `main`。原 `feature/v3.20.1-custom-routing` 和文档工作分支保留用于追溯，两个平台的文档 PR 合并提交均保留在 `main` 历史中。
 
-GitHub CI 检查面向 `main` 的 PR 与推送，并支持手动执行。Node 版本读取 `.node-version`，Rust 工具链与仓库固定为 1.95.0；Windows 测试编译使用 32 MB 线程栈。具体验证结果以每次工作流运行记录为准。
+GitHub CI 检查面向 `main` 的 PR 与推送，并支持手动执行。Node 版本读取 `.node-version`，Rust 工具链与仓库固定为 1.95.0；Windows 测试编译使用 32 MB 线程栈，后端测试以 `-j 1` 串行编译，避免集成目标加载到不一致的库产物。具体验证结果以每次工作流运行记录为准。
 
 本地远端分工：
 
