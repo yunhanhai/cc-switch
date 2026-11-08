@@ -637,7 +637,11 @@ async function main() {
   const command = await powershell(
     String.raw`(Get-Item 'HKCU:\Software\Classes\yunswitch\shell\open\command').GetValue('')`,
   );
-  assert.ok(command.toLowerCase().includes(installedExe.toLowerCase()));
+  const registeredExe = command.match(/^"([^"]+)"\s+"%1"$/)?.[1];
+  assert.ok(registeredExe, `Unexpected protocol command: ${command}`);
+  // [!Path] in MSI may expand to an 8.3 short path; verify the actual file.
+  assert.equal(await sha256(registeredExe), await sha256(installedExe));
+  evidence.protocolCommand = command;
   assert.ok(command.includes('"%1"'));
   assert.ok(
     await exists(

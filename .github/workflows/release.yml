@@ -166,6 +166,13 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Cache compiled release dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release-${{ runner.os }}-${{ matrix.arch || runner.arch }}
+          save-if: ${{ !cancelled() }}
+
       - name: Validate release version and prepare build configuration
         shell: bash
         env:
@@ -693,6 +700,13 @@ jobs:
           set -euo pipefail
           echo "Collected signatures (if any alongside artifacts):"
           ls -la release-assets/*.sig || echo "No signatures found"
+
+      - name: Save built packages before installation acceptance
+        uses: actions/upload-artifact@v7
+        with:
+          name: built-packages-${{ runner.os }}-${{ matrix.arch || runner.arch }}
+          path: release-assets/*
+          if-no-files-found: error
 
       - name: Accept Windows x64 production packages on a clean runner
         if: runner.os == 'Windows' && matrix.arch != 'arm64'
