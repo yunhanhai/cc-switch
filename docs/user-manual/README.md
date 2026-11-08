@@ -18,5 +18,5 @@
 
 ## Links
 
-- [GitHub Issues](https://github.com/farion1231/cc-switch/issues)
-- [GitHub Repository](https://github.com/farion1231/cc-switch)
+- [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)
+- [GitHub Repository](https://github.com/yunhanhai/yunswitch)

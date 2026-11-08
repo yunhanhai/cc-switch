@@ -1,12 +1,12 @@
 blank_issues_enabled: false
 contact_links:
   - name: "Security Vulnerabilities / 安全漏洞"
-    url: "https://github.com/farion1231/cc-switch/security/advisories/new"
+    url: "https://github.com/yunhanhai/yunswitch/blob/feature/v3.20.1-custom-routing/SECURITY.md"
     about: |
-      Report security vulnerabilities through GitHub Security Advisories.
-      请通过 GitHub 安全公告报告安全漏洞。
-  - name: "Discussions / 讨论区"
-    url: "https://github.com/farion1231/cc-switch/discussions"
+      Read the policy and confirm a private reporting channel with yunhanhai before sharing details.
+      请阅读安全策略，先与 yunhanhai 确认私密报告渠道再提交细节。
+  - name: "Gitee Issues / Gitee 问题反馈"
+    url: "https://gitee.com/yunhanhai/yunswitch/issues"
     about: |
-      General discussions and community help.
-      一般讨论和社区帮助。
+      Questions and feedback for this independently maintained edition.
+      本独立维护版本的提问与反馈。

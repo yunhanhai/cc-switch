@@ -1,59 +1,24 @@
 # Support / 获取帮助
 
-> [中文版本](#获取帮助)
+This edition of CC Switch is independently maintained by **yunhanhai**. Use this project's channels for questions about this edition:
 
-## How to Get Help
+本版本由 **yunhanhai** 独立维护，使用与开发问题请通过本项目渠道反馈：
 
-CC Switch is an open-source project maintained by volunteers. We're happy to help, but please use the right channel so we can respond efficiently.
+- [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues)
+- [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)
 
-### Before Asking
+Read the [README](README.md) and [Chinese README](README_ZH.md), then search existing issues, including closed ones. On GitHub, choose the bug, feature, documentation or question template that fits your report. If you report on both platforms, cross-link the issues.
 
-1. **Read the [FAQ](https://github.com/farion1231/cc-switch#faq)** — most common questions are answered there.
-2. **Search [existing issues](https://github.com/farion1231/cc-switch/issues)** (including closed ones) — someone may have had the same question.
+先阅读 [README](README.md) 与[中文 README](README_ZH.md)，再搜索已有及已关闭的 Issue。GitHub 提供 Bug、功能、文档与提问模板；如在两个平台提交同一问题，请附上对应链接。
 
-### Asking a Question
+Include the app version or commit, OS, affected tool and reproduction steps. Redact API keys, access tokens and personal data from logs, configuration snippets and screenshots. Report vulnerabilities through the process in [SECURITY.md](SECURITY.md).
 
-- **Usage or configuration questions**: [Open a Question issue](https://github.com/farion1231/cc-switch/issues/new?template=question.yml)
-- **General discussion**: [GitHub Discussions](https://github.com/farion1231/cc-switch/discussions)
+反馈请附应用版本或提交、操作系统、涉及工具和复现步骤。日志、配置片段与截图须隐藏 API Key、访问令牌和个人信息；安全漏洞按 [SECURITY.md](SECURITY.md) 中的流程报告。
 
-### Reporting Problems
+This is currently a solo-maintained project. Responses and fixes depend on available time and issue priority; there is no guaranteed response deadline.
 
-- **Bug reports**: [Open a Bug Report](https://github.com/farion1231/cc-switch/issues/new?template=bug_report.yml)
-- **Documentation issues**: [Open a Doc Issue](https://github.com/farion1231/cc-switch/issues/new?template=doc_issue.yml)
-- **Security vulnerabilities**: Please do NOT use public issues. See our [Security Policy](./SECURITY.md).
+目前项目由一人维护，响应与修复根据可用时间和问题优先级安排，不承诺固定响应期限。
 
-### Feature Requests
+For contributions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- [Submit a Feature Request](https://github.com/farion1231/cc-switch/issues/new?template=feature_request.yml)
-- Please open an issue for discussion before submitting a PR for new features.
-
----
-
-# 获取帮助
-
-> [English Version](#support--获取帮助)
-
-## 如何获取帮助
-
-CC Switch 是一个由志愿者维护的开源项目。我们很乐意提供帮助，但请使用合适的渠道，以便我们高效响应。
-
-### 提问之前
-
-1. **阅读 [常见问题](https://github.com/farion1231/cc-switch#常见问题)** — 大多数常见问题都已在其中解答。
-2. **搜索 [已有的 Issue](https://github.com/farion1231/cc-switch/issues)**（包括已关闭的） — 可能已经有人问过相同的问题。
-
-### 提问
-
-- **使用或配置问题**：[提交问题 Issue](https://github.com/farion1231/cc-switch/issues/new?template=question.yml)
-- **一般讨论**：[GitHub 讨论区](https://github.com/farion1231/cc-switch/discussions)
-
-### 报告问题
-
-- **Bug 报告**：[提交 Bug 报告](https://github.com/farion1231/cc-switch/issues/new?template=bug_report.yml)
-- **文档问题**：[提交文档问题](https://github.com/farion1231/cc-switch/issues/new?template=doc_issue.yml)
-- **安全漏洞**：请不要使用公开 Issue。请参阅我们的[安全策略](./SECURITY.md)。
-
-### 功能请求
-
-- [提交功能请求](https://github.com/farion1231/cc-switch/issues/new?template=feature_request.yml)
-- 提交新功能的 PR 之前，请先开 Issue 讨论。
+参与贡献请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
