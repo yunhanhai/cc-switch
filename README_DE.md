@@ -37,8 +37,8 @@ Wiederholungen beim gleichen Anbieter sind standardmäßig ausgeschaltet. Sie ge
 
 ## Versionsstand und Bezug
 
-Die `3.20.1` in den Quelldateien bezeichnet den übernommenen Versionsstand. Sie ist keine eigenständige veröffentlichte Versionsnummer dieses Projekts.
-Derzeit stehen auf GitHub Releases keine Pakete dieses Projekts zur Verfügung. Für die Entwicklung wird die Anwendung aus dem Quellcode gestartet.
+Die erste eigenständige Vorabversion des Quellcodes ist `3.20.1-yunswitch.1`; die Upstream-Basis bleibt v3.20.1. Pakete werden nach der Prüfung über GitHub Releases dieses Repositorys bereitgestellt.
+Siehe [Vorabversionsnotizen](docs/releases/3.20.1-yunswitch.1.md) und [Migrationsanleitung](docs/MIGRATION-YUNSWITCH.md). Die Entwicklungsversion verwendet `~/.yunswitch-dev`, die Veröffentlichungsversion `~/.yunswitch`.
 Installationspakete und Paketmanager-Befehle des Ursprungsprojekts liefern nicht die Erweiterungen dieses Repositorys.
 
 ## Entwicklung aus dem Quellcode

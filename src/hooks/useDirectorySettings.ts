@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { settingsApi, type AppId } from "@/lib/api";
+import type { RuntimeDirectoryIdentity } from "@/lib/api/settings";
 import type { SettingsFormState } from "./useSettingsForm";
 
 export type DirectoryAppId = Exclude<AppId, "claude-desktop">;
@@ -32,13 +33,17 @@ export interface ResolvedDirectories {
 // Single source of truth for per-app directory metadata.
 const APP_DIRECTORY_META: Record<
   DirectoryAppId,
-  { key: AppDirectoryKey; defaultFolder: string }
+  { key: AppDirectoryKey; defaultFolder: string; isolatedFolder?: string }
 > = {
   claude: { key: "claude", defaultFolder: ".claude" },
   codex: { key: "codex", defaultFolder: ".codex" },
   gemini: { key: "gemini", defaultFolder: ".gemini" },
   grokbuild: { key: "grokbuild", defaultFolder: ".grok" },
-  opencode: { key: "opencode", defaultFolder: ".config/opencode" },
+  opencode: {
+    key: "opencode",
+    defaultFolder: ".config/opencode",
+    isolatedFolder: ".opencode",
+  },
   openclaw: { key: "openclaw", defaultFolder: ".openclaw" },
   hermes: { key: "hermes", defaultFolder: ".hermes" },
   pi: { key: "pi", defaultFolder: ".pi/agent" },
@@ -64,10 +69,13 @@ const sanitizeDir = (value?: string | null): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const computeDefaultAppConfigDir = async (): Promise<string | undefined> => {
+const computeDefaultAppConfigDir = async (
+  runtimeIdentity?: RuntimeDirectoryIdentity,
+): Promise<string | undefined> => {
   try {
-    const home = await homeDir();
-    return await join(home, ".cc-switch");
+    const identity =
+      runtimeIdentity ?? (await settingsApi.getRuntimeDirectoryIdentity());
+    return identity.defaultAppConfigDir;
   } catch (error) {
     console.error(
       "[useDirectorySettings] Failed to resolve default app config dir",
@@ -79,10 +87,17 @@ const computeDefaultAppConfigDir = async (): Promise<string | undefined> => {
 
 const computeDefaultConfigDir = async (
   app: DirectoryAppId,
+  runtimeIdentity?: RuntimeDirectoryIdentity,
 ): Promise<string | undefined> => {
   try {
-    const home = await homeDir();
-    return await join(home, APP_DIRECTORY_META[app].defaultFolder);
+    const identity =
+      runtimeIdentity ?? (await settingsApi.getRuntimeDirectoryIdentity());
+    const meta = APP_DIRECTORY_META[app];
+    const root = identity.isolatedConfigRoot ?? (await homeDir());
+    const folder = identity.isolatedConfigRoot
+      ? (meta.isolatedFolder ?? meta.defaultFolder)
+      : meta.defaultFolder;
+    return await join(root, folder);
   } catch (error) {
     console.error(
       "[useDirectorySettings] Failed to resolve default config dir",
@@ -166,6 +181,7 @@ export function useDirectorySettings({
 
     const load = async () => {
       try {
+        const identity = await settingsApi.getRuntimeDirectoryIdentity();
         const [
           overrideRaw,
           claudeDir,
@@ -195,15 +211,15 @@ export function useDirectorySettings({
           settingsApi.getConfigDir("openclaw"),
           settingsApi.getConfigDir("hermes"),
           settingsApi.getConfigDir("pi"),
-          computeDefaultAppConfigDir(),
-          computeDefaultConfigDir("claude"),
-          computeDefaultConfigDir("codex"),
-          computeDefaultConfigDir("gemini"),
-          computeDefaultConfigDir("grokbuild"),
-          computeDefaultConfigDir("opencode"),
-          computeDefaultConfigDir("openclaw"),
-          computeDefaultConfigDir("hermes"),
-          computeDefaultConfigDir("pi"),
+          computeDefaultAppConfigDir(identity),
+          computeDefaultConfigDir("claude", identity),
+          computeDefaultConfigDir("codex", identity),
+          computeDefaultConfigDir("gemini", identity),
+          computeDefaultConfigDir("grokbuild", identity),
+          computeDefaultConfigDir("opencode", identity),
+          computeDefaultConfigDir("openclaw", identity),
+          computeDefaultConfigDir("hermes", identity),
+          computeDefaultConfigDir("pi", identity),
         ]);
 
         if (!active) return;

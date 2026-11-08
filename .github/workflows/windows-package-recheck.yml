@@ -1,0 +1,142 @@
+name: YunSwitch Windows package recheck
+
+on:
+  workflow_call:
+    inputs:
+      build_run_id:
+        required: true
+        type: string
+      package_source_sha:
+        required: true
+        type: string
+      source_ref:
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: "Same-repository run containing built-packages-Windows-X64"
+        required: true
+        type: string
+        default: "42462475121"
+      package_source_sha:
+        description: "Exact source SHA used to build those packages"
+        required: true
+        type: string
+        default: "d7a6a450029ffe32d87aa3b896f4f749fe266da3"
+      source_ref:
+        description: "Ref containing the acceptance script; leave empty to use the dispatch ref"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: windows-package-recheck-${{ inputs.build_run_id }}
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - name: Checkout acceptance source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: ".node-version"
+
+      - name: Validate package provenance and unchanged product sources
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          PACKAGE_SOURCE_SHA: ${{ inputs.package_source_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:BUILD_RUN_ID -notmatch '^\d+$') { throw 'Use a numeric build run ID' }
+          if ($env:PACKAGE_SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Use a full source SHA' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:BUILD_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read the package build run' }
+          if ($run.repository.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Build belongs to another repository' }
+          if ($run.head_sha -ne $env:PACKAGE_SOURCE_SHA) { throw 'Package source SHA does not match build run' }
+          if ($run.status -ne 'completed') { throw 'Wait for the package build run to finish' }
+          $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:BUILD_RUN_ID/artifacts" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read package artifacts' }
+          $packages = @($artifacts.artifacts | Where-Object { $_.name -eq 'built-packages-Windows-X64' -and -not $_.expired })
+          if ($packages.Count -ne 1) { throw 'Expected one unexpired Windows x64 package artifact' }
+          git cat-file -e "$env:PACKAGE_SOURCE_SHA^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw 'Package source commit is unavailable' }
+          git diff --exit-code $env:PACKAGE_SOURCE_SHA HEAD -- src src-tauri package.json pnpm-lock.yaml index.html
+          if ($LASTEXITCODE -ne 0) { throw 'Product sources differ from those used to build the packages' }
+          $provenance = @{
+            packageBuildRun = $env:BUILD_RUN_ID
+            packageSourceSha = $env:PACKAGE_SOURCE_SHA
+            acceptanceSourceSha = (git rev-parse HEAD)
+            packageArtifactId = $packages[0].id
+            productSourcesUnchanged = $true
+          }
+          $provenance | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP/package-provenance.json" -Encoding utf8
+
+      - name: Download the existing Windows x64 packages
+        uses: actions/download-artifact@v8
+        with:
+          name: built-packages-Windows-X64
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: release-assets
+
+      - name: Accept the unchanged Windows x64 packages
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/windows-release-smoke.mjs `
+            --msi "release-assets/YunSwitch-v3.20.1-yunswitch.1-Windows.msi" `
+            --zip "release-assets/YunSwitch-v3.20.1-yunswitch.1-Windows-Portable.zip" `
+            --output "$env:RUNNER_TEMP/yunswitch-smoke"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package acceptance failed' }
+
+      - name: Preserve package provenance with acceptance evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = "$env:RUNNER_TEMP/yunswitch-smoke"
+          $provenance = "$env:RUNNER_TEMP/package-provenance.json"
+          if ((Test-Path -LiteralPath $evidence) -and (Test-Path -LiteralPath $provenance)) {
+            Copy-Item -LiteralPath $provenance -Destination $evidence
+          }
+
+      - name: Upload installation acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-installation-evidence
+          path: ${{ runner.temp }}/yunswitch-smoke/
+          if-no-files-found: warn
+
+      - name: Generate checksums for the accepted packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = @(Get-ChildItem -LiteralPath release-assets -File | Where-Object { $_.Name -notmatch '\.(sig|sha256)$' })
+          if ($assets.Count -ne 2) { throw 'Expected the MSI and portable ZIP only' }
+          foreach ($asset in $assets) {
+            $hash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($asset.Name)" | Set-Content -LiteralPath "$($asset.FullName).sha256" -Encoding utf8NoBOM
+          }
+
+      - name: Upload the accepted release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets-Windows-X64
+          path: release-assets/*
+          if-no-files-found: error

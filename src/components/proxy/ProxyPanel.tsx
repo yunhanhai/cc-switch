@@ -60,8 +60,8 @@ export function ProxyPanel({
   const updateGlobalConfig = useUpdateGlobalProxyConfig();
 
   // 监听地址/端口的本地状态（端口用字符串以支持完全清空）
-  const [listenAddress, setListenAddress] = useState("127.0.0.1");
-  const [listenPort, setListenPort] = useState("15722");
+  const [listenAddress, setListenAddress] = useState("");
+  const [listenPort, setListenPort] = useState("");
   const [effectiveRouteSizes, setEffectiveRouteSizes] = useState<
     Record<string, number>
   >({});
@@ -526,6 +526,7 @@ export function ProxyPanel({
                   <Input
                     id="listen-address"
                     value={listenAddress}
+                    disabled={!globalConfig || updateGlobalConfig.isPending}
                     onChange={(e) => setListenAddress(e.target.value)}
                     placeholder={t(
                       "proxy.settings.fields.listenAddress.placeholder",
@@ -552,13 +553,11 @@ export function ProxyPanel({
                     id="listen-port"
                     type="number"
                     value={listenPort}
+                    disabled={!globalConfig || updateGlobalConfig.isPending}
                     onChange={(e) => setListenPort(e.target.value)}
-                    placeholder={t(
-                      "proxy.settings.fields.listenPort.placeholder",
-                      {
-                        defaultValue: "15722",
-                      },
-                    )}
+                    placeholder={
+                      globalConfig ? String(globalConfig.listenPort) : ""
+                    }
                   />
                   <p className="text-xs text-muted-foreground">
                     {t("proxy.settings.fields.listenPort.description", {
@@ -572,7 +571,7 @@ export function ProxyPanel({
                 <Button
                   size="sm"
                   onClick={handleSaveBasicConfig}
-                  disabled={updateGlobalConfig.isPending}
+                  disabled={!globalConfig || updateGlobalConfig.isPending}
                 >
                   {updateGlobalConfig.isPending ? (
                     <>

@@ -55,7 +55,7 @@ This existing repository screenshot illustrates provider configuration and local
 
 ## Getting the distribution
 
-The source version remains `3.20.1` to continue the existing code version. As checked on 2026-11-08, this repository has no GitHub Release. Build from source for now; independently published packages will be listed in this repository's release channel.
+The first independent prerelease source version is `3.20.1-yunswitch.1`. The upstream baseline remains v3.20.1. Packages will appear in this repository's release channel after validation; preparing the source does not mean a release has been published. See the [prerelease notes](docs/releases/3.20.1-yunswitch.1.md) and [migration guide](docs/MIGRATION-YUNSWITCH.md).
 
 - [Gitee repository](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
@@ -104,7 +104,7 @@ You can also clone `https://github.com/yunhanhai/yunswitch.git`. When using Core
 | `pnpm build`                                      | Build the desktop application and packages           |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | Run backend tests                                    |
 
-Development builds use `CC Switch Dev`, `~/.cc-switch-dev` and proxy port `15722` by default. Production branding and data migration will be planned with the independent release. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
+`pnpm dev` uses `YunSwitch Dev`, `~/.yunswitch-dev`, `yunswitch-dev://` and proxy port `15732`. Release builds use `YunSwitch`, `~/.yunswitch`, `yunswitch://` and port `15731`. Imported databases retain their configured ports. See the [migration guide](docs/MIGRATION-YUNSWITCH.md) before using existing data and [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow.
 
 ## Contributing and next steps
 

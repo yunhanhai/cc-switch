@@ -80,7 +80,7 @@ export type ImportResult =
 export const deeplinkApi = {
   /**
    * Parse a deep link URL
-   * @param url The ccswitch:// URL to parse
+   * @param url The yunswitch:// URL to parse (yunswitch-dev:// in development)
    * @returns Parsed deep link request
    */
   parseDeeplink: async (url: string): Promise<DeepLinkImportRequest> => {

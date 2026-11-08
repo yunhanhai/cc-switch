@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-// Generates the website download manifest (manifest.json) from a directory of
-// downloaded release assets. Consumed by ccswitch.io/download. The manifest
-// schema is mirrored in cc-switch-website/src/lib/downloads.ts — keep both in
-// sync when changing fields or classification rules.
+// Generates YunSwitch's optional mirror download manifest (manifest.json)
+// from downloaded release assets. Consumers must follow the schema below;
+// no upstream website or download service is assumed.
 //
 // Usage: node scripts/generate-download-manifest.mjs <assets-dir> <tag> <base-url> [output] [pub-date]
 
-import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-const [assetsDir, tag, baseUrl, output = 'manifest.json', pubDateArg] = process.argv.slice(2);
+const [assetsDir, tag, baseUrl, output = "manifest.json", pubDateArg] =
+  process.argv.slice(2);
 
 if (!assetsDir || !tag || !baseUrl) {
-  console.error('Usage: node scripts/generate-download-manifest.mjs <assets-dir> <tag> <base-url> [output] [pub-date]');
+  console.error(
+    "Usage: node scripts/generate-download-manifest.mjs <assets-dir> <tag> <base-url> [output] [pub-date]",
+  );
   process.exit(1);
 }
 
@@ -27,21 +29,46 @@ if (Number.isNaN(pubDate.getTime())) {
 // Longer suffixes must come before their shorter counterparts
 // (e.g. -Windows-arm64.msi before -Windows.msi).
 const RULES = [
-  { suffix: '-macOS.dmg', platform: 'macos', kind: 'dmg', arch: 'universal' },
-  { suffix: '-macOS.zip', platform: 'macos', kind: 'zip', arch: 'universal' },
-  { suffix: '-Windows-arm64-Portable.zip', platform: 'windows', kind: 'portable', arch: 'arm64' },
-  { suffix: '-Windows-Portable.zip', platform: 'windows', kind: 'portable', arch: 'x64' },
-  { suffix: '-Windows-arm64.msi', platform: 'windows', kind: 'msi', arch: 'arm64' },
-  { suffix: '-Windows.msi', platform: 'windows', kind: 'msi', arch: 'x64' },
-  { suffix: '-Linux-arm64.AppImage', platform: 'linux', kind: 'appimage', arch: 'arm64' },
-  { suffix: '-Linux-x86_64.AppImage', platform: 'linux', kind: 'appimage', arch: 'x64' },
-  { suffix: '-Linux-arm64.deb', platform: 'linux', kind: 'deb', arch: 'arm64' },
-  { suffix: '-Linux-x86_64.deb', platform: 'linux', kind: 'deb', arch: 'x64' },
-  { suffix: '-Linux-arm64.rpm', platform: 'linux', kind: 'rpm', arch: 'arm64' },
-  { suffix: '-Linux-x86_64.rpm', platform: 'linux', kind: 'rpm', arch: 'x64' },
+  { suffix: "-macOS.dmg", platform: "macos", kind: "dmg", arch: "universal" },
+  { suffix: "-macOS.zip", platform: "macos", kind: "zip", arch: "universal" },
+  {
+    suffix: "-Windows-arm64-Portable.zip",
+    platform: "windows",
+    kind: "portable",
+    arch: "arm64",
+  },
+  {
+    suffix: "-Windows-Portable.zip",
+    platform: "windows",
+    kind: "portable",
+    arch: "x64",
+  },
+  {
+    suffix: "-Windows-arm64.msi",
+    platform: "windows",
+    kind: "msi",
+    arch: "arm64",
+  },
+  { suffix: "-Windows.msi", platform: "windows", kind: "msi", arch: "x64" },
+  {
+    suffix: "-Linux-arm64.AppImage",
+    platform: "linux",
+    kind: "appimage",
+    arch: "arm64",
+  },
+  {
+    suffix: "-Linux-x86_64.AppImage",
+    platform: "linux",
+    kind: "appimage",
+    arch: "x64",
+  },
+  { suffix: "-Linux-arm64.deb", platform: "linux", kind: "deb", arch: "arm64" },
+  { suffix: "-Linux-x86_64.deb", platform: "linux", kind: "deb", arch: "x64" },
+  { suffix: "-Linux-arm64.rpm", platform: "linux", kind: "rpm", arch: "arm64" },
+  { suffix: "-Linux-x86_64.rpm", platform: "linux", kind: "rpm", arch: "x64" },
 ];
 
-const normalizedBase = baseUrl.replace(/\/+$/, '');
+const normalizedBase = baseUrl.replace(/\/+$/, "");
 const files = [];
 
 for (const name of readdirSync(assetsDir).sort()) {
@@ -56,7 +83,7 @@ for (const name of readdirSync(assetsDir).sort()) {
     arch: rule.arch,
     name,
     size: statSync(path).size,
-    sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+    sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
     url: `${normalizedBase}/${tag}/${encodeURIComponent(name)}`,
   });
 }
@@ -67,7 +94,7 @@ if (files.length === 0) {
 }
 
 const manifest = {
-  version: tag.replace(/^v/, ''),
+  version: tag.replace(/^v/, ""),
   tag,
   pubDate: pubDate.toISOString(),
   files,
