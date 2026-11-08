@@ -32,7 +32,7 @@
 
 ## 当前版本与发布状态
 
-首个独立预发布源码版本为 `3.20.1-yunswitch.1`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。上游基线仍为 v3.20.1。安装包验证与发布进度见[预发布记录](releases/3.20.1-yunswitch.1.md)，准备源码不代表已创建公开 Release。
+首个独立预发布版本为 `3.20.1-yunswitch.1`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与免安装版已在 Gitee、GitHub 同步公开，其他平台尚未发布。上游基线仍为 v3.20.1。安装包校验与验收记录见[预发布记录](releases/3.20.1-yunswitch.1.md)。
 
 | 身份         | 发布构建                        | 开发构建                            |
 | ------------ | ------------------------------- | ----------------------------------- |

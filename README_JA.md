@@ -37,7 +37,7 @@ Claude Code、Codex、Gemini CLI などの設定管理とローカルルーテ�
 
 ## 現在のバージョンと入手方法
 
-最初の独立プレビュー版のソースバージョンは `3.20.1-yunswitch.1` です。上流の基準バージョンは v3.20.1 のままです。配布物は検証後に本リポジトリの GitHub Releases に公開されます。
+最初の独立プレビュー版 `3.20.1-yunswitch.1` の Windows x64 インストーラーとポータブル ZIP を公開しました：[GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1)。インストール、起動、プロキシ、合成データの移行とアンインストールを検証済みです。Windows 署名は未設定で、自動更新は無効です。上流の基準バージョンは v3.20.1 のままです。
 [リリース準備記録](docs/releases/3.20.1-yunswitch.1.md)と[データ移行ガイド](docs/MIGRATION-YUNSWITCH.md)を参照してください。開発版は `~/.yunswitch-dev`、配布版は `~/.yunswitch` を使用します。
 上流のインストーラーやパッケージ管理コマンドは、本リポジトリの追加機能を配布するものではありません。
 

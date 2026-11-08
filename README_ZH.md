@@ -55,7 +55,7 @@ AI 编程工具配置与路由管理，面向多供应商与多模型场景持�
 
 ## 获取与使用
 
-首个独立预发布源码版本为 `3.20.1-yunswitch.1`，上游基线仍为 v3.20.1。安装包验证后会在本仓库发布入口公布，源码准备完成不等于已经发布。详见[预发布说明](docs/releases/3.20.1-yunswitch.1.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
+首个独立预发布 `3.20.1-yunswitch.1` 已提供 Windows x64 安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1)。上游基线仍为 v3.20.1。安装、启动、代理、合成数据迁移和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[预发布说明](docs/releases/3.20.1-yunswitch.1.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
 - [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)

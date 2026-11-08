@@ -55,7 +55,7 @@ This existing repository screenshot illustrates provider configuration and local
 
 ## Getting the distribution
 
-The first independent prerelease source version is `3.20.1-yunswitch.1`. The upstream baseline remains v3.20.1. Packages will appear in this repository's release channel after validation; preparing the source does not mean a release has been published. See the [prerelease notes](docs/releases/3.20.1-yunswitch.1.md) and [migration guide](docs/MIGRATION-YUNSWITCH.md).
+The first independent prerelease, `3.20.1-yunswitch.1`, is available for Windows x64 as an installer and portable ZIP: [GitHub download](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee download](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1). Installation, startup, proxy requests, synthetic data migration and uninstall checks passed. The packages are unsigned and automatic updates are disabled. The upstream baseline remains v3.20.1. See the [prerelease notes](docs/releases/3.20.1-yunswitch.1.md) and [migration guide](docs/MIGRATION-YUNSWITCH.md).
 
 - [Gitee repository](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)

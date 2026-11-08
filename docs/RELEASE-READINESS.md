@@ -15,13 +15,16 @@
 - [x] 本次提交已同步至 [GitHub PR #9](https://github.com/yunhanhai/yunswitch/pull/9) 与 [Gitee PR #2](https://gitee.com/yunhanhai/yunswitch/pulls/2)，[对应跨平台 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42456495217)全部通过，计数见预发布说明。
 - [x] 本机 Windows x64 release 构建、MSI 身份与协议登记检查通过；已生成最终 MSI、免安装 ZIP 及 SHA-256，记录见预发布说明。
 
-## 仍需完成
+## Windows 验收与发布
 
-- [ ] 在干净 Windows CI 环境验证首次安装、实际界面加载、卸载和合成数据导入，保存截图与 JSON 结果；本机构建及 MSI 元数据检查不能代替实际运行验收。真实旧数据迁移仍应按迁移指南用私有备份另行验证。
+- [x] 在干净 Windows CI 环境完成安装、实际界面、代理请求、重启、单实例、合成旧 SQL 导入、卸载及数据保留验收，保存截图与 JSON：[通过记录](https://github.com/yunhanhai/yunswitch/actions/runs/42464519875)。真实旧数据迁移仍应按迁移指南用私有备份另行验证。
+- [x] 两边 PR 合并并保留各自历史，`main` 同步为 `16c09ead`；标签 `v3.20.1-yunswitch.1` 指向该版本，Windows x64 预发布在两边公开。
+
+## 后续可选工作
+
 - [ ] 对实际发布的 macOS、Linux / ARM64 包分别记录构建与安装检查，不能以 Windows 结果代替。
 - [ ] 如需自动更新，配置 YunSwitch 自有公钥、私钥和地址，并验证签名与更新链路；处理本机打包器的 `__TAURI_BUNDLE_TYPE` 标记警告后再验收更新安装。
 - [ ] 如需可信平台签名，为 Windows 配置 Authenticode、macOS 配置 Developer ID 与公证。当前没有此类验证声明。
-- [ ] 先通过工作分支的仅构建模式验收，再合并两边 PR、创建对应 Git 标签并公开 Windows x64 预发布；发布说明引用实际完成的验证。
 
 ## 首次 Windows 发布流程
 

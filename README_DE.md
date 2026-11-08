@@ -37,7 +37,7 @@ Wiederholungen beim gleichen Anbieter sind standardmäßig ausgeschaltet. Sie ge
 
 ## Versionsstand und Bezug
 
-Die erste eigenständige Vorabversion des Quellcodes ist `3.20.1-yunswitch.1`; die Upstream-Basis bleibt v3.20.1. Pakete werden nach der Prüfung über GitHub Releases dieses Repositorys bereitgestellt.
+Die erste eigenständige Vorabversion `3.20.1-yunswitch.1` ist für Windows x64 als Installer und portable ZIP verfügbar: [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1). Installation, Start, Proxy, Migration synthetischer Daten und Deinstallation wurden geprüft. Die Pakete sind nicht signiert; automatische Updates sind deaktiviert. Die Upstream-Basis bleibt v3.20.1.
 Siehe [Vorabversionsnotizen](docs/releases/3.20.1-yunswitch.1.md) und [Migrationsanleitung](docs/MIGRATION-YUNSWITCH.md). Die Entwicklungsversion verwendet `~/.yunswitch-dev`, die Veröffentlichungsversion `~/.yunswitch`.
 Installationspakete und Paketmanager-Befehle des Ursprungsprojekts liefern nicht die Erweiterungen dieses Repositorys.
 
