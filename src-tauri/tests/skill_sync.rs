@@ -144,7 +144,8 @@ fn sync_to_app_removes_disabled_and_orphaned_ssot_symlinks() {
 
     let opencode_skills_dir = home.join(".config").join("opencode").join("skills");
     fs::create_dir_all(&opencode_skills_dir).expect("create opencode skills dir");
-    let created_disabled = symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
+    let created_disabled =
+        symlink_dir(&disabled_skill, &opencode_skills_dir.join("disabled-skill"));
     let created_orphan = symlink_dir(&orphan_skill, &opencode_skills_dir.join("orphan-skill"));
     if !created_disabled || !created_orphan {
         // Windows 无符号链接特权：无法构造待清理的 symlink 场景，跳过本用例

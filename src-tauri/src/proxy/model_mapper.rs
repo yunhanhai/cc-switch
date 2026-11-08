@@ -102,18 +102,23 @@ pub fn provider_has_own_model_mapping(provider: &Provider) -> bool {
     ModelMapping::from_provider(provider).has_mapping()
 }
 
- /// 导出该 provider 显式配置的 `(source, target)` 映射对，供 model alias 归并建议使用。
- ///
- /// 只返回 `model_mapping` 数组里的显式规则，不含 env 映射 —— env 的键是
- /// "档位"（sonnet/opus/haiku）而非客户端实际发送的模型名，归并成 alias 后
- /// 匹配不到真实请求，反而会误导用户。
- pub fn provider_mapping_pairs(provider: &Provider) -> Vec<(String, String)> {
-     generic_mapping_rules(provider)
-         .into_iter()
-         .map(|rule| (rule.source.trim().to_string(), rule.target.trim().to_string()))
-         .filter(|(source, target)| !source.is_empty() && !target.is_empty())
-         .collect()
- }
+/// 导出该 provider 显式配置的 `(source, target)` 映射对，供 model alias 归并建议使用。
+///
+/// 只返回 `model_mapping` 数组里的显式规则，不含 env 映射 —— env 的键是
+/// "档位"（sonnet/opus/haiku）而非客户端实际发送的模型名，归并成 alias 后
+/// 匹配不到真实请求，反而会误导用户。
+pub fn provider_mapping_pairs(provider: &Provider) -> Vec<(String, String)> {
+    generic_mapping_rules(provider)
+        .into_iter()
+        .map(|rule| {
+            (
+                rule.source.trim().to_string(),
+                rule.target.trim().to_string(),
+            )
+        })
+        .filter(|(source, target)| !source.is_empty() && !target.is_empty())
+        .collect()
+}
 
 /// 模型映射配置
 pub struct ModelMapping {

@@ -151,16 +151,15 @@ impl RequestContext {
         //
         // Gemini（模型名在 URL 路径）的选路推迟到 with_model_from_uri 解析出
         // 真实模型后再执行初始过滤与可选的二次纠正；其余 app 直接按 body["model"] 过滤。
-        let alias_model = if supports_model_alias(app_type_str)
-            && !model_name_lives_in_body(app_type_str)
-        {
-            // Gemini：new 阶段尚未拿到 URI，此处不按模型过滤，交由 with_model_from_uri 纠正。
-            None
-        } else if supports_model_alias(app_type_str) {
-            Some(request_model.as_str())
-        } else {
-            None
-        };
+        let alias_model =
+            if supports_model_alias(app_type_str) && !model_name_lives_in_body(app_type_str) {
+                // Gemini：new 阶段尚未拿到 URI，此处不按模型过滤，交由 with_model_from_uri 纠正。
+                None
+            } else if supports_model_alias(app_type_str) {
+                Some(request_model.as_str())
+            } else {
+                None
+            };
         let providers = state
             .provider_router
             // 传入请求模型，让 model alias 能在选路阶段跳过不认识该模型的渠道。
@@ -232,9 +231,7 @@ impl RequestContext {
     /// 空链等）都只记日志并保留原链，不向调用方报错 —— 否则一个本可正常
     /// 服务的请求会因为"优化失败"而 500。
     pub async fn correct_providers_for_gemini_model(&mut self, state: &ProxyState) {
-        if !supports_model_alias(self.app_type_str)
-            || model_name_lives_in_body(self.app_type_str)
-        {
+        if !supports_model_alias(self.app_type_str) || model_name_lives_in_body(self.app_type_str) {
             return;
         }
         if self.request_model.is_empty() || self.request_model == "unknown" {
@@ -497,21 +494,15 @@ mod tests {
     #[test]
     fn rewrite_with_proxy_prefix() {
         assert_eq!(
-            rewrite_gemini_model_in_path(
-                "/gemini/v1beta/models/gemini-1.0-pro:countTokens",
-                "x"
-            )
-            .as_deref(),
+            rewrite_gemini_model_in_path("/gemini/v1beta/models/gemini-1.0-pro:countTokens", "x")
+                .as_deref(),
             Some("/gemini/v1beta/models/x:countTokens")
         );
     }
 
     #[test]
     fn rewrite_returns_none_on_list_endpoint() {
-        assert_eq!(
-            rewrite_gemini_model_in_path("/v1beta/models", "x"),
-            None
-        );
+        assert_eq!(rewrite_gemini_model_in_path("/v1beta/models", "x"), None);
     }
 
     #[test]
@@ -729,9 +720,7 @@ mod tests {
             );
 
             // URI 提供真实逻辑模型 → 纠正后只保留声明的渠道
-            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent"
-                .parse()
-                .unwrap();
+            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent".parse().unwrap();
             ctx = ctx.with_model_from_uri(&uri);
             assert_eq!(ctx.request_model, "gemini-pro");
             ctx.correct_providers_for_gemini_model(&state).await;
@@ -872,9 +861,7 @@ mod tests {
                 db.remove_from_failover_queue("gemini", id).unwrap();
             }
 
-            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent"
-                .parse()
-                .unwrap();
+            let uri: axum::http::Uri = "/v1beta/models/gemini-pro:generateContent".parse().unwrap();
             ctx = ctx.with_model_from_uri(&uri);
             // 关键：返回类型是 ()，调用方无法（也不需要）处理错误。
             ctx.correct_providers_for_gemini_model(&state).await;

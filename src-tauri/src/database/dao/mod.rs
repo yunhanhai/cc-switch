@@ -24,5 +24,5 @@ pub use failover::FailoverQueueItem;
 pub use failover_events::FailoverEvent;
 pub use model_aliases::ModelAlias;
 pub use profiles::Profile;
-pub use stream_check::LatestStreamCheck;
 pub use routing_groups::{RoutingGroup, RoutingGroupWithMembers};
+pub use stream_check::LatestStreamCheck;

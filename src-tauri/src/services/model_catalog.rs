@@ -121,12 +121,14 @@ pub fn merge_catalog_models(
     }
 
     for fetched in vendor {
-        let entry = by_id.entry(fetched.id.clone()).or_insert_with(|| CatalogModel {
-            id: fetched.id.clone(),
-            display_name: fetched.id.clone(),
-            source: CatalogSource::Vendor,
-            owned_by: fetched.owned_by.clone(),
-        });
+        let entry = by_id
+            .entry(fetched.id.clone())
+            .or_insert_with(|| CatalogModel {
+                id: fetched.id.clone(),
+                display_name: fetched.id.clone(),
+                source: CatalogSource::Vendor,
+                owned_by: fetched.owned_by.clone(),
+            });
         // 厂商覆盖：来源升级为 Both，owned_by 以厂商为准
         entry.source = match entry.source {
             CatalogSource::ModelsDev => CatalogSource::Both,
@@ -186,7 +188,9 @@ pub fn load_models_dev_fallback(
         .prepare("SELECT model_id, display_name FROM model_pricing ORDER BY model_id")
         .map_err(|e| AppError::Database(format!("读取模型定价失败: {e}")))?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(|e| AppError::Database(format!("读取模型定价失败: {e}")))?;
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
@@ -205,7 +209,9 @@ pub fn load_models_dev_fallback(
     Ok(models)
 }
 
-pub fn get_cached_catalog(provider_key_str: &str) -> Result<Option<ModelCatalogSnapshot>, AppError> {
+pub fn get_cached_catalog(
+    provider_key_str: &str,
+) -> Result<Option<ModelCatalogSnapshot>, AppError> {
     let _guard = file_lock()
         .lock()
         .map_err(|e| AppError::Config(format!("模型目录文件锁失败: {e}")))?;
@@ -336,7 +342,9 @@ mod tests {
         ];
         let merged = merge_catalog_models(vendor, dev);
         assert_eq!(merged.len(), 2);
-        assert!(merged.iter().any(|m| m.id == "b" && m.source == CatalogSource::ModelsDev));
+        assert!(merged
+            .iter()
+            .any(|m| m.id == "b" && m.source == CatalogSource::ModelsDev));
     }
 
     #[test]

@@ -394,9 +394,7 @@ impl RequestForwarder {
         endpoint: &str,
         requested_model: &str,
     ) -> Option<String> {
-        if crate::proxy::handler_context::model_name_lives_in_body(
-            self.model_alias_app_type,
-        ) {
+        if crate::proxy::handler_context::model_name_lives_in_body(self.model_alias_app_type) {
             return None;
         }
         let target = self.resolve_alias_model(provider, requested_model)?;
@@ -717,16 +715,15 @@ impl RequestForwarder {
                                 {
                                     let mut st = self.status.write().await;
                                     st.record_rate_limit_wait(app_type_str, wait_secs);
-                                    st.rate_limit_waiting = Some(
-                                        crate::proxy::types::RateLimitWaiting {
+                                    st.rate_limit_waiting =
+                                        Some(crate::proxy::types::RateLimitWaiting {
                                             provider_name: provider.name.clone(),
                                             provider_id: provider.id.clone(),
                                             app_type: app_type_str.to_string(),
                                             wait_secs,
                                             attempt: rate_limit_attempt,
                                             started_at: chrono::Utc::now().to_rfc3339(),
-                                        },
-                                    );
+                                        });
                                     // last_error 在等待期间展示为"正在等待"而非旧错误，
                                     // 避免 ResilienceSummaryBar 在 30-120s 等待中误导。
                                     st.last_error = Some(format!(
@@ -1350,8 +1347,7 @@ impl RequestForwarder {
                                     self.rate_limit_retry_enabled,
                                     Some(rate_limit_cooling_for_rate_limited(&e)),
                                 ) {
-                                    let cooling_secs =
-                                        rate_limit_cooling_for_rate_limited(&e);
+                                    let cooling_secs = rate_limit_cooling_for_rate_limited(&e);
                                     self.router
                                         .note_rate_limited(
                                             &provider.id,
@@ -1382,7 +1378,8 @@ impl RequestForwarder {
                                 }
                             } else {
                                 // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                                let record_result = if matches!(&e, ProxyError::BillingExhausted(_)) {
+                                let record_result = if matches!(&e, ProxyError::BillingExhausted(_))
+                                {
                                     self.router
                                         .record_fatal_result(
                                             &provider.id,
@@ -1616,10 +1613,9 @@ impl RequestForwarder {
         // 使「过滤」与「换名」成对——不同渠道自动使用各自的物理模型名。
         // 仅命中 alias 时重写；未命中保持原 endpoint，行为与引入前一致。
         let gemini_alias_endpoint: Option<String> = if matches!(app_type, AppType::Gemini) {
-            crate::proxy::handler_context::extract_gemini_model_from_path(endpoint)
-                .and_then(|req_model| {
-                    self.rewrite_gemini_endpoint_for_alias(provider, endpoint, &req_model)
-                })
+            crate::proxy::handler_context::extract_gemini_model_from_path(endpoint).and_then(
+                |req_model| self.rewrite_gemini_endpoint_for_alias(provider, endpoint, &req_model),
+            )
         } else {
             None
         };
@@ -3955,8 +3951,7 @@ fn rewrite_gemini_full_url_for_alias(
 ) -> Option<String> {
     let physical_model =
         crate::proxy::handler_context::extract_gemini_model_from_path(rewritten_endpoint?)?;
-    let configured_model =
-        crate::proxy::handler_context::extract_gemini_model_from_path(base_url)?;
+    let configured_model = crate::proxy::handler_context::extract_gemini_model_from_path(base_url)?;
     if configured_model != requested_model {
         return None;
     }
@@ -5711,9 +5706,15 @@ mod tests {
             Some("anthropic/claude-sonnet-4.5".to_string())
         );
         // 未声明的渠道返回 None，调用方回落到旧映射链路
-        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_c"), "sonnet"), None);
+        assert_eq!(
+            fwd.resolve_alias_model(&provider_for_alias("ch_c"), "sonnet"),
+            None
+        );
         // 未声明的逻辑模型同样回落
-        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_a"), "opus"), None);
+        assert_eq!(
+            fwd.resolve_alias_model(&provider_for_alias("ch_a"), "opus"),
+            None
+        );
     }
 
     #[test]
@@ -5721,7 +5722,10 @@ mod tests {
         // 安全阀：空索引等价于未启用，绝不能把模型名改坏
         let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1))
             .with_model_aliases(std::collections::HashMap::new(), "claude");
-        assert_eq!(fwd.resolve_alias_model(&provider_for_alias("ch_a"), "sonnet"), None);
+        assert_eq!(
+            fwd.resolve_alias_model(&provider_for_alias("ch_a"), "sonnet"),
+            None
+        );
     }
 
     #[test]
@@ -6586,7 +6590,9 @@ mod tests {
     #[test]
     fn outbound_model_is_none_without_a_model_segment() {
         assert_eq!(
-            resolve_gemini_outbound_model("https://generativelanguage.googleapis.com/v1beta/models"),
+            resolve_gemini_outbound_model(
+                "https://generativelanguage.googleapis.com/v1beta/models"
+            ),
             None
         );
         assert_eq!(

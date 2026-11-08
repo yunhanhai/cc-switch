@@ -54,7 +54,10 @@ pub fn update_routing_group(
 
 #[tauri::command]
 pub fn delete_routing_group(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.db.delete_routing_group(&id).map_err(|e| e.to_string())
+    state
+        .db
+        .delete_routing_group(&id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

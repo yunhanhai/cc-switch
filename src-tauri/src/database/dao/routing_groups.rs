@@ -203,8 +203,7 @@ impl Database {
         .map_err(|e| AppError::Database(e.to_string()))?;
         if enabled_changed {
             // 兼容期：启用态变更反向同步 in_failover_queue，保证旧队列视图与分组聚合一致
-            let _ =
-                Self::sync_in_failover_queue_from_enabled_locked(&conn, &existing.app_type);
+            let _ = Self::sync_in_failover_queue_from_enabled_locked(&conn, &existing.app_type);
         }
         Ok(RoutingGroup {
             id: existing.id,
@@ -475,9 +474,7 @@ impl Database {
                         "分组 {id} 不属于 {app_type}（实际 {other}）"
                     )))
                 }
-                _ => {
-                    return Err(AppError::InvalidInput(format!("路由分组不存在: {id}")))
-                }
+                _ => return Err(AppError::InvalidInput(format!("路由分组不存在: {id}"))),
             }
         }
         let now = chrono::Utc::now().timestamp();
@@ -511,17 +508,14 @@ impl Database {
 
         // 读取当前成员集合校验
         let mut stmt = conn
-            .prepare(
-                "SELECT provider_id FROM routing_group_members WHERE group_id = ?1",
-            )
+            .prepare("SELECT provider_id FROM routing_group_members WHERE group_id = ?1")
             .map_err(|e| AppError::Database(e.to_string()))?;
         let current: Vec<String> = stmt
             .query_map(params![group_id], |row| row.get(0))
             .map_err(|e| AppError::Database(e.to_string()))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AppError::Database(e.to_string()))?;
-        let current_set: std::collections::HashSet<String> =
-            current.into_iter().collect();
+        let current_set: std::collections::HashSet<String> = current.into_iter().collect();
         if ordered_provider_ids.len() != current_set.len() {
             return Err(AppError::InvalidInput(
                 "成员重排需提供全量成员且不重复".to_string(),
@@ -600,17 +594,24 @@ impl Database {
             params![app_type],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
-        let placeholders = enabled_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = enabled_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
         let sql = format!(
             "UPDATE providers SET in_failover_queue = 1 WHERE app_type = ? AND id IN ({placeholders})"
         );
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(enabled_ids.len() + 1);
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> =
+            Vec::with_capacity(enabled_ids.len() + 1);
         params_vec.push(Box::new(app_type.to_string()));
         for id in &enabled_ids {
             params_vec.push(Box::new(id.clone()));
         }
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|b| b.as_ref() as &dyn rusqlite::ToSql).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec
+            .iter()
+            .map(|b| b.as_ref() as &dyn rusqlite::ToSql)
+            .collect();
         conn.execute(&sql, params_refs.as_slice())
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
@@ -859,17 +860,24 @@ mod tests {
         db.save_provider("claude", &provider("p2", "P2"))?;
         let g = db.create_routing_group("claude", "solo", None)?;
         db.set_routing_group_members(&g.id, &["p1".to_string()])?;
-        assert_eq!(db.get_enabled_routing_group_provider_ids("claude")?.len(), 1);
+        assert_eq!(
+            db.get_enabled_routing_group_provider_ids("claude")?.len(),
+            1
+        );
         assert_eq!(db.get_failover_queue("claude")?.len(), 1);
         // 清空成员后，启用分组为空，队列应清空（而非残留 p1）
         db.set_routing_group_members(&g.id, &[])?;
-        assert!(db.get_enabled_routing_group_provider_ids("claude")?.is_empty());
+        assert!(db
+            .get_enabled_routing_group_provider_ids("claude")?
+            .is_empty());
         assert!(db.get_failover_queue("claude")?.is_empty());
         // 再加入 p2 后禁用分组，队列同样清空
         db.set_routing_group_members(&g.id, &["p2".to_string()])?;
         assert_eq!(db.get_failover_queue("claude")?.len(), 1);
         db.update_routing_group(&g.id, None, Some(false), None)?;
-        assert!(db.get_enabled_routing_group_provider_ids("claude")?.is_empty());
+        assert!(db
+            .get_enabled_routing_group_provider_ids("claude")?
+            .is_empty());
         assert!(db.get_failover_queue("claude")?.is_empty());
         // 删除分组后亦保持空
         db.delete_routing_group(&g.id)?;
@@ -893,19 +901,31 @@ mod tests {
             .iter()
             .find(|entry| entry.group.id == "rg_default_claude")
             .expect("default group mirrored from failover queue");
-        assert!(default.members.iter().any(|member| member.provider_id == "p2"));
+        assert!(default
+            .members
+            .iter()
+            .any(|member| member.provider_id == "p2"));
         // p1 仍在 fast，p2 在 default，互不重叠
         let fast_members = groups
             .iter()
             .find(|entry| entry.group.id == fast.id)
             .unwrap();
-        assert!(fast_members.members.iter().any(|member| member.provider_id == "p1"));
+        assert!(fast_members
+            .members
+            .iter()
+            .any(|member| member.provider_id == "p1"));
         // 再从旧队列移除 p2，default 应同步移除但 fast 不受影响
         db.remove_from_failover_queue("claude", "p2")?;
         let groups = db.list_routing_groups("claude")?;
         let _ = slow; // 占位，避免未使用警告
-        let default = groups.iter().find(|entry| entry.group.id == "rg_default_claude").unwrap();
-        assert!(!default.members.iter().any(|member| member.provider_id == "p2"));
+        let default = groups
+            .iter()
+            .find(|entry| entry.group.id == "rg_default_claude")
+            .unwrap();
+        assert!(!default
+            .members
+            .iter()
+            .any(|member| member.provider_id == "p2"));
         Ok(())
     }
 
@@ -934,8 +954,14 @@ mod tests {
             .into_iter()
             .map(|item| item.provider_id)
             .collect();
-        assert_eq!(queue_ids, ["p1", "p2", "p3"].into_iter().map(String::from).collect());
-        assert!(!queue_ids.contains("p5"), "禁用的分组不应进入 failover 镜像");
+        assert_eq!(
+            queue_ids,
+            ["p1", "p2", "p3"].into_iter().map(String::from).collect()
+        );
+        assert!(
+            !queue_ids.contains("p5"),
+            "禁用的分组不应进入 failover 镜像"
+        );
 
         // 禁用 standby 后，仅 primary 生效；empty 仍为空不影响
         db.update_routing_group(&standby.id, None, Some(false), None)?;
@@ -955,14 +981,23 @@ mod tests {
         db.update_routing_group(&standby.id, None, Some(true), None)?;
         db.reorder_routing_groups(
             "claude",
-            &[empty.id.clone(), primary.id.clone(), standby.id.clone(), disabled.id.clone()],
+            &[
+                empty.id.clone(),
+                primary.id.clone(),
+                standby.id.clone(),
+                disabled.id.clone(),
+            ],
         )?;
         // empty 为空，聚合应为 primary(p1,p2) + standby(p3)，与顺序一致且不含 p5
         assert_eq!(
             db.get_enabled_routing_group_provider_ids("claude")?,
             vec!["p1", "p2", "p3"]
         );
-        let queue: Vec<_> = db.get_failover_queue("claude")?.into_iter().map(|i| i.provider_id).collect();
+        let queue: Vec<_> = db
+            .get_failover_queue("claude")?
+            .into_iter()
+            .map(|i| i.provider_id)
+            .collect();
         assert_eq!(queue.len(), 3);
         assert!(queue.contains(&"p1".to_string()) && queue.contains(&"p3".to_string()));
         Ok(())
@@ -989,14 +1024,20 @@ mod tests {
             };
             assert_eq!(
                 db.get_enabled_routing_group_provider_ids("claude")?,
-                expected.iter().map(|item| item.to_string()).collect::<Vec<_>>()
+                expected
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect::<Vec<_>>()
             );
             let queue: std::collections::HashSet<_> = db
                 .get_failover_queue("claude")?
                 .into_iter()
                 .map(|item| item.provider_id)
                 .collect();
-            assert_eq!(queue, expected.iter().map(|item| item.to_string()).collect());
+            assert_eq!(
+                queue,
+                expected.iter().map(|item| item.to_string()).collect()
+            );
         }
 
         // 重复覆盖写入同一集合：幂等且不产生重复行
@@ -1046,7 +1087,12 @@ mod tests {
                     for round in 0..rounds {
                         let enabled = (thread_idx + round) % 2 == 0;
                         // 经由 update 的启用态翻转触发同步（与 setMembers 同锁路径）
-                        let _ = db_cloned.update_routing_group(&secondary_id, None, Some(enabled), None);
+                        let _ = db_cloned.update_routing_group(
+                            &secondary_id,
+                            None,
+                            Some(enabled),
+                            None,
+                        );
                         // 经由成员覆写触发同步，交替写入 p3 与空
                         if round % 3 == 0 {
                             let _ = db_cloned.set_routing_group_members(
@@ -1083,7 +1129,10 @@ mod tests {
         );
         // 互斥锁下无死锁且无重复：所有 id 均来自真实 provider，且无幽灵 id
         for id in &queue_ids {
-            assert!(["p1", "p2", "p3", "p4"].contains(&id.as_str()), "幽灵 provider {id}");
+            assert!(
+                ["p1", "p2", "p3", "p4"].contains(&id.as_str()),
+                "幽灵 provider {id}"
+            );
         }
         Ok(())
     }
@@ -1161,14 +1210,19 @@ mod tests {
                 .into_iter()
                 .map(|item| item.provider_id)
                 .collect();
-            assert_eq!(queue, vec![expected.to_string()], "[{app_type}] failover 镜像串扰");
+            assert_eq!(
+                queue,
+                vec![expected.to_string()],
+                "[{app_type}] failover 镜像串扰"
+            );
         }
 
         // 禁用 claude 的分组：只有 claude 清空，其余 app 不受影响
         let claude_group_id = group_ids["claude"].clone();
         db.update_routing_group(&claude_group_id, None, Some(false), None)?;
         assert!(
-            db.get_enabled_routing_group_provider_ids("claude")?.is_empty(),
+            db.get_enabled_routing_group_provider_ids("claude")?
+                .is_empty(),
             "claude 禁用后聚合应为空"
         );
         assert!(db.get_failover_queue("claude")?.is_empty());

@@ -378,9 +378,7 @@ pub fn patch_json_file(path: &Path, patch: &Map<String, Value>) -> Result<(), Ap
 
     let obj = current
         .as_object_mut()
-        .ok_or_else(|| {
-            AppError::Config(format!("配置文件根节点必须是对象: {}", path.display()))
-        })?;
+        .ok_or_else(|| AppError::Config(format!("配置文件根节点必须是对象: {}", path.display())))?;
 
     for (key, value) in patch {
         if value.is_null() {
@@ -407,6 +405,8 @@ pub fn patch_json_file_and_read_back(
 ///
 /// `patch` 的每个顶层键会覆盖 `path` 中同名键；值为 null 时删除该键。
 /// 该函数按 TOML 格式逐键应用，因此 JSON/普通文本请走 `patch_json_file`。
+// Retain this tested patch helper for TOML callers; production currently uses JSON patches.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn patch_toml_file(path: &Path, patch: &Map<String, Value>) -> Result<(), AppError> {
     use toml_edit::DocumentMut;
 
@@ -416,12 +416,9 @@ pub fn patch_toml_file(path: &Path, patch: &Map<String, Value>) -> Result<(), Ap
         String::new()
     };
 
-    let mut doc: DocumentMut = content.parse().map_err(|e| {
-        AppError::Config(format!(
-            "解析 TOML 配置失败 ({}): {e}",
-            path.display()
-        ))
-    })?;
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e| AppError::Config(format!("解析 TOML 配置失败 ({}): {e}", path.display())))?;
 
     for (key, value) in patch {
         if value.is_null() {
@@ -435,6 +432,8 @@ pub fn patch_toml_file(path: &Path, patch: &Map<String, Value>) -> Result<(), Ap
     write_text_file(path, &doc.to_string())
 }
 
+// Used by the retained TOML patch helper and its unit tests.
+#[cfg_attr(not(test), allow(dead_code))]
 fn value_to_toml_value(value: &Value) -> toml_edit::Value {
     match value {
         Value::Null => toml_edit::Value::String(toml_edit::Formatted::new(String::new())),
@@ -918,7 +917,10 @@ mod tests {
         .unwrap();
 
         let mut patch = Map::new();
-        patch.insert("env".to_string(), serde_json::json!({"CUSTOM": "keep-me", "NEW": "1"}));
+        patch.insert(
+            "env".to_string(),
+            serde_json::json!({"CUSTOM": "keep-me", "NEW": "1"}),
+        );
         patch_json_file(&path, &patch).unwrap();
 
         let after: Value = read_json_file(&path).unwrap();

@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use tauri::State;
 
 #[tauri::command(rename_all = "camelCase")]
+// Keep the established flat Tauri IPC parameters compatible with the renderer.
+#[allow(clippy::too_many_arguments)]
 pub async fn get_model_catalog(
     state: State<'_, AppState>,
     base_url: String,
@@ -31,6 +33,8 @@ pub async fn get_model_catalog(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+// Keep the established flat Tauri IPC parameters compatible with the renderer.
+#[allow(clippy::too_many_arguments)]
 pub async fn refresh_model_catalog(
     state: State<'_, AppState>,
     base_url: String,
@@ -71,4 +75,3 @@ pub async fn get_model_catalog_cache_status(
     };
     crate::services::model_catalog::get_cached_catalog(&key).map_err(|e| e.to_string())
 }
-
