@@ -89,7 +89,7 @@ fn default_hermes_dir() -> PathBuf {
 /// Windows `%LOCALAPPDATA%\hermes` 路径计算(纯函数,便于跨平台单测)。
 /// 对齐 Hermes 的 `os.environ.get("LOCALAPPDATA", "").strip()`:trim 后为空
 /// (缺失/空/纯空白)则回退 `<home>\AppData\Local\hermes`。
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn windows_local_hermes_dir(localappdata: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
     localappdata
         .map(|value| value.to_string_lossy().trim().to_string())
