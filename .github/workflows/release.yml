@@ -18,6 +18,14 @@ on:
         description: "Branch or commit for build-only acceptance; leave empty to build a tagged draft release"
         required: false
         type: string
+      recheck_run_id:
+        description: "Existing Windows package build run to recheck without rebuilding"
+        required: false
+        type: string
+      package_source_sha:
+        description: "Exact source SHA of packages when recheck_run_id is set"
+        required: false
+        type: string
       scope:
         description: "Packages to build; all platforms require separate installation acceptance"
         required: true
@@ -29,6 +37,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ inputs.source_ref || inputs.tag || github.ref_name }}
@@ -44,7 +53,15 @@ env:
   MACOS_NOTARIZATION_ENABLED: ${{ vars.YUNSWITCH_MACOS_NOTARIZATION_ENABLED == 'true' }}
 
 jobs:
+  recheck:
+    if: inputs.recheck_run_id != ''
+    uses: ./.github/workflows/windows-package-recheck.yml
+    with:
+      build_run_id: ${{ inputs.recheck_run_id }}
+      package_source_sha: ${{ inputs.package_source_sha }}
+      source_ref: ${{ inputs.source_ref || github.sha }}
   release:
+    if: inputs.recheck_run_id == ''
     runs-on: ${{ matrix.os }}
     environment: release
     strategy:

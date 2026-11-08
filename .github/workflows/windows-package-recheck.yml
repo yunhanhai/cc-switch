@@ -1,6 +1,17 @@
 name: YunSwitch Windows package recheck
 
 on:
+  workflow_call:
+    inputs:
+      build_run_id:
+        required: true
+        type: string
+      package_source_sha:
+        required: true
+        type: string
+      source_ref:
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       build_run_id:
