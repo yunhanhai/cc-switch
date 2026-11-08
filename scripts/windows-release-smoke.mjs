@@ -631,7 +631,7 @@ async function main() {
   assert.ok(await exists(installedExe));
   assert.equal(await sha256(installedExe), await sha256(portableExe));
   assert.match(
-    await readFile(join(installedRoot, "LICENSE"), "utf8"),
+    await readFile(join(installedRoot, "LICENSE.rtf"), "utf8"),
     /Jason Young/,
   );
   const command = await powershell(
