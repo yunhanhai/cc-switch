@@ -46,7 +46,9 @@
 
 ## 仓库维护方式
 
-当前远端默认分支为 `feature/v3.20.1-custom-routing`。建议在本轮文档审阅后，将稳定开发线整理为 `main`，保留原分支用于追溯；更改默认分支前核对两边 CI、分支保护与发布规则。
+两边稳定开发线与默认分支统一为 `main`。原 `feature/v3.20.1-custom-routing` 和文档工作分支保留用于追溯，两个平台的文档 PR 合并提交均保留在 `main` 历史中。
+
+GitHub CI 检查面向 `main` 的 PR 与推送，并支持手动执行。Node 版本读取 `.node-version`，Rust 工具链与仓库固定为 1.95.0；Windows 测试编译使用 32 MB 线程栈。具体验证结果以每次工作流运行记录为准。
 
 本地远端分工：
 
@@ -56,7 +58,9 @@ github    https://github.com/yunhanhai/yunswitch.git
 upstream  https://github.com/farion1231/cc-switch.git
 ```
 
-从当前默认分支创建 `feat/*`、`fix/*` 或 `docs/*` 工作分支。上游更新先在单独分支评估，选择需要的提交并记录来源；保留本仓库修改与测试，再合并到自己的稳定线。向 Gitee 和 GitHub 推送前先 fetch 核对，避免覆盖任一平台上的独有提交。
+从 `main` 创建 `feat/*`、`fix/*` 或 `docs/*` 工作分支。上游更新先在单独分支评估，选择需要的提交并记录来源；保留本仓库修改与测试，再合并到自己的稳定线。向 Gitee 和 GitHub 推送前先 fetch 核对，避免覆盖任一平台上的独有提交。
+
+独立发版准备清单见 [发布准备](RELEASE-READINESS.md)。
 
 ## 后续调整
 

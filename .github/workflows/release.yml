@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -35,10 +35,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version-file: ".node-version"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
 
       - name: Add Windows ARM64 target
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
@@ -131,7 +133,7 @@ jobs:
             echo "请检查 GitHub 仓库 Settings > Secrets and variables > Actions" >&2
             exit 1
           fi
-          
+
           RAW="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           # 目标：提供正确的私钥“文件路径”给 Tauri CLI，避免内容解码歧义
           KEY_PATH="$RUNNER_TEMP/tauri_signing.key"
@@ -153,7 +155,6 @@ jobs:
                 echo "✅ 使用一行 Base64 私钥，已构造两行文件"
               else
                 echo "❌ TAURI_SIGNING_PRIVATE_KEY 格式无法识别：既不是两行原文，也不是其 base64，亦非一行 base64" >&2
-                echo "密钥前10个字符: $(echo "$RAW" | head -c 10)..." >&2
                 exit 1
               fi
             fi

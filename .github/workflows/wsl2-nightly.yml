@@ -8,6 +8,9 @@ on:
     - cron: "23 18 * * *" # 02:23 Beijing time
   workflow_dispatch:
 
+env:
+  RUST_MIN_STACK: "33554432"
+
 jobs:
   backend-windows-wsl2-full:
     name: Backend Full Suite (Windows + WSL2 home)
@@ -21,6 +24,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: "1.95.0"
 
       - name: Setup WSL2
         uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364 # v7

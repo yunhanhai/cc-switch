@@ -52,7 +52,7 @@ cargo test
 
 1. Search this project's existing issues before opening another. For bugs, include the version or commit, OS, reproduction steps, expected behavior and actual behavior. Redact API keys, tokens and personal data from logs and screenshots. See [SECURITY.md](SECURITY.md) for vulnerabilities.
 2. Discuss substantial features before implementation. Small fixes and documentation improvements can be submitted directly.
-3. Create a focused branch from the repository's **current default branch**, currently `feature/v3.20.1-custom-routing`, and target that branch in your PR. Follow the repository settings if the default changes.
+3. Create a focused branch from **main** and target `main` in your PR. The former `feature/v3.20.1-custom-routing` branch is retained for history.
 4. Explain the change and the checks you ran. For behavior changes, add or update relevant tests where useful; state any platforms or checks you could not verify.
 5. Preserve upstream copyright and license notices. Identify third-party code or assets you introduce and their licenses.
 
@@ -60,7 +60,7 @@ cargo test
 
 1. 提交前搜索本项目已有 Issue。Bug 报告请包含版本或提交、操作系统、复现步骤、预期及实际行为；日志和截图须隐藏 API Key、令牌与个人信息。漏洞报告参见 [SECURITY.md](SECURITY.md)。
 2. 较大功能先讨论方案；小修复和文档改进可直接提交。
-3. 从仓库的**当前默认分支**创建专注于单一改动的分支，并将 PR 指向该默认分支。目前是 `feature/v3.20.1-custom-routing`；以后变更时以仓库设置为准。
+3. 从 **main** 创建专注于单一改动的分支，并将 PR 指向 `main`。旧 `feature/v3.20.1-custom-routing` 分支保留用于追溯。
 4. 说明改动及已运行的检查。行为改动按需要补充相关测试；明确未验证的平台或检查。
 5. 保留上游版权与许可证声明，注明新引入的第三方代码、资源及其许可证。
 

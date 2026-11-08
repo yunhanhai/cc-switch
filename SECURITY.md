@@ -6,9 +6,9 @@ This policy applies to the edition independently maintained by **yunhanhai**, ho
 
 ## Maintenance / 维护范围
 
-Security work focuses on the current default branch, `feature/v3.20.1-custom-routing`, and this project's own subsequent releases. Historical upstream tags retained in Git are not a promise of security maintenance. Include the affected commit or release in your report.
+Security work focuses on the default branch, `main`, and this project's own subsequent releases. Historical upstream tags retained in Git are not a promise of security maintenance. Include the affected commit or release in your report.
 
-安全维护优先面向当前默认分支 `feature/v3.20.1-custom-routing` 及本项目后续自行发布的版本。Git 中保留的上游历史标签不代表本项目承诺维护对应版本。报告请注明受影响提交或版本。
+安全维护优先面向默认分支 `main` 及本项目后续自行发布的版本。Git 中保留的上游历史标签不代表本项目承诺维护对应版本。报告请注明受影响提交或版本。
 
 ## Reporting / 报告方式
 

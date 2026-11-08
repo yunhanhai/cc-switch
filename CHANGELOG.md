@@ -2,6 +2,7 @@
 
 ## Unreleased — 仓库定位与开发文档
 
+- 合并两边文档 PR，稳定开发线统一为 `main`；校准 CI 工具链和 Windows 测试栈大小，移除签名错误日志中的私钥片段输出。
 - 确定独立项目名 YunSwitch，两个平台仓库路径改为 `yunhanhai/yunswitch`。
 - 明确 yunhanhai 独立维护的二次开发定位，重写多语言 README 和贡献入口。
 - 保留上游 MIT 版权与 Git 历史，补充本仓库维护者、来源和版本说明。
