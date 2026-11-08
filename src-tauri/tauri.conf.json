@@ -38,6 +38,9 @@
     "targets": "all",
     "createUpdaterArtifacts": false,
     "publisher": "yunhanhai",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "resources": { "../LICENSE": "LICENSE" },
     "homepage": "https://github.com/yunhanhai/yunswitch",
     "shortDescription": "AI coding tool configuration and routing manager",
     "icon": [
