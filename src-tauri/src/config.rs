@@ -13,7 +13,7 @@ use crate::error::AppError;
 /// - `dirs::home_dir()` 在 Windows 上使用 `SHGetKnownFolderPath(FOLDERID_Profile)`，
 ///   返回的是真实用户目录（类似 `C:\\Users\\Alice`），与 v3.10.2 行为一致。
 /// - 不要直接使用 `HOME` 环境变量：它可能由 Git/Cygwin/MSYS 等第三方工具注入，
-///   且不一定等于用户目录，可能导致 `.cc-switch/cc-switch.db` 路径变化，从而“看起来像数据丢失”。
+///   且不一定等于用户目录，可能导致 `.yunswitch/cc-switch.db` 路径变化，从而“看起来像数据丢失”。
 ///
 /// ## 测试隔离
 ///
@@ -40,7 +40,7 @@ pub fn get_claude_config_dir() -> PathBuf {
     }
 
     if uses_dev_isolated_layout() {
-        get_home_dir().join(".cc-switch-dev").join(".claude")
+        get_app_config_dir().join(".claude")
     } else {
         get_home_dir().join(".claude")
     }
@@ -210,7 +210,7 @@ pub fn get_claude_settings_path() -> PathBuf {
 /// 判断当前是否处于测试/沙盒环境（即 `CC_SWITCH_TEST_HOME` 已设置且非空）。
 ///
 /// 开发版（`cc_switch_dev_build`）默认使用与正式版隔离的目录布局
-/// （`.cc-switch-dev`、独立 scheme、独立端口），以保证开发版与正式版可
+/// （`.yunswitch-dev`、独立 scheme、独立端口），以保证开发版与正式版可
 /// 同时运行。但集成测试编译 lib 时 `cfg(test)` 不成立，导致 dev 布局
 /// 分支生效，而测试夹具按正常布局（`.cc-switch`）铺目录，两边路径错位。
 ///
@@ -232,46 +232,57 @@ pub fn uses_dev_isolated_layout() -> bool {
     cfg!(all(cc_switch_dev_build, not(test))) && !is_test_sandbox_environment()
 }
 
-/// 获取应用配置目录路径 (~/.cc-switch；开发版隔离布局下为 ~/.cc-switch-dev)
+fn uses_test_compatible_layout() -> bool {
+    cfg!(test) || is_test_sandbox_environment()
+}
+
+fn app_directory_name_for_layout(dev: bool, test: bool) -> &'static str {
+    if test {
+        ".cc-switch"
+    } else if dev {
+        ".yunswitch-dev"
+    } else {
+        ".yunswitch"
+    }
+}
+
+fn deep_link_scheme_for_layout(dev: bool, test: bool) -> &'static str {
+    if test {
+        "ccswitch"
+    } else if dev {
+        "yunswitch-dev"
+    } else {
+        "yunswitch"
+    }
+}
+
+/// 注册与解析深链使用相同身份；仅测试夹具保留旧协议格式。
+pub fn deep_link_scheme() -> &'static str {
+    deep_link_scheme_for_layout(uses_dev_isolated_layout(), uses_test_compatible_layout())
+}
+
+/// 新库的默认监听端口与原版分开；已有数据库的自定义端口不变。
+pub fn default_proxy_port() -> u16 {
+    if uses_test_compatible_layout() {
+        15721
+    } else if uses_dev_isolated_layout() {
+        15732
+    } else {
+        15731
+    }
+}
+
+/// 获取应用配置目录路径 (~/.yunswitch；开发版为 ~/.yunswitch-dev)。
+/// 独立应用不自动查找上游数据库，迁移应通过用户备份副本完成。
 pub fn get_app_config_dir() -> PathBuf {
     if let Some(custom) = crate::app_store::get_app_config_dir_override() {
         return custom;
     }
 
-    let default_dir = if uses_dev_isolated_layout() {
-        get_home_dir().join(".cc-switch-dev")
-    } else {
-        get_home_dir().join(".cc-switch")
-    };
-
-    // 兼容 v3.10.3：当用户环境存在 `HOME` 且与真实用户目录不同，
-    // v3.10.3 可能在 `HOME/.cc-switch/` 下创建/使用了数据库。
-    // 这里仅在“默认位置没有数据库”时回退到旧位置，避免再次出现“供应商消失”问题，
-    // 同时也避免新安装因为 `HOME` 被设置而写入非预期路径。
-    // 开发版构建必须跳过：legacy 目录指向正式版数据，一旦回退开发版会
-    // 直接读写生产数据库，破坏“开发版与正式版可同时运行”的隔离承诺。
-    #[cfg(all(windows, not(cc_switch_dev_build)))]
-    {
-        let default_db = default_dir.join("cc-switch.db");
-        if !default_db.exists() {
-            if let Ok(home_env) = std::env::var("HOME") {
-                let trimmed = home_env.trim();
-                if !trimmed.is_empty() {
-                    let legacy_dir = PathBuf::from(trimmed).join(".cc-switch");
-                    if legacy_dir.join("cc-switch.db").exists() {
-                        log::info!(
-                            "Detected v3.10.3 legacy database at {}, using it instead of {}",
-                            legacy_dir.display(),
-                            default_dir.display()
-                        );
-                        return legacy_dir;
-                    }
-                }
-            }
-        }
-    }
-
-    default_dir
+    get_home_dir().join(app_directory_name_for_layout(
+        uses_dev_isolated_layout(),
+        uses_test_compatible_layout(),
+    ))
 }
 
 /// 获取应用配置文件路径
@@ -648,6 +659,18 @@ fn atomic_write_with_unix_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identity_layout_keeps_production_development_and_fixtures_separate() {
+        assert_eq!(app_directory_name_for_layout(false, false), ".yunswitch");
+        assert_eq!(app_directory_name_for_layout(true, false), ".yunswitch-dev");
+        assert_eq!(app_directory_name_for_layout(false, true), ".cc-switch");
+        assert_eq!(app_directory_name_for_layout(true, true), ".cc-switch");
+        assert_eq!(deep_link_scheme_for_layout(false, false), "yunswitch");
+        assert_eq!(deep_link_scheme_for_layout(true, false), "yunswitch-dev");
+        assert_eq!(deep_link_scheme_for_layout(false, true), "ccswitch");
+        assert_eq!(deep_link_scheme_for_layout(true, true), "ccswitch");
+    }
 
     fn assert_atomic_write_replaces_existing_file(dir: &Path) {
         let path = dir.join("atomic-write-contract.json");

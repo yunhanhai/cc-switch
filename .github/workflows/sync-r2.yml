@@ -1,7 +1,7 @@
-# Mirror release assets to Cloudflare R2 so ccswitch.io/download can serve
-# them directly (dl.ccswitch.io), and mirror the Tauri updater manifest and
-# artifacts so in-app updates avoid GitHub too (the updater verifies minisign
-# signatures client-side, so the mirror is untrusted).
+# Optional YunSwitch release mirror. Disabled until the repository variable
+# YUNSWITCH_R2_MIRROR_ENABLED is true and the maintainer configures an owned
+# YUNSWITCH_R2_BUCKET / YUNSWITCH_R2_PUBLIC_BASE_URL plus the R2 secrets.
+# No upstream bucket or domain is used as a fallback.
 #
 # Triggered on release promotion (`released` fires when a prerelease is
 # flipped to a full release, or a release is published as stable directly) —
@@ -11,13 +11,8 @@
 # root manifests (and prunes old versions) when its tag IS releases/latest —
 # manual backfills of older tags restore versioned files only.
 #
-# Caveat (by design of tauri-plugin-updater): the updater stops at the first
-# endpoint whose response parses, so a stale-but-valid R2 manifest would mask
-# newer GitHub releases. That is why this sync hard-fails on the official
-# repo when the R2 secrets are missing, instead of silently skipping.
-#
 # Required secrets: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
-name: Sync release to R2
+name: Sync YunSwitch release to R2
 
 on:
   release:
@@ -26,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to sync (e.g. v3.18.0)'
+        description: "YunSwitch release tag to sync (e.g. v3.20.1-yunswitch.1)"
         required: true
         type: string
 
@@ -42,11 +37,12 @@ concurrency:
 
 jobs:
   sync-to-r2:
+    if: vars.YUNSWITCH_R2_MIRROR_ENABLED == 'true'
     name: Sync release to R2
     runs-on: ubuntu-22.04
     env:
-      R2_BUCKET: cc-switch-releases
-      R2_PUBLIC_BASE_URL: https://dl.ccswitch.io
+      R2_BUCKET: ${{ vars.YUNSWITCH_R2_BUCKET }}
+      R2_PUBLIC_BASE_URL: ${{ vars.YUNSWITCH_R2_PUBLIC_BASE_URL }}
       KEEP_VERSIONS: "5"
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -57,7 +53,7 @@ jobs:
       R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
-      - name: Check R2 secrets
+      - name: Check YunSwitch R2 configuration
         id: r2
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -66,18 +62,17 @@ jobs:
             echo "::error::No release tag to sync."
             exit 1
           fi
-          if [ -n "$R2_ACCOUNT_ID" ] && [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          elif [ "$GITHUB_REPOSITORY" = "farion1231/cc-switch" ]; then
-            # A silently stale mirror strands updater users on old versions
-            # (the R2 endpoint wins as long as its manifest parses), so the
-            # official repo must never skip this sync.
-            echo "::error::R2 secrets (R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY) are missing on the official repo; refusing to skip the mirror sync."
+          for required in R2_ACCOUNT_ID AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE_URL; do
+            if [ -z "${!required}" ]; then
+              echo "::error::$required is required when the YunSwitch R2 mirror is enabled."
+              exit 1
+            fi
+          done
+          if [[ ! "$R2_PUBLIC_BASE_URL" =~ ^https://[^/]+ ]]; then
+            echo "::error::YUNSWITCH_R2_PUBLIC_BASE_URL must be an HTTPS URL for your mirror."
             exit 1
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "R2 secrets not configured; skipping download mirror sync."
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       # Only the tag that IS GitHub's releases/latest may touch the bucket-root
       # manifests or prune old versions. This keeps manual backfills of old
@@ -147,7 +142,11 @@ jobs:
         if: steps.r2.outputs.configured == 'true' && steps.latest.outputs.is_latest == 'true'
         run: |
           set -euo pipefail
-          node scripts/rewrite-updater-manifest.mjs r2-assets/latest.json "$TAG" "$R2_PUBLIC_BASE_URL" latest-r2.json
+          if [ -f r2-assets/latest.json ]; then
+            node scripts/rewrite-updater-manifest.mjs r2-assets/latest.json "$TAG" "$R2_PUBLIC_BASE_URL" latest-r2.json
+          else
+            echo "This release has no signed updater manifest; mirroring manual downloads only."
+          fi
 
       - name: Upload versioned assets to R2
         if: steps.r2.outputs.configured == 'true'
@@ -164,6 +163,7 @@ jobs:
             --endpoint-url "$R2_ENDPOINT"
 
       - name: Publish root manifests to R2
+        id: publish-root
         if: steps.r2.outputs.configured == 'true' && steps.latest.outputs.is_latest == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -192,20 +192,25 @@ jobs:
             echo "::warning::$TAG stopped being the latest stable release mid-run ($latest is); leaving root manifests untouched."
             exit 0
           fi
-          # Both manifests are replaced on every release — keep edge cache
-          # short. Uploaded after the assets they reference so an aborted run
+          # Keep root-manifest cache short. Upload after the assets so an aborted run
           # never leaves them pointing at missing files.
           aws s3 cp manifest.json "s3://$R2_BUCKET/manifest.json" \
             --content-type "application/json" \
             --cache-control "public, max-age=300" \
             --endpoint-url "$R2_ENDPOINT"
-          aws s3 cp latest-r2.json "s3://$R2_BUCKET/latest.json" \
-            --content-type "application/json" \
-            --cache-control "public, max-age=300" \
-            --endpoint-url "$R2_ENDPOINT"
+          if [ -f latest-r2.json ]; then
+            aws s3 cp latest-r2.json "s3://$R2_BUCKET/latest.json" \
+              --content-type "application/json" \
+              --cache-control "public, max-age=300" \
+              --endpoint-url "$R2_ENDPOINT"
+          else
+            # Never leave an old updater manifest advertising an unsigned release.
+            aws s3 rm "s3://$R2_BUCKET/latest.json" --endpoint-url "$R2_ENDPOINT"
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Prune old versions
-        if: steps.r2.outputs.configured == 'true' && steps.latest.outputs.is_latest == 'true'
+        if: steps.publish-root.outputs.published == 'true'
         run: |
           set -euo pipefail
           versions=$(aws s3 ls "s3://$R2_BUCKET/" --endpoint-url "$R2_ENDPOINT" \

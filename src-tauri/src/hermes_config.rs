@@ -48,11 +48,16 @@ use std::sync::{Mutex, OnceLock};
 ///
 /// 解析顺序对齐 Hermes 自身的 `get_hermes_home()`:
 ///   1. CCS 设置 `hermes_config_dir`(显式覆盖)
-///   2. `HERMES_HOME` 环境变量(trim 后非空;按原样,不展开 `~`,与 Hermes `Path(val)` 一致)
-///   3. 平台默认(Windows: `%LOCALAPPDATA%\hermes`,Mac/Linux: `~/.hermes`)
+///   2. YunSwitch 开发版隔离目录（仅 debug 布局）
+///   3. `HERMES_HOME` 环境变量(trim 后非空;按原样,不展开 `~`,与 Hermes `Path(val)` 一致)
+///   4. 平台默认(Windows: `%LOCALAPPDATA%\hermes`,Mac/Linux: `~/.hermes`)
 pub fn get_hermes_dir() -> PathBuf {
     if let Some(override_dir) = get_hermes_override_dir() {
         return override_dir;
+    }
+
+    if crate::config::uses_dev_isolated_layout() {
+        return crate::config::get_app_config_dir().join(".hermes");
     }
 
     if let Some(raw) = std::env::var_os("HERMES_HOME") {
@@ -63,11 +68,7 @@ pub fn get_hermes_dir() -> PathBuf {
         }
     }
 
-    if crate::config::uses_dev_isolated_layout() {
-        crate::config::get_app_config_dir().join(".hermes")
-    } else {
-        default_hermes_dir()
-    }
+    default_hermes_dir()
 }
 
 /// 平台默认 Hermes 目录(Windows):对齐 Hermes `_get_platform_default_hermes_home()`——

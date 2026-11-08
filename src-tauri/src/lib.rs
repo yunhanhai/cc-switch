@@ -18,6 +18,8 @@ mod grok_config;
 pub mod hermes_config;
 mod init_status;
 mod lightweight;
+#[cfg(any(target_os = "linux", test))]
+mod linux_deeplink;
 #[cfg(target_os = "linux")]
 mod linux_fix;
 mod mcp;
@@ -238,7 +240,7 @@ fn runtime_log_level_allows(level: log::Level, max_level: log::LevelFilter) -> b
     max_level.to_level().is_some_and(|maximum| level <= maximum)
 }
 
-/// 统一处理 ccswitch:// 深链接 URL
+/// 统一处理 YunSwitch 深链接 URL
 ///
 /// - 解析 URL
 /// - 向前端发射 `deeplink-import` / `deeplink-error` 事件
@@ -249,12 +251,8 @@ fn handle_deeplink_url(
     focus_main_window: bool,
     source: &str,
 ) -> bool {
-    let scheme_prefix = if crate::config::uses_dev_isolated_layout() {
-        "ccswitch-dev://"
-    } else {
-        "ccswitch://"
-    };
-    if !url_str.starts_with(scheme_prefix) {
+    let scheme_prefix = format!("{}://", crate::config::deep_link_scheme());
+    if !url_str.starts_with(&scheme_prefix) {
         return false;
     }
 
@@ -453,6 +451,16 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let title = if crate::config::uses_dev_isolated_layout() {
+                    "YunSwitch Dev"
+                } else {
+                    "YunSwitch"
+                };
+                if let Err(error) = window.set_title(title) {
+                    log::warn!("Failed to set application title: {error}");
+                }
+            }
             let _ = rustls::crypto::ring::default_provider().install_default();
 
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
@@ -1023,23 +1031,11 @@ pub fn run() {
             {
                 #[cfg(target_os = "linux")]
                 {
-                    // Use Tauri's path API to get correct path (includes app identifier)
-                    // tauri-plugin-deep-link writes to: ~/.local/share/com.ccswitch.desktop/applications/cc-switch-handler.desktop
-                    // Only register if .desktop file doesn't exist to avoid overwriting user customizations
-                    let should_register = app
-                        .path()
-                        .data_dir()
-                        .map(|d| !d.join("applications/cc-switch-handler.desktop").exists())
-                        .unwrap_or(true);
-
-                    if should_register {
-                        if let Err(e) = app.deep_link().register_all() {
-                            log::error!("✗ Failed to register deep link schemes: {}", e);
-                        } else {
-                            log::info!("✓ Deep link schemes registered (Linux)");
-                        }
-                    } else {
-                        log::info!("⊘ Deep link handler already exists, skipping registration");
+                    // The plugin names its global .desktop handler after the executable.
+                    // Register our own per-scheme handler so cc-switch can remain the binary
+                    // name without colliding with upstream or the other build profile.
+                    if let Err(e) = crate::linux_deeplink::register(app.handle()) {
+                        log::error!("✗ Failed to register YunSwitch deep link scheme: {e}");
                     }
                 }
 
@@ -1072,7 +1068,7 @@ pub fn run() {
                         log::debug!("  URL[{i}]: {}", url_for_log(url_str));
 
                         if handle_deeplink_url(&app_handle, url_str, true, "on_open_url") {
-                            break; // Process only first ccswitch:// URL
+                            break; // Process only the first matching YunSwitch URL
                         }
                     }
                 }
@@ -1399,6 +1395,8 @@ pub fn run() {
             commands::get_migration_result,
             commands::get_skills_migration_result,
             commands::get_app_config_path,
+            commands::get_runtime_directory_identity,
+            commands::is_app_updater_configured,
             commands::open_app_config_folder,
             commands::get_claude_common_config_snippet,
             commands::set_claude_common_config_snippet,
@@ -1829,7 +1827,7 @@ pub fn run() {
                         }
                     }
                 }
-                // 处理通过自定义 URL 协议触发的打开事件（例如 ccswitch://...）
+                // 处理通过自定义 YunSwitch URL 协议触发的打开事件
                 RunEvent::Opened { urls } => {
                     if let Some(url) = urls.first() {
                         let url_str = url.to_string();
@@ -1838,12 +1836,8 @@ pub fn run() {
                             url_for_log(&url_str)
                         );
 
-                        let scheme_prefix = if crate::config::uses_dev_isolated_layout() {
-                            "ccswitch-dev://"
-                        } else {
-                            "ccswitch://"
-                        };
-                        if url_str.starts_with(scheme_prefix) {
+                        let scheme_prefix = format!("{}://", crate::config::deep_link_scheme());
+                        if url_str.starts_with(&scheme_prefix) {
                             if crate::lightweight::is_lightweight_mode() {
                                 if let Err(e) = crate::lightweight::exit_lightweight_mode(app_handle)
                                 {

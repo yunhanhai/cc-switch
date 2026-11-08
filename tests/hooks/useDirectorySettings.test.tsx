@@ -4,6 +4,7 @@ import { useDirectorySettings } from "@/hooks/useDirectorySettings";
 import type { SettingsFormState } from "@/hooks/useSettingsForm";
 
 const getAppConfigDirOverrideMock = vi.hoisted(() => vi.fn());
+const getRuntimeDirectoryIdentityMock = vi.hoisted(() => vi.fn());
 const getConfigDirMock = vi.hoisted(() => vi.fn());
 const selectConfigDirectoryMock = vi.hoisted(() => vi.fn());
 const setAppConfigDirOverrideMock = vi.hoisted(() => vi.fn());
@@ -16,6 +17,7 @@ const toastErrorMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", () => ({
   settingsApi: {
     getAppConfigDirOverride: getAppConfigDirOverrideMock,
+    getRuntimeDirectoryIdentity: getRuntimeDirectoryIdentityMock,
     getConfigDir: getConfigDirMock,
     selectConfigDirectory: selectConfigDirectoryMock,
     setAppConfigDirOverride: setAppConfigDirOverrideMock,
@@ -65,6 +67,10 @@ describe("useDirectorySettings", () => {
     );
 
     getAppConfigDirOverrideMock.mockResolvedValue(null);
+    getRuntimeDirectoryIdentityMock.mockResolvedValue({
+      defaultAppConfigDir: "/home/mock/.yunswitch",
+      isolatedConfigRoot: null,
+    });
     getConfigDirMock.mockImplementation(async (app: string) => {
       if (app === "claude") return "/remote/claude";
       if (app === "codex") return "/remote/codex";
@@ -187,7 +193,7 @@ describe("useDirectorySettings", () => {
 
     expect(result.current.appConfigDir).toBe("/new/app");
     expect(selectConfigDirectoryMock).toHaveBeenCalledWith(
-      "/home/mock/.cc-switch",
+      "/home/mock/.yunswitch",
     );
   });
 
@@ -217,7 +223,33 @@ describe("useDirectorySettings", () => {
     });
     expect(result.current.resolvedDirs.claude).toBe("/home/mock/.claude");
     expect(result.current.resolvedDirs.codex).toBe("/home/mock/.codex");
-    expect(result.current.resolvedDirs.appConfig).toBe("/home/mock/.cc-switch");
+    expect(result.current.resolvedDirs.appConfig).toBe("/home/mock/.yunswitch");
+  });
+
+  it("resets debug directories using the running application's isolated root", async () => {
+    getRuntimeDirectoryIdentityMock.mockResolvedValue({
+      defaultAppConfigDir: "/home/mock/.yunswitch-dev",
+      isolatedConfigRoot: "/custom/dev-app",
+    });
+    const { result } = renderHook(() =>
+      useDirectorySettings({ settings: createSettings(), onUpdateSettings }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.resetDirectory("claude");
+      await result.current.resetDirectory("opencode");
+      await result.current.resetDirectory("pi");
+      await result.current.resetAppConfigDir();
+    });
+    expect(result.current.resolvedDirs.appConfig).toBe(
+      "/home/mock/.yunswitch-dev",
+    );
+    expect(result.current.resolvedDirs.claude).toBe("/custom/dev-app/.claude");
+    expect(result.current.resolvedDirs.opencode).toBe(
+      "/custom/dev-app/.opencode",
+    );
+    expect(result.current.resolvedDirs.pi).toBe("/custom/dev-app/.pi/agent");
+    expect(getRuntimeDirectoryIdentityMock).toHaveBeenCalledTimes(1);
   });
 
   it("updates openclaw directory when browsing succeeds", async () => {

@@ -43,11 +43,7 @@ impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
             listen_address: "127.0.0.1".to_string(),
-            listen_port: if crate::config::uses_dev_isolated_layout() {
-                15722
-            } else {
-                15721
-            },
+            listen_port: crate::config::default_proxy_port(),
             max_retries: 3,
             request_timeout: 600,
             enable_logging: true,

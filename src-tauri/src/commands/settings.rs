@@ -10,6 +10,65 @@ struct UpdateDownloadProgress {
     total: Option<u64>,
 }
 
+fn updater_configuration_is_enabled(config: Option<&serde_json::Value>) -> bool {
+    let Some(config) = config else {
+        return false;
+    };
+    config.get("active").and_then(|value| value.as_bool()) != Some(false)
+        && config
+            .get("pubkey")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty())
+        && config
+            .get("endpoints")
+            .and_then(|value| value.as_array())
+            .is_some_and(|endpoints| {
+                !endpoints.is_empty()
+                    && endpoints.iter().all(|endpoint| {
+                        endpoint
+                            .as_str()
+                            .is_some_and(|value| value.starts_with("https://"))
+                    })
+            })
+}
+
+/// Whether this build has its own enabled, signed update channel.
+#[tauri::command]
+pub fn is_app_updater_configured(app: AppHandle) -> bool {
+    updater_configuration_is_enabled(app.config().plugins.0.get("updater"))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDirectoryIdentity {
+    default_app_config_dir: String,
+    isolated_config_root: Option<String>,
+}
+
+/// Directory defaults come from the running app, including debug isolation.
+#[tauri::command]
+pub fn get_runtime_directory_identity() -> RuntimeDirectoryIdentity {
+    let dev = crate::config::uses_dev_isolated_layout();
+    let name = if cfg!(test) || crate::config::is_test_sandbox_environment() {
+        ".cc-switch"
+    } else if dev {
+        ".yunswitch-dev"
+    } else {
+        ".yunswitch"
+    };
+    RuntimeDirectoryIdentity {
+        default_app_config_dir: crate::config::get_home_dir()
+            .join(name)
+            .to_string_lossy()
+            .to_string(),
+        isolated_config_root: dev.then(|| {
+            crate::config::get_app_config_dir()
+                .to_string_lossy()
+                .to_string()
+        }),
+    }
+}
+
 fn merge_settings_for_save(
     mut incoming: crate::settings::AppSettings,
     existing: &crate::settings::AppSettings,
@@ -196,6 +255,9 @@ pub async fn restart_app(app: AppHandle) -> Result<bool, String> {
 /// 这里把退出清理、安装和重启串在同一个后端流程中，避免依赖旧前端继续执行。
 #[tauri::command]
 pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> {
+    if !is_app_updater_configured(app.clone()) {
+        return Err("Automatic updates are not configured; open the YunSwitch release page to update manually.".to_string());
+    }
     let updater = app
         .updater_builder()
         .build()
@@ -268,11 +330,13 @@ pub async fn install_update_and_restart(app: AppHandle) -> Result<bool, String> 
 
 /// 检查是否有可用的应用更新，返回可用的新版本号（无更新时返回 None）。
 ///
-/// 数据库版本过新的恢复界面用它判断：升级应用能否解决问题。若返回 None，说明
-/// 已是最新版本，但数据库仍不兼容（通常由第三方客户端或更高版本创建），应提示用户
-/// 升级无法解决，而不是让其反复尝试。
+/// 未配置更新渠道或没有检测到更新时返回 None；这不保证当前版本是最新版本，
+/// 也不保证远端安装包支持该数据库。恢复界面仍提供手动发布页入口。
 #[tauri::command]
 pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
+    if !is_app_updater_configured(app.clone()) {
+        return Ok(None);
+    }
     let updater = app
         .updater_builder()
         .build()
@@ -314,12 +378,31 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_settings_for_save;
+    use super::{merge_settings_for_save, updater_configuration_is_enabled};
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
         CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,
         WebDavSyncSettings,
     };
+
+    #[test]
+    fn independent_updater_requires_enabled_key_and_endpoints() {
+        use serde_json::json;
+        assert!(!updater_configuration_is_enabled(None));
+        for config in [
+            json!({"pubkey": "", "endpoints": []}),
+            json!({"pubkey": "key", "endpoints": []}),
+            json!({"pubkey": "key", "endpoints": ["http://example.com/update.json"]}),
+            json!({"active": false, "pubkey": "key", "endpoints": ["https://example.com/update.json"]}),
+        ] {
+            assert!(!updater_configuration_is_enabled(Some(&config)));
+        }
+        assert!(updater_configuration_is_enabled(Some(&json!({
+            "active": true,
+            "pubkey": "key",
+            "endpoints": ["https://example.com/update.json"]
+        }))));
+    }
 
     #[test]
     fn save_settings_should_preserve_existing_webdav_when_payload_omits_it() {

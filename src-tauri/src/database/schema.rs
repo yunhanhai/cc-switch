@@ -22,6 +22,13 @@ impl Database {
 
     /// 在指定连接上创建表（供迁移和测试使用）
     pub(crate) fn create_tables_on_conn(conn: &Connection) -> Result<(), AppError> {
+        Self::create_tables_on_conn_with_proxy_port(conn, crate::config::default_proxy_port())
+    }
+
+    fn create_tables_on_conn_with_proxy_port(
+        conn: &Connection,
+        proxy_port: u16,
+    ) -> Result<(), AppError> {
         // 1. Providers 表
         conn.execute(
             "CREATE TABLE IF NOT EXISTS providers (
@@ -123,10 +130,10 @@ impl Database {
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         // 8. Proxy Config 表（三行结构，app_type 主键）
-        conn.execute("CREATE TABLE IF NOT EXISTS proxy_config (
+        conn.execute(&format!("CREATE TABLE IF NOT EXISTS proxy_config (
             app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
             proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-            listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
+            listen_port INTEGER NOT NULL DEFAULT {proxy_port}, enable_logging INTEGER NOT NULL DEFAULT 1,
             enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
             max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
             streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
@@ -140,7 +147,7 @@ impl Database {
             default_cost_multiplier TEXT NOT NULL DEFAULT '1',
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )", []).map_err(|e| AppError::Database(e.to_string()))?;
+        )"), []).map_err(|e| AppError::Database(e.to_string()))?;
 
         // 初始化三行数据（每应用不同默认值）
         //
@@ -148,68 +155,50 @@ impl Database {
         // - 老版本 proxy_config 是单例表（没有 app_type 列），此时不能执行三行 seed insert；
         // - 旧表会在 apply_schema_migrations() 中迁移为三行结构后再插入。
         if Self::has_column(conn, "proxy_config", "app_type")? {
+            Self::add_column_if_missing(
+                conn,
+                "proxy_config",
+                "listen_port",
+                &format!("INTEGER NOT NULL DEFAULT {proxy_port}"),
+            )?;
             conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+                "INSERT OR IGNORE INTO proxy_config (app_type, listen_port, max_retries,
                 streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                 circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                 circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('claude', 6, 90, 180, 600, 8, 3, 90, 0.7, 15)",
+                VALUES ('claude', COALESCE((SELECT listen_port FROM proxy_config LIMIT 1), ?1), 6, 90, 180, 600, 8, 3, 90, 0.7, 15)",
+                [proxy_port],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            conn.execute(
+                "INSERT OR IGNORE INTO proxy_config (app_type, listen_port, max_retries,
+                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
+                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
+                circuit_error_rate_threshold, circuit_min_requests)
+                VALUES ('codex', (SELECT listen_port FROM proxy_config WHERE app_type = 'claude'), 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
                 [],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
             conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+                "INSERT OR IGNORE INTO proxy_config (app_type, listen_port, max_retries,
                 streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                 circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                 circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('codex', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
+                VALUES ('gemini', (SELECT listen_port FROM proxy_config WHERE app_type = 'claude'), 5, 60, 120, 600, 4, 2, 60, 0.6, 10)",
                 [],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
             conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
+                "INSERT OR IGNORE INTO proxy_config (app_type, listen_port, max_retries,
                 streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
                 circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
                 circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('gemini', 5, 60, 120, 600, 4, 2, 60, 0.6, 10)",
-                [],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-            conn.execute(
-                "INSERT OR IGNORE INTO proxy_config (app_type, max_retries,
-                streaming_first_byte_timeout, streaming_idle_timeout, non_streaming_timeout,
-                circuit_failure_threshold, circuit_success_threshold, circuit_timeout_seconds,
-                circuit_error_rate_threshold, circuit_min_requests)
-                VALUES ('grokbuild', 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
+                VALUES ('grokbuild', (SELECT listen_port FROM proxy_config WHERE app_type = 'claude'), 3, 60, 120, 600, 4, 2, 60, 0.6, 10)",
                 [],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-            if crate::config::uses_dev_isolated_layout() {
-                // 一次性端口迁移：把旧开发库的 15721 拉到 15722。
-                // 用 settings 标记确保只跑一次——用户此后在 UI 里选择的
-                // 任何端口（包括改回 15721）都不会再被启动迁移覆盖。
-                let migrated: bool = conn
-                    .query_row(
-                        "SELECT value FROM settings WHERE key = 'dev_port_migrated'",
-                        [],
-                        |row| Ok(row.get::<_, String>(0)?.eq("1")),
-                    )
-                    .unwrap_or(false);
-                if !migrated {
-                    conn.execute(
-                        "UPDATE proxy_config SET listen_port = 15722 WHERE listen_port = 15721",
-                        [],
-                    )
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-                    conn.execute(
-                        "INSERT OR REPLACE INTO settings (key, value) VALUES ('dev_port_migrated', '1')",
-                        [],
-                    )
-                    .map_err(|e| AppError::Database(e.to_string()))?;
-                    log::info!("[Schema] 开发版端口一次性迁移完成 (15721 → 15722)");
-                }
-            }
+            // 独立目录的新库使用自身默认端口；导入库及用户端口不自动重写。
         }
 
         // 9. Provider Health 表
@@ -531,7 +520,9 @@ impl Database {
             [],
         );
         let _ = conn.execute(
-            "ALTER TABLE proxy_config ADD COLUMN listen_port INTEGER NOT NULL DEFAULT 15721",
+            &format!(
+                "ALTER TABLE proxy_config ADD COLUMN listen_port INTEGER NOT NULL DEFAULT {proxy_port}"
+            ),
             [],
         );
         let _ = conn.execute(
@@ -896,7 +887,10 @@ impl Database {
                 conn,
                 "proxy_config",
                 "listen_port",
-                "INTEGER NOT NULL DEFAULT 15721",
+                &format!(
+                    "INTEGER NOT NULL DEFAULT {}",
+                    crate::config::default_proxy_port()
+                ),
             )?;
             Self::add_column_if_missing(
                 conn,
@@ -1103,10 +1097,10 @@ impl Database {
 
         // 创建新表
         conn.execute("DROP TABLE IF EXISTS proxy_config_new", [])?;
-        conn.execute("CREATE TABLE proxy_config_new (
+        conn.execute(&format!("CREATE TABLE proxy_config_new (
             app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
             proxy_enabled INTEGER NOT NULL DEFAULT 0, listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-            listen_port INTEGER NOT NULL DEFAULT 15721, enable_logging INTEGER NOT NULL DEFAULT 1,
+            listen_port INTEGER NOT NULL DEFAULT {}, enable_logging INTEGER NOT NULL DEFAULT 1,
             enabled INTEGER NOT NULL DEFAULT 0, auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
             max_retries INTEGER NOT NULL DEFAULT 3, streaming_first_byte_timeout INTEGER NOT NULL DEFAULT 60,
             streaming_idle_timeout INTEGER NOT NULL DEFAULT 120, non_streaming_timeout INTEGER NOT NULL DEFAULT 600,
@@ -1121,7 +1115,7 @@ impl Database {
             pricing_model_source TEXT NOT NULL DEFAULT 'response',
             live_takeover_active INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-        )", [])?;
+        )", crate::config::default_proxy_port()), [])?;
 
         // 插入三行配置
         for (app, takeover, failover, retries, fb, idle, cb_f, cb_s, cb_t, cb_r, cb_m) in apps {
@@ -1669,11 +1663,11 @@ impl Database {
         conn.execute("DROP TABLE IF EXISTS proxy_config_v14", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
-            "CREATE TABLE proxy_config_v14 (
+            &format!("CREATE TABLE proxy_config_v14 (
                 app_type TEXT PRIMARY KEY CHECK (app_type IN ('claude','codex','gemini','grokbuild')),
                 proxy_enabled INTEGER NOT NULL DEFAULT 0,
                 listen_address TEXT NOT NULL DEFAULT '127.0.0.1',
-                listen_port INTEGER NOT NULL DEFAULT 15721,
+                listen_port INTEGER NOT NULL DEFAULT {},
                 enable_logging INTEGER NOT NULL DEFAULT 1,
                 enabled INTEGER NOT NULL DEFAULT 0,
                 auto_failover_enabled INTEGER NOT NULL DEFAULT 0,
@@ -1691,16 +1685,17 @@ impl Database {
                 live_takeover_active INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )",
+            )", crate::config::default_proxy_port()),
             [],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        let default_port = crate::config::default_proxy_port().to_string();
         let copied_columns = [
             ("app_type", "'claude'"),
             ("proxy_enabled", "0"),
             ("listen_address", "'127.0.0.1'"),
-            ("listen_port", "15721"),
+            ("listen_port", default_port.as_str()),
             ("enable_logging", "1"),
             ("enabled", "0"),
             ("auto_failover_enabled", "0"),
@@ -1752,8 +1747,9 @@ impl Database {
         conn.execute("ALTER TABLE proxy_config_v14 RENAME TO proxy_config", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
         conn.execute(
-            "INSERT OR IGNORE INTO proxy_config (app_type) VALUES ('grokbuild')",
-            [],
+            "INSERT OR IGNORE INTO proxy_config (app_type, listen_port)
+             VALUES ('grokbuild', COALESCE((SELECT listen_port FROM proxy_config WHERE app_type = 'claude'), ?1))",
+            [crate::config::default_proxy_port()],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -3659,6 +3655,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn identity_proxy_port_is_used_by_fresh_tables_and_seed_rows() -> Result<(), AppError> {
+        for port in [15721_u16, 15731, 15732] {
+            let conn = Connection::open_in_memory()?;
+            Database::create_tables_on_conn_with_proxy_port(&conn, port)?;
+            let matching_rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proxy_config WHERE listen_port = ?1",
+                [port],
+                |row| row.get(0),
+            )?;
+            assert_eq!(matching_rows, 4);
+
+            conn.execute("DELETE FROM proxy_config WHERE app_type = 'grokbuild'", [])?;
+            conn.execute(
+                "INSERT INTO proxy_config (app_type) VALUES ('grokbuild')",
+                [],
+            )?;
+            let inserted_port: u16 = conn.query_row(
+                "SELECT listen_port FROM proxy_config WHERE app_type = 'grokbuild'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(inserted_port, port);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn identity_schema_reinitialization_preserves_imported_and_custom_ports() -> Result<(), AppError>
+    {
+        for saved_port in [15721_u16, 15722, 25001] {
+            let conn = Connection::open_in_memory()?;
+            Database::create_tables_on_conn_with_proxy_port(&conn, 15721)?;
+            conn.execute("UPDATE proxy_config SET listen_port = ?1", [saved_port])?;
+            conn.execute("DELETE FROM proxy_config WHERE app_type = 'grokbuild'", [])?;
+
+            Database::create_tables_on_conn_with_proxy_port(&conn, 15732)?;
+
+            let matching_rows: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM proxy_config WHERE listen_port = ?1",
+                [saved_port],
+                |row| row.get(0),
+            )?;
+            assert_eq!(
+                matching_rows, 4,
+                "saved port must survive and seed new rows"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn migrate_v12_to_v13_adds_input_token_semantics_columns() -> Result<(), AppError> {
         let conn = Connection::open_in_memory()?;
         conn.execute(
@@ -3700,6 +3747,7 @@ mod tests {
         let conn = Connection::open_in_memory()?;
         Database::create_tables_on_conn(&conn)?;
         conn.execute("DELETE FROM proxy_config WHERE app_type = 'grokbuild'", [])?;
+        conn.execute("UPDATE proxy_config SET listen_port = 25001", [])?;
         conn.execute(
             "UPDATE proxy_config SET enabled = 1, max_retries = 9 WHERE app_type = 'codex'",
             [],
@@ -3715,6 +3763,12 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(grok_rows, 1);
+        let preserved_ports: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_config WHERE listen_port = 25001",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(preserved_ports, 4);
         let codex_values: (i64, i64) = conn.query_row(
             "SELECT enabled, max_retries FROM proxy_config WHERE app_type = 'codex'",
             [],

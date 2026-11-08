@@ -55,7 +55,7 @@ AI 编程工具配置与路由管理，面向多供应商与多模型场景持�
 
 ## 获取与使用
 
-源码中的版本目前仍为 `3.20.1`，用于延续已有代码版本。本仓库 GitHub 在 2026-11-08 核查时尚无正式 Release；请使用源码开发，后续安装包会在本仓库发布入口公布。
+首个独立预发布源码版本为 `3.20.1-yunswitch.1`，上游基线仍为 v3.20.1。安装包验证后会在本仓库发布入口公布，源码准备完成不等于已经发布。详见[预发布说明](docs/releases/3.20.1-yunswitch.1.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
 - [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
@@ -108,7 +108,7 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git
 | `pnpm build`                                      | 构建桌面应用与安装包                |
 | `cargo test --manifest-path src-tauri/Cargo.toml` | Rust 后端测试                       |
 
-开发构建使用 `CC Switch Dev`、`~/.cc-switch-dev` 和默认代理端口 `15722`；正式版本的数据与发布标识将在独立发版时统一规划。详细开发流程见 [贡献指南](CONTRIBUTING.md)。
+`pnpm dev` 使用 `YunSwitch Dev`、`~/.yunswitch-dev`、`yunswitch-dev://` 和默认端口 `15732`；发布构建使用 `YunSwitch`、`~/.yunswitch`、`yunswitch://` 和端口 `15731`。导入的数据库保留原有端口。使用旧数据前请阅读[迁移指南](docs/MIGRATION-YUNSWITCH.md)，开发流程见[贡献指南](CONTRIBUTING.md)。
 
 ## 参与与后续计划
 

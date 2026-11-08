@@ -240,6 +240,17 @@ export const handlers = [
     success(getAppConfigDirOverride()),
   ),
 
+  http.post(`${TAURI_ENDPOINT}/get_runtime_directory_identity`, () =>
+    success({
+      defaultAppConfigDir: "/home/mock/.yunswitch",
+      isolatedConfigRoot: null,
+    }),
+  ),
+
+  http.post(`${TAURI_ENDPOINT}/is_app_updater_configured`, () =>
+    success(false),
+  ),
+
   http.post(
     `${TAURI_ENDPOINT}/apply_claude_plugin_config`,
     async ({ request }) => {

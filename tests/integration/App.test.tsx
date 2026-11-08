@@ -1,7 +1,7 @@
 import { Suspense, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { providersApi } from "@/lib/api/providers";
 import {
@@ -198,6 +198,14 @@ const renderApp = (AppComponent: ComponentType) => {
 };
 
 describe("App integration with MSW", () => {
+  let App: ComponentType;
+
+  beforeAll(async () => {
+    // Load the desktop module graph during suite setup, so the first test's
+    // timeout measures provider interactions rather than module transforms.
+    ({ default: App } = await import("@/App"));
+  });
+
   beforeEach(() => {
     resetProviderState();
     toastSuccessMock.mockReset();
@@ -209,7 +217,6 @@ describe("App integration with MSW", () => {
   });
 
   it("covers basic provider flows via real hooks", async () => {
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     await waitFor(() =>
@@ -266,7 +273,6 @@ describe("App integration with MSW", () => {
   }, 10_000);
 
   it("shows toast when auto sync fails in background", async () => {
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     await waitFor(() =>
@@ -326,7 +332,6 @@ describe("App integration with MSW", () => {
     setCurrentProviderId("openclaw", "deepseek");
     setLiveProviderIds("openclaw", ["deepseek-copy"]);
 
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     fireEvent.click(screen.getByText("switch-openclaw"));
@@ -376,7 +381,6 @@ describe("App integration with MSW", () => {
       ),
     );
 
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     await waitFor(() =>
@@ -417,7 +421,6 @@ describe("App integration with MSW", () => {
       .spyOn(providersApi, "getOpenClawLiveProviderIds")
       .mockRejectedValueOnce(new Error("broken config"));
 
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     fireEvent.click(screen.getByText("switch-openclaw"));
@@ -445,7 +448,6 @@ describe("App integration with MSW", () => {
 
   it("hosts the Skills check-update action in the App toolbar", async () => {
     localStorage.setItem("cc-switch-last-view", "skills");
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     expect(
@@ -462,7 +464,6 @@ describe("App integration with MSW", () => {
 
   it("routes the Skills discover toolbar action through the panel guard", async () => {
     localStorage.setItem("cc-switch-last-view", "skills");
-    const { default: App } = await import("@/App");
     renderApp(App);
 
     expect(
