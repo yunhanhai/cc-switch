@@ -57,6 +57,16 @@ This existing repository screenshot illustrates provider configuration and local
 
 The first independent prerelease, `3.20.1-yunswitch.1`, is available for Windows x64 as an installer and portable ZIP: [GitHub download](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee download](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1). Installation, startup, proxy requests, synthetic data migration and uninstall checks passed. The packages are unsigned and automatic updates are disabled. The upstream baseline remains v3.20.1. See the [prerelease notes](docs/releases/3.20.1-yunswitch.1.md) and [migration guide](docs/MIGRATION-YUNSWITCH.md).
 
+The next source maintenance change removes inherited referral links and commercial partner flags from built-in presets. Default preset sorting puts official entries first, then sorts the rest by display name; compatibility identifiers remain where required. These changes are not included in the published `3.20.1-yunswitch.1` packages. Existing release files remain unchanged.
+
+| Platform      | Verification                                                                                                                                                                                    | Release status                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Windows x64   | [Clean-runner installation checks](https://github.com/yunhanhai/yunswitch/actions/runs/42464519875) for portable ZIP and MSI, including UI startup, mock proxy requests and synthetic migration | Independent prerelease available                       |
+| macOS / Linux | [Source CI](https://github.com/yunhanhai/yunswitch/actions/runs/42464523899): frontend checks, platform backend tests and Clippy                                                                | No independent packages or installation acceptance yet |
+| ARM64         | No independent installation acceptance yet                                                                                                                                                      | No independent packages published                      |
+
+These records cover the prerelease source; maintenance changes are checked in their own PR. Built-in presets are configuration starting points. Real paid-provider connectivity and private-data migration have not been verified across all providers and platforms. See the [validation scope](docs/PROJECT.md#供应商目录维护与验证范围).
+
 - [Gitee repository](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
 - [Version and release plan](docs/PROJECT.md)
@@ -110,7 +120,7 @@ You can also clone `https://github.com/yunhanhai/yunswitch.git`. When using Core
 
 Use [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) or [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues) for questions and suggestions. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting code and [SECURITY.md](SECURITY.md) for security reports.
 
-Planned work includes independent releases and branding, client/provider compatibility checks, and integrations with other projects that clearly record their source and license. See the [maintenance plan](docs/PROJECT.md).
+Planned work includes further independently verified releases, client/provider compatibility checks, and integrations with other projects that clearly record their source and license. See the [maintenance plan](docs/PROJECT.md).
 
 ## Attribution and license
 

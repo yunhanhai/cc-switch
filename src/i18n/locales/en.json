@@ -1717,7 +1717,7 @@
     "searchPlaceholder": "Search name, website, or category...",
     "sortAriaLabel": "Toggle preset sorting",
     "sortNameAscTooltip": "Sort by name A-Z",
-    "sortOriginalTooltip": "Restore original order",
+    "sortOriginalTooltip": "Restore default order",
     "noSearchResults": "No provider presets match your search."
   },
   "usage": {

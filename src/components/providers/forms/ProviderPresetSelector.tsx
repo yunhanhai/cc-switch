@@ -87,31 +87,14 @@ export function sortPresetEntries(
     );
 
   if (sortMode === PresetSortMode.Original) {
-    // 保留继承的目录排序，官方预设优先；合作元数据只用于旧排序兼容，
-    // 不表示这些供应商与 YunSwitch 有商业合作关系，也不展示合作标记。
-    // 排他条件保证同时命中多组的预设只归入最前面的组、不被重复。
+    // 默认官方预设优先，其余按显示名排序；旧合作标记不影响展示顺序。
     const official = entries.filter(
       (entry) => entry.preset.category === "official",
     );
-    const prime = entries.filter(
-      (entry) =>
-        entry.preset.category !== "official" && entry.preset.primePartner,
-    );
-    const partner = entries.filter(
-      (entry) =>
-        entry.preset.category !== "official" &&
-        !entry.preset.primePartner &&
-        entry.preset.isPartner,
-    );
     const rest = entries
-      .filter(
-        (entry) =>
-          entry.preset.category !== "official" &&
-          !entry.preset.primePartner &&
-          !entry.preset.isPartner,
-      )
+      .filter((entry) => entry.preset.category !== "official")
       .sort(byDisplayName);
-    return [...official, ...prime, ...partner, ...rest];
+    return [...official, ...rest];
   }
 
   return [...entries].sort(byDisplayName);
@@ -369,7 +352,7 @@ export function ProviderPresetSelector({
             title={
               sortMode === PresetSortMode.NameAsc
                 ? t("providerPreset.sortOriginalTooltip", {
-                    defaultValue: "Restore original order",
+                    defaultValue: "Restore default order",
                   })
                 : t("providerPreset.sortNameAscTooltip", {
                     defaultValue: "Sort A-Z",

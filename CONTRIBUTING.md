@@ -1,6 +1,6 @@
 # Contributing / 贡献指南
 
-This edition of CC Switch is independently maintained by **yunhanhai**. Please submit issues and contributions to this project's [Gitee repository](https://gitee.com/yunhanhai/yunswitch) or [GitHub repository](https://github.com/yunhanhai/yunswitch). Read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+YunSwitch is independently maintained by **yunhanhai**. Please submit issues and contributions to this project's [Gitee repository](https://gitee.com/yunhanhai/yunswitch) or [GitHub repository](https://github.com/yunhanhai/yunswitch). Read the [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 本版本由 **yunhanhai** 独立维护。请向本项目的 [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)或 [GitHub 仓库](https://github.com/yunhanhai/yunswitch)提交问题与贡献，参与前请阅读[行为准则](CODE_OF_CONDUCT.md)。
 
