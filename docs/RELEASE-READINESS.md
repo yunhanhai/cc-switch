@@ -1,16 +1,16 @@
 # YunSwitch 独立发布准备
 
-当前正在准备 `3.20.1-yunswitch.2` Windows x64 预发布，尚未公开。仓库改名保留原历史，两边默认分支为 `main`。新版本进度见[本次发布记录](releases/3.20.1-yunswitch.2.md)，首个已公开版本见[首版记录](releases/3.20.1-yunswitch.1.md)。
+`3.20.1-yunswitch.2` Windows x64 预发布已在 Gitee、GitHub 公开。仓库改名保留原历史，两边默认分支为 `main`。文件校验与实际验收见[本次发布记录](releases/3.20.1-yunswitch.2.md)，首版记录见[历史发布](releases/3.20.1-yunswitch.1.md)。
 
 ## 本次版本验收
 
 - [x] 目录清理 PR 已合并：内置中性链接、取消商业优先排序，保留 Gemini 认证兼容键与配置模板。
 - [x] 源码版本统一为 `3.20.1-yunswitch.2`，Windows MSI 版本为 `3.20.1.2`，沿用独立 UpgradeCode。
-- [ ] 新版本工作分支 CI 通过，并确认最终构建源码与验收源码一致。
-- [ ] 干净 Windows runner 使用新包完成安装、实际界面、代理模拟请求、重启、合成旧 SQL 导入、卸载与数据保留验收。
-- [ ] 从已公开 `3.20.1-yunswitch.1` MSI 升级，确认版本替换、单实例、协议登记与合成数据保留。
-- [ ] 核对最终 MSI / 便携 ZIP 和 SHA-256，记录验收运行与源码提交。
-- [ ] 合并新版本 PR，创建新标签，在 Gitee、GitHub 上传同一批已验收文件并公开预发布。
+- [x] [新版本源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42835576117)通过，最终构建源码与验收源码的产品文件一致。
+- [x] 干净 Windows runner 使用新包完成安装、实际界面、代理模拟请求、重启、合成旧 SQL 导入、卸载与数据保留验收。
+- [x] 从已公开 `3.20.1-yunswitch.1` MSI 升级，确认版本替换、单实例、协议登记与合成数据保留。
+- [x] 核对最终 MSI / 便携 ZIP 和 SHA-256，记录验收运行与源码提交。
+- [x] 合并 GitHub #11 / Gitee #4，标签 `v3.20.1-yunswitch.2` 指向 `fc24f4de`，两边公开同一批已验收文件。
 
 ## 首版已落实
 

@@ -1,11 +1,11 @@
 # 本仓库更新记录 / Changes in this distribution
 
-## 3.20.1-yunswitch.2 — Windows x64 预发布准备中
+## 3.20.1-yunswitch.2 — Windows x64 预发布（2026-11-10）
 
 - 内置供应商链接移除继承推广归因与邀请路径，取消商业合作标记及合作方优先排序；保留请求配置和 Gemini 认证兼容键。
 - 默认预设列表显示官方项在前，其余按显示名称排序。
 - 四语言 README 补充平台验证范围，区分源码 CI 与实际安装包验收。
-- 源码版本 `3.20.1-yunswitch.2`、MSI 版本 `3.20.1.2`；新的安装、启动及首版升级验收仍在准备。进度见[发布记录](docs/releases/3.20.1-yunswitch.2.md)。
+- 源码版本 `3.20.1-yunswitch.2`、MSI 版本 `3.20.1.2`；安装、启动、从首版升级及数据保留验收通过，已在 Gitee、GitHub 同步公开。验证与校验见[发布记录](docs/releases/3.20.1-yunswitch.2.md)。
 
 首个已公开的 Windows x64 版本 `3.20.1-yunswitch.1` 及其包校验、实际安装验收见[首版记录](docs/releases/3.20.1-yunswitch.1.md)。
 
