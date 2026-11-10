@@ -4,7 +4,10 @@
   "identifier": "io.github.yunhanhai.yunswitch.dev",
   "bundle": {
     "windows": {
-      "wix": { "upgradeCode": "a18d2d5c-630d-4ba6-b8e4-b3b497d09919" }
+      "wix": {
+        "upgradeCode": "a18d2d5c-630d-4ba6-b8e4-b3b497d09919",
+        "fragmentPaths": ["wix/third-party-notices-dev.wxs"]
+      }
     }
   },
   "plugins": {

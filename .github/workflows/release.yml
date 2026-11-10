@@ -635,6 +635,12 @@ jobs:
             New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
             Copy-Item $exePath $portableDir
             Copy-Item -LiteralPath LICENSE -Destination (Join-Path $portableDir 'LICENSE')
+            Copy-Item -LiteralPath THIRD-PARTY-NOTICES.md -Destination $portableDir
+            $portableLicenses = Join-Path $portableDir 'licenses'
+            New-Item -ItemType Directory -Path $portableLicenses | Out-Null
+            foreach ($licenseName in @('CodexBar-MIT.txt', 'LobeHub-Icons-MIT.txt')) {
+              Copy-Item -LiteralPath (Join-Path 'licenses' $licenseName) -Destination $portableLicenses
+            }
             @(
               "YunSwitch $VERSION - Windows $env:WINDOWS_RELEASE_ARCH",
               'Run cc-switch.exe to start YunSwitch. No installer is required.',
@@ -645,7 +651,7 @@ jobs:
               'Automatic updates are disabled. Close YunSwitch and replace this package to upgrade manually.',
               'This prerelease is unsigned. SHA-256 checksums verify file integrity, not publisher identity.',
               'Project: https://github.com/yunhanhai/yunswitch',
-              'MIT attribution and license terms are included in LICENSE.'
+              'Attribution and license terms are included in LICENSE, THIRD-PARTY-NOTICES.md and licenses/.'
             ) | Set-Content -LiteralPath (Join-Path $portableDir 'README.txt') -Encoding utf8
             $portableIniPath = Join-Path $portableDir 'portable.ini'
             $portableContent = if ($isArm64) {
@@ -737,13 +743,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $acceptanceArgs = @()
+          $acceptanceArgs = @('--require-third-party-notices', 'true')
           if ($version -ne '3.20.1-yunswitch.1') {
             $previousMsi = Join-Path $env:RUNNER_TEMP 'YunSwitch-v3.20.1-yunswitch.1-Windows.msi'
             Invoke-WebRequest -Uri 'https://github.com/yunhanhai/yunswitch/releases/download/v3.20.1-yunswitch.1/YunSwitch-v3.20.1-yunswitch.1-Windows.msi' -OutFile $previousMsi
             $previousHash = (Get-FileHash -LiteralPath $previousMsi -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'Previous released MSI checksum mismatch' }
-            $acceptanceArgs = @('--previous-msi', $previousMsi, '--previous-version', '3.20.1-yunswitch.1', '--previous-msi-sha256', $previousHash)
+            $acceptanceArgs += @('--previous-msi', $previousMsi, '--previous-version', '3.20.1-yunswitch.1', '--previous-msi-sha256', $previousHash)
           }
           node scripts/windows-release-smoke.mjs `
             --msi "release-assets/YunSwitch-$env:RELEASE_TAG-Windows.msi" `

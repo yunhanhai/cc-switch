@@ -675,6 +675,12 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
   );
   assert.match(upgradeLicense, /Jason Young/);
   assert.match(upgradeLicense, /yunhanhai/);
+  if (args["require-third-party-notices"] === "true") {
+    await verifyThirdPartyNotices(
+      join(process.env.LOCALAPPDATA, "Programs", "YunSwitch"),
+      "upgraded MSI",
+    );
+  }
   await verifySingleInstance(installedExe);
   await cdp.screenshot("installed-after-upgrade.png");
   await exitApp();
@@ -691,6 +697,21 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
       providerIds: Object.keys(providersBefore).sort(),
     },
   );
+}
+
+async function verifyThirdPartyNotices(packageRoot, label) {
+  const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+  for (const path of [
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "licenses/CodexBar-MIT.txt",
+    "licenses/LobeHub-Icons-MIT.txt",
+  ]) {
+    const expected = await readFile(join(repoRoot, path));
+    const actual = await readFile(join(packageRoot, path));
+    assert.deepEqual(actual, expected, `${label}: bundled ${path} differs`);
+  }
+  check(`${label} includes exact third-party notices and license copies`);
 }
 
 async function main() {
@@ -786,6 +807,9 @@ async function main() {
     /\.yunswitch/,
   );
   check("portable ZIP contains binary, marker, license and data instructions");
+  if (args["require-third-party-notices"] === "true") {
+    await verifyThirdPartyNotices(portableRoot, "portable ZIP");
+  }
   let cdp = await launch(portableExe, "portable-first-run");
   await verifyIdentity(cdp, true);
   await until(
@@ -865,6 +889,9 @@ async function main() {
     "False",
   );
   check("MSI registers its independent protocol, shortcut and license");
+  if (args["require-third-party-notices"] === "true") {
+    await verifyThirdPartyNotices(installedRoot, "installed MSI");
+  }
   cdp = await launch(installedExe, "installed");
   await verifyIdentity(cdp, false);
   await verifySingleInstance(installedExe);

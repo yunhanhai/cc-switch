@@ -1,0 +1,39 @@
+<?if $(sys.BUILDARCH)="x86"?>
+  <?define NoticeWin64 = "no" ?>
+<?else?>
+  <?define NoticeWin64 = "yes" ?>
+<?endif?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <!-- Fixed production GUIDs keep per-user file components stable across upgrades. -->
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="PlainLicense" Guid="BAF1780B-E54E-44BA-BF9B-585FFBD61AAD" Win64="$(var.NoticeWin64)">
+        <File Id="PlainLicenseFile" Name="LICENSE" Source="$(sys.SOURCEFILEDIR)..\..\LICENSE" KeyPath="no" />
+        <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="RootLicense" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Component Id="ThirdPartyNotice" Guid="834F8D7E-1513-4A3B-8449-06BA3479DCC7" Win64="$(var.NoticeWin64)">
+        <File Id="ThirdPartyNoticeFile" Name="THIRD-PARTY-NOTICES.md" Source="$(sys.SOURCEFILEDIR)..\..\THIRD-PARTY-NOTICES.md" KeyPath="no" />
+        <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="Notice" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+      <Directory Id="ThirdPartyLicenseDirectory" Name="licenses">
+        <Component Id="CodexBarLicense" Guid="123A8FCA-541F-462F-A1CB-966F8EBEF78E" Win64="$(var.NoticeWin64)">
+          <File Id="CodexBarLicenseFile" Name="CodexBar-MIT.txt" Source="$(sys.SOURCEFILEDIR)..\..\licenses\CodexBar-MIT.txt" KeyPath="no" />
+          <RemoveFolder Id="RemoveThirdPartyLicenseDirectory" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="CodexBar" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+        <Component Id="LobeHubLicense" Guid="F885AFD9-E077-4519-B516-0F54898BA27D" Win64="$(var.NoticeWin64)">
+          <File Id="LobeHubLicenseFile" Name="LobeHub-Icons-MIT.txt" Source="$(sys.SOURCEFILEDIR)..\..\licenses\LobeHub-Icons-MIT.txt" KeyPath="no" />
+          <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="LobeHub" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </DirectoryRef>
+  </Fragment>
+  <Fragment>
+    <ComponentGroup Id="ThirdPartyNotices">
+      <ComponentRef Id="PlainLicense" />
+      <ComponentRef Id="ThirdPartyNotice" />
+      <ComponentRef Id="CodexBarLicense" />
+      <ComponentRef Id="LobeHubLicense" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>
