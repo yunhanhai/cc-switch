@@ -30,6 +30,8 @@
 
 这一阶段是连续的二次开发历史。继承功能与本仓库增强的区别见 [中文 README](../README_ZH.md)，具体提交见 [历史开发记录](RELEASE-NOTES-P1-P6.md)。例如 Responses 与 Anthropic 的协议桥接核心来自上游，本仓库在其基础上补充供应商转换、模型搬运、守卫和整链测试。
 
+按已有代码注释和 Git 历史核查的第三方来源，以及后续引入代码、资源的记录格式，见[来源台账](PROVENANCE.md)。当前台账覆盖已确认的主要来源，依赖和全部图标资源仍需分别核查。
+
 ## 当前版本与发布状态
 
 当前源码版本为 `3.20.1-yunswitch.2`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与免安装版已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 同步公开，安装与首版升级验收通过。文件校验与运行记录见[本次发布记录](releases/3.20.1-yunswitch.2.md)。
@@ -81,6 +83,8 @@ upstream  https://github.com/farion1231/cc-switch.git
 从 `main` 创建 `feat/*`、`fix/*`、`docs/*` 或 `chore/*` 工作分支。上游更新先在单独分支评估，选择需要的提交并记录来源；保留本仓库修改与测试，再合并到自己的稳定线。向 Gitee 和 GitHub 推送前先 fetch 核对，避免覆盖任一平台上的独有提交。
 
 独立发版准备清单见 [发布准备](RELEASE-READINESS.md)。
+
+新增供应商时按[供应商目录维护指南](PROVIDER-CATALOG.md)记录客户端、请求协议、模型和实际验证结果；引入其他项目的实现时更新[来源台账](PROVENANCE.md)。贡献与审阅说明见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 后续调整
 
