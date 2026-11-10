@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.2)"
+        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.3)"
         required: false
         type: string
       source_ref:
@@ -26,6 +26,11 @@ on:
         description: "Exact source SHA of packages when recheck_run_id is set"
         required: false
         type: string
+      previous_tag:
+        description: "Previous public release to test upgrading; defaults to v3.20.1-yunswitch.2"
+        required: false
+        type: string
+        default: v3.20.1-yunswitch.2
       scope:
         description: "Packages to build; all platforms require separate installation acceptance"
         required: true
@@ -60,6 +65,7 @@ jobs:
       build_run_id: ${{ inputs.recheck_run_id }}
       package_source_sha: ${{ inputs.package_source_sha }}
       source_ref: ${{ inputs.source_ref || github.sha }}
+      previous_tag: ${{ inputs.previous_tag }}
   release:
     if: inputs.recheck_run_id == ''
     runs-on: ${{ matrix.os }}
@@ -740,16 +746,25 @@ jobs:
         if: runner.os == 'Windows' && matrix.arch != 'arm64'
         shell: pwsh
         timeout-minutes: 16
+        env:
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $acceptanceArgs = @('--require-third-party-notices', 'true')
-          if ($version -ne '3.20.1-yunswitch.1') {
-            $previousMsi = Join-Path $env:RUNNER_TEMP 'YunSwitch-v3.20.1-yunswitch.1-Windows.msi'
-            Invoke-WebRequest -Uri 'https://github.com/yunhanhai/yunswitch/releases/download/v3.20.1-yunswitch.1/YunSwitch-v3.20.1-yunswitch.1-Windows.msi' -OutFile $previousMsi
+          $previousTag = if ($env:PREVIOUS_TAG) { $env:PREVIOUS_TAG } else { 'v3.20.1-yunswitch.2' }
+          if ($previousTag -notmatch '^v\d+\.\d+\.\d+-yunswitch\.\d+$' -or $previousTag -eq "v$version") { throw 'Previous public tag must differ from the new source version' }
+          if ($previousTag) {
+            $previousName = "YunSwitch-$previousTag-Windows.msi"
+            $previousMsi = Join-Path $env:RUNNER_TEMP $previousName
+            $previousUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$previousTag/$previousName"
+            Invoke-WebRequest -Uri $previousUrl -OutFile $previousMsi
+            Invoke-WebRequest -Uri "$previousUrl.sha256" -OutFile "$previousMsi.sha256"
+            $publishedChecksum = (Get-Content -LiteralPath "$previousMsi.sha256" -Raw).Trim()
             $previousHash = (Get-FileHash -LiteralPath $previousMsi -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'Previous released MSI checksum mismatch' }
-            $acceptanceArgs += @('--previous-msi', $previousMsi, '--previous-version', '3.20.1-yunswitch.1', '--previous-msi-sha256', $previousHash)
+            if ($publishedChecksum -ne "$previousHash  $previousName") { throw 'Previous MSI checksum differs from its published sidecar' }
+            if ($previousTag -eq 'v3.20.1-yunswitch.2' -and $previousHash -ne '2b0e1e88febe1c3f07862a381e1aefa21b90f9db547ef4995ed3aa345e951930') { throw 'Previous MSI differs from the accepted second prerelease' }
+            $acceptanceArgs += @('--previous-msi', $previousMsi, '--previous-version', $previousTag.Substring(1), '--previous-msi-sha256', $previousHash)
           }
           node scripts/windows-release-smoke.mjs `
             --msi "release-assets/YunSwitch-$env:RELEASE_TAG-Windows.msi" `

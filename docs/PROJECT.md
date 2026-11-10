@@ -36,7 +36,9 @@
 
 ## 当前版本与发布状态
 
-当前源码版本为 `3.20.1-yunswitch.2`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与免安装版已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 同步公开，安装与首版升级验收通过。文件校验与运行记录见[本次发布记录](releases/3.20.1-yunswitch.2.md)。
+当前源码版本为 `3.20.1-yunswitch.3`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致，正在准备包含第三方通知和已核实许可副本的 Windows x64 包。新包的安装、从 `.2` 升级及卸载验收尚待完成，进度见[`.3` 准备记录](releases/3.20.1-yunswitch.3.md)。
+
+已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
 首个独立预发布 `3.20.1-yunswitch.1` 的 Windows x64 安装版与免安装版已在 Gitee、GitHub 同步公开，其他平台尚未发布。上游基线仍为 v3.20.1。已公开包的校验与验收记录见[首版记录](releases/3.20.1-yunswitch.1.md)。
 
@@ -50,7 +52,7 @@
 
 开发命令通过 `tauri.dev.conf.json` 覆盖身份，Cargo debug profile 使用隔离布局；发布构建使用正式布局。运行时按布局设置窗口标题。显式应用设置可以覆盖 CLI 目录；开发布局默认优先于 Hermes、OpenCode 和 Pi 的环境变量目录。测试沙盒保留旧夹具布局，仅用于兼容现有测试。
 
-Windows MSI 沿用固定独立 UpgradeCode，新包安装显示版本为 `3.20.1.2`，上一版为 `3.20.1.1`；应用显示与 Git 标签使用完整预发布版本。从上一版安装升级的数据保留与版本替换已在干净 runner 通过验收。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
+Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1.3`，已公开 `.2` 安装版本为 `3.20.1.2`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2` 升级已通过验收，`.2`→`.3` 仍须使用新包验证。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
 
 自动更新关闭、更新地址为空，上游签名公钥已移除。更新按钮打开本项目的 Releases 页面；后续配置本项目签名后再启用自动更新。R2 镜像默认停用，仅通过本项目显式配置启用。
 
