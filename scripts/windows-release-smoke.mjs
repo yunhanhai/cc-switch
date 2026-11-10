@@ -714,6 +714,23 @@ async function verifyThirdPartyNotices(packageRoot, label) {
   check(`${label} includes exact third-party notices and license copies`);
 }
 
+async function verifyNoticeUninstall(packageRoot, label) {
+  if (args["require-third-party-notices"] !== "true") return;
+  for (const path of ["LICENSE", "THIRD-PARTY-NOTICES.md", "licenses"]) {
+    assert.ok(
+      !(await exists(join(packageRoot, path))),
+      `${label}: ${path} remains`,
+    );
+  }
+  assert.equal(
+    await powershell(
+      String.raw`[bool](Test-Path 'HKCU:\Software\yunhanhai\YunSwitch\ThirdPartyNotices')`,
+    ),
+    "False",
+  );
+  check(`${label} removes third-party notices, license directory and registry`);
+}
+
 async function main() {
   await freshRunnerGuard();
   assert.ok(
@@ -900,6 +917,7 @@ async function main() {
   await exitApp();
   await installOrUninstall("/x");
   installed = false;
+  await verifyNoticeUninstall(installedRoot, "first uninstall");
   if (previous) {
     await verifyUpgrade(
       previous,
@@ -909,6 +927,7 @@ async function main() {
     );
     await installOrUninstall("/x", msi, "upgraded-version-uninstall");
     installed = false;
+    await verifyNoticeUninstall(installedRoot, "upgraded uninstall");
   }
   assert.ok(!(await exists(installedExe)));
   assert.equal(
