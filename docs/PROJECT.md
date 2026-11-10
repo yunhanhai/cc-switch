@@ -32,6 +32,8 @@
 
 按已有代码注释和 Git 历史核查的第三方来源，以及后续引入代码、资源的记录格式，见[来源台账](PROVENANCE.md)。当前台账覆盖已确认的主要来源，依赖和全部图标资源仍需分别核查。
 
+已确认的 CodexBar 与 LobeHub 许可副本见[第三方通知](../THIRD-PARTY-NOTICES.md)，图标匹配范围见[图标来源记录](ICON-SOURCES.md)。后续包的通知配置与本次验证见[许可分发](THIRD-PARTY-PACKAGING.md)；既有发布包保留其历史内容，新增源码文件不等同于旧包已更新。
+
 ## 当前版本与发布状态
 
 当前源码版本为 `3.20.1-yunswitch.2`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与免安装版已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 同步公开，安装与首版升级验收通过。文件校验与运行记录见[本次发布记录](releases/3.20.1-yunswitch.2.md)。

@@ -79,8 +79,8 @@ jobs:
           if ($packages.Count -ne 1) { throw 'Expected one unexpired Windows x64 package artifact' }
           git cat-file -e "$env:PACKAGE_SOURCE_SHA^{commit}"
           if ($LASTEXITCODE -ne 0) { throw 'Package source commit is unavailable' }
-          git diff --exit-code $env:PACKAGE_SOURCE_SHA HEAD -- src src-tauri package.json pnpm-lock.yaml index.html
-          if ($LASTEXITCODE -ne 0) { throw 'Product sources differ from those used to build the packages' }
+          git diff --exit-code $env:PACKAGE_SOURCE_SHA HEAD -- src src-tauri package.json pnpm-lock.yaml index.html LICENSE THIRD-PARTY-NOTICES.md licenses
+          if ($LASTEXITCODE -ne 0) { throw 'Product or bundled license sources differ from those used to build the packages' }
           $provenance = @{
             packageBuildRun = $env:BUILD_RUN_ID
             packageSourceSha = $env:PACKAGE_SOURCE_SHA
@@ -115,6 +115,9 @@ jobs:
             '--zip', "release-assets/YunSwitch-v$version-Windows-Portable.zip",
             '--output', "$env:RUNNER_TEMP/yunswitch-smoke"
           )
+          if (Test-Path -LiteralPath THIRD-PARTY-NOTICES.md) {
+            $smokeArgs += @('--require-third-party-notices', 'true')
+          }
           if ($env:PREVIOUS_TAG) {
             if ($env:PREVIOUS_TAG -notmatch '^v\d+\.\d+\.\d+-yunswitch\.\d+$') { throw 'Use an independent previous YunSwitch tag' }
             if ($env:PREVIOUS_TAG -eq "v$version") { throw 'Previous release must differ from the packages under acceptance' }
