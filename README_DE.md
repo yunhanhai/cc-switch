@@ -41,6 +41,16 @@ Die erste eigenständige Vorabversion `3.20.1-yunswitch.1` ist für Windows x64 
 Siehe [Vorabversionsnotizen](docs/releases/3.20.1-yunswitch.1.md) und [Migrationsanleitung](docs/MIGRATION-YUNSWITCH.md). Die Entwicklungsversion verwendet `~/.yunswitch-dev`, die Veröffentlichungsversion `~/.yunswitch`.
 Installationspakete und Paketmanager-Befehle des Ursprungsprojekts liefern nicht die Erweiterungen dieses Repositorys.
 
+Die nächste Quellcodepflege entfernt übernommene Empfehlungslinks und kommerzielle Partnerkennzeichnungen aus den eingebauten Vorlagen. Die Standardsortierung zeigt offizielle Vorlagen zuerst und ordnet die übrigen nach Anzeigename. Erforderliche Kennungen für Anbieter und Kompatibilität bleiben erhalten. Diese Änderungen sind noch nicht in den veröffentlichten Paketen `3.20.1-yunswitch.1` enthalten; bestehende Veröffentlichungsdateien bleiben unverändert.
+
+| Plattform     | Prüfung                                                                                                                                                                                                                                | Veröffentlichungsstand                                     |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Windows x64   | [Installationsprüfung auf einem frischen Runner](https://github.com/yunhanhai/yunswitch/actions/runs/42464519875): portable ZIP und MSI, einschließlich Oberflächenstart, simulierter Proxy-Anfragen und Migration synthetischer Daten | Eigenständige Vorabversion verfügbar                       |
+| macOS / Linux | [Quellcode-CI](https://github.com/yunhanhai/yunswitch/actions/runs/42464523899): Frontend-Prüfungen, plattformspezifische Backend-Tests und Clippy                                                                                     | Noch keine eigenständigen Pakete oder Installationsabnahme |
+| ARM64         | Noch keine eigenständige Installationsabnahme                                                                                                                                                                                          | Keine eigenständigen Pakete veröffentlicht                 |
+
+Diese Nachweise betreffen den Quellcode der Vorabversion; Wartungsänderungen werden im jeweiligen PR geprüft. Vorlagen dienen als Ausgangspunkt für die Konfiguration. Echte Verbindungen zu allen kostenpflichtigen Anbietern und Migrationen privater Daten wurden nicht umfassend geprüft. Siehe [Prüfumfang](docs/PROJECT.md#供应商目录维护与验证范围).
+
 ## Entwicklung aus dem Quellcode
 
 Benötigt werden Node.js, pnpm, Rust und die Tauri-Entwicklungsumgebung für das jeweilige Betriebssystem.
