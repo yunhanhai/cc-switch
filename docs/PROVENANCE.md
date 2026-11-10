@@ -21,7 +21,7 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 ### 图标与第三方通知
 
-图标来源核查见 [ICON-SOURCES.md](ICON-SOURCES.md)：49 个独立 SVG 与历史固定包 `@lobehub/icons-static-svg@1.73.0` 逐字节一致，对应 LobeHub MIT 许可原文保存于 [LobeHub-Icons-MIT.txt](../licenses/LobeHub-Icons-MIT.txt)。未匹配的 SVG、位图和自定义内联资源继续逐项追溯，不能用该子集结论覆盖全部图标。
+图标来源核查见 [ICON-SOURCES.md](ICON-SOURCES.md)：49 个独立 SVG 与历史固定包 `@lobehub/icons-static-svg@1.73.0` 逐字节一致，对应 LobeHub MIT 许可原文保存于 [LobeHub-Icons-MIT.txt](../licenses/LobeHub-Icons-MIT.txt)。运行时[内联 SVG](ICON-INLINE-DETAILS.md)、[其余独立 SVG](ICON-SVG-DETAILS.md)及[位图与平台图标](ICON-BITMAP-DETAILS.md)分别记录来源与处理证据；不能用任一匹配子集覆盖全部图标。
 
 已确认来源的汇总见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。已核实副本与通知随 `.3` Windows 包公开分发，实际检查见[`.3` 发布记录](releases/3.20.1-yunswitch.3.md)。其他资源和平台的许可范围仍按逐项记录核查。
 
