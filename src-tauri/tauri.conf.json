@@ -40,7 +40,11 @@
     "publisher": "yunhanhai",
     "license": "MIT",
     "licenseFile": "../LICENSE",
-    "resources": { "../LICENSE": "LICENSE" },
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
+      "../licenses/": "licenses/"
+    },
     "homepage": "https://github.com/yunhanhai/yunswitch",
     "shortDescription": "AI coding tool configuration and routing manager",
     "icon": [
@@ -54,7 +58,9 @@
       "wix": {
         "template": "wix/per-user-main.wxs",
         "version": "3.20.1.2",
-        "upgradeCode": "30b9d4b3-1c8e-4653-aacc-2fec007d1122"
+        "upgradeCode": "30b9d4b3-1c8e-4653-aacc-2fec007d1122",
+        "fragmentPaths": ["wix/third-party-notices.wxs"],
+        "componentGroupRefs": ["ThirdPartyNotices"]
       }
     },
     "macOS": {
