@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.1)"
+        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.2)"
         required: false
         type: string
       source_ref:
@@ -219,6 +219,11 @@ jobs:
           const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1];
           if ([pkg.version, tauri.version, cargo].some(value => value !== version)) {
             throw new Error('Release tag must match package.json, Cargo.toml and tauri.conf.json versions');
+          }
+          const lock = readFileSync('src-tauri/Cargo.lock', 'utf8').match(/\[\[package\]\]\r?\nname = "cc-switch"\r?\nversion = "([^"]+)"/)?.[1];
+          const parts = version.match(/^(\d+\.\d+\.\d+)-yunswitch\.(\d+)$/);
+          if (lock !== version || tauri.bundle.windows.wix.version !== `${parts[1]}.${parts[2]}`) {
+            throw new Error('Cargo.lock and MSI versions must match the prerelease version');
           }
           const signedUpdater = process.env.SIGNED_UPDATER_ENABLED === 'true';
           if (signedUpdater && !process.env.UPDATER_PUBLIC_KEY?.trim()) {
@@ -728,13 +733,22 @@ jobs:
       - name: Accept Windows x64 production packages on a clean runner
         if: runner.os == 'Windows' && matrix.arch != 'arm64'
         shell: pwsh
-        timeout-minutes: 12
+        timeout-minutes: 16
         run: |
           $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $acceptanceArgs = @()
+          if ($version -ne '3.20.1-yunswitch.1') {
+            $previousMsi = Join-Path $env:RUNNER_TEMP 'YunSwitch-v3.20.1-yunswitch.1-Windows.msi'
+            Invoke-WebRequest -Uri 'https://github.com/yunhanhai/yunswitch/releases/download/v3.20.1-yunswitch.1/YunSwitch-v3.20.1-yunswitch.1-Windows.msi' -OutFile $previousMsi
+            $previousHash = (Get-FileHash -LiteralPath $previousMsi -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'Previous released MSI checksum mismatch' }
+            $acceptanceArgs = @('--previous-msi', $previousMsi, '--previous-version', '3.20.1-yunswitch.1', '--previous-msi-sha256', $previousHash)
+          }
           node scripts/windows-release-smoke.mjs `
             --msi "release-assets/YunSwitch-$env:RELEASE_TAG-Windows.msi" `
             --zip "release-assets/YunSwitch-$env:RELEASE_TAG-Windows-Portable.zip" `
-            --output "$env:RUNNER_TEMP/yunswitch-smoke"
+            --output "$env:RUNNER_TEMP/yunswitch-smoke" @acceptanceArgs
           if ($LASTEXITCODE -ne 0) { throw 'Windows package acceptance failed' }
 
       - name: Upload Windows installation acceptance evidence

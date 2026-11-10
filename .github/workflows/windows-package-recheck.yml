@@ -12,20 +12,25 @@ on:
       source_ref:
         required: false
         type: string
+      previous_tag:
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       build_run_id:
         description: "Same-repository run containing built-packages-Windows-X64"
         required: true
         type: string
-        default: "42462475121"
       package_source_sha:
         description: "Exact source SHA used to build those packages"
         required: true
         type: string
-        default: "d7a6a450029ffe32d87aa3b896f4f749fe266da3"
       source_ref:
         description: "Ref containing the acceptance script; leave empty to use the dispatch ref"
+        required: false
+        type: string
+      previous_tag:
+        description: "Previous public YunSwitch tag for MSI upgrade acceptance; defaults to the first prerelease for newer packages"
         required: false
         type: string
 
@@ -95,13 +100,39 @@ jobs:
 
       - name: Accept the unchanged Windows x64 packages
         shell: pwsh
-        timeout-minutes: 12
+        timeout-minutes: 16
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          node scripts/windows-release-smoke.mjs `
-            --msi "release-assets/YunSwitch-v3.20.1-yunswitch.1-Windows.msi" `
-            --zip "release-assets/YunSwitch-v3.20.1-yunswitch.1-Windows-Portable.zip" `
-            --output "$env:RUNNER_TEMP/yunswitch-smoke"
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+-yunswitch\.\d+$') { throw 'Use an independent YunSwitch source version' }
+          if (-not $env:PREVIOUS_TAG -and $version -ne '3.20.1-yunswitch.1') { $env:PREVIOUS_TAG = 'v3.20.1-yunswitch.1' }
+          $smokeArgs = @(
+            'scripts/windows-release-smoke.mjs',
+            '--msi', "release-assets/YunSwitch-v$version-Windows.msi",
+            '--zip', "release-assets/YunSwitch-v$version-Windows-Portable.zip",
+            '--output', "$env:RUNNER_TEMP/yunswitch-smoke"
+          )
+          if ($env:PREVIOUS_TAG) {
+            if ($env:PREVIOUS_TAG -notmatch '^v\d+\.\d+\.\d+-yunswitch\.\d+$') { throw 'Use an independent previous YunSwitch tag' }
+            if ($env:PREVIOUS_TAG -eq "v$version") { throw 'Previous release must differ from the packages under acceptance' }
+            $previousRelease = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:PREVIOUS_TAG" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $previousRelease.draft) { throw 'Previous release must be public' }
+            $previousDir = Join-Path $env:RUNNER_TEMP 'yunswitch-previous-release'
+            New-Item -ItemType Directory -Path $previousDir | Out-Null
+            $previousName = "YunSwitch-$env:PREVIOUS_TAG-Windows.msi"
+            gh release download $env:PREVIOUS_TAG --repo $env:GITHUB_REPOSITORY --pattern $previousName --pattern "$previousName.sha256" --dir $previousDir
+            if ($LASTEXITCODE -ne 0) { throw 'Previous published MSI download failed' }
+            $previousPath = Join-Path $previousDir $previousName
+            $checksum = (Get-Content -LiteralPath "$previousPath.sha256" -Raw).Trim()
+            $previousHash = (Get-FileHash -LiteralPath $previousPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($checksum -ne "$previousHash  $previousName") { throw 'Previous MSI checksum does not match its published sidecar' }
+            if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.1' -and $previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'First prerelease MSI differs from the recorded accepted package' }
+            $smokeArgs += @('--previous-msi', $previousPath, '--previous-msi-sha256', $previousHash, '--previous-version', $env:PREVIOUS_TAG.Substring(1))
+          }
+          node @smokeArgs
           if ($LASTEXITCODE -ne 0) { throw 'Windows package acceptance failed' }
 
       - name: Preserve package provenance with acceptance evidence

@@ -38,6 +38,7 @@ let installed = false;
 let currentApp;
 let mock;
 let msi;
+let expectedVersion;
 
 async function powershell(code) {
   const encoded = Buffer.from(
@@ -344,13 +345,13 @@ async function exitApp() {
   check(`${app.label} exits normally`);
 }
 
-async function verifyIdentity(cdp, portable) {
+async function verifyIdentity(cdp, portable, version = expectedVersion) {
   assert.equal(await cdp.invoke("plugin:app|name"), "YunSwitch");
   assert.equal(
     await cdp.invoke("plugin:app|identifier"),
     "io.github.yunhanhai.yunswitch",
   );
-  assert.equal(await cdp.invoke("plugin:app|version"), "3.20.1-yunswitch.1");
+  assert.equal(await cdp.invoke("plugin:app|version"), version);
   assert.equal(await cdp.invoke("is_portable_mode"), portable);
   const identity = await cdp.invoke("get_runtime_directory_identity");
   assert.equal(
@@ -515,15 +516,18 @@ async function exerciseMigration(cdp) {
   });
 }
 
-async function installOrUninstall(action) {
-  const log = join(output, action === "/i" ? "install.log" : "uninstall.log");
+async function installOrUninstall(action, packagePath = msi, label) {
+  const log = join(
+    output,
+    `${label || (action === "/i" ? "install" : "uninstall")}.log`,
+  );
   // Do not pass AUTOLAUNCHAPP: both "0" and an empty trailing assignment
   // can be interpreted as a present property and launch an extra instance.
   const result = await execFileAsync(
     "msiexec.exe",
     [
       action,
-      msi,
+      packagePath,
       "/qn",
       "/norestart",
       "/l*v",
@@ -546,6 +550,149 @@ async function installOrUninstall(action) {
   );
 }
 
+async function readMsiProperties(packagePath) {
+  return JSON.parse(
+    await powershell(`
+      $installer = New-Object -ComObject WindowsInstaller.Installer
+      $database = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @(${psQuote(packagePath)}, 0))
+      $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, @('SELECT Property, Value FROM Property'))
+      $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+      $properties = @{}
+      while ($record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)) {
+        $key = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, @(1))
+        if ($key -in @('ProductCode', 'ProductVersion', 'UpgradeCode', 'ProductName', 'Manufacturer')) {
+          $properties[$key] = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, @(2))
+        }
+      }
+      $properties | ConvertTo-Json -Compress
+    `),
+  );
+}
+
+async function productState(productCode) {
+  return Number(
+    await powershell(`
+      $installer = New-Object -ComObject WindowsInstaller.Installer
+      $installer.GetType().InvokeMember('ProductState', 'GetProperty', $null, $installer, @(${psQuote(productCode)}))
+    `),
+  );
+}
+
+async function verifyUpgrade(previous, current, installedExe, portableExe) {
+  installed = true;
+  const currentMsi = msi;
+  // Cleanup must uninstall the version currently installed if a later step fails.
+  msi = previous.path;
+  await installOrUninstall("/i", previous.path, "previous-version-install");
+  assert.equal(await productState(previous.properties.ProductCode), 5);
+  let cdp = await launch(installedExe, "installed-previous-version");
+  await verifyIdentity(cdp, false, previous.version);
+  assert.equal(
+    (await cdp.invoke("get_providers", { app: "claude" }))["legacy-ci"].name,
+    "Synthetic legacy provider",
+  );
+  const marker = {
+    id: "upgrade-ci",
+    name: "Synthetic provider created by previous YunSwitch version",
+    category: "custom",
+    settingsConfig: {
+      env: {
+        ANTHROPIC_AUTH_TOKEN: "fake-upgrade-key",
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:1",
+      },
+    },
+  };
+  assert.equal(
+    await cdp.invoke("add_provider", {
+      app: "claude",
+      provider: marker,
+      addToLive: false,
+    }),
+    true,
+  );
+  const providersBefore = await cdp.invoke("get_providers", { app: "claude" });
+  const settingsBefore = await cdp.invoke("get_settings");
+  await cdp.screenshot("installed-previous-version.png");
+  await exitApp();
+  const databasePath = join(
+    process.env.USERPROFILE,
+    ".yunswitch",
+    "cc-switch.db",
+  );
+  const databaseBefore = await sha256(databasePath);
+  msi = currentMsi;
+  await installOrUninstall("/i", currentMsi, "upgrade-install");
+  assert.equal(
+    await sha256(databasePath),
+    databaseBefore,
+    "MSI upgrade must not modify the application database",
+  );
+  assert.equal(await productState(previous.properties.ProductCode), -1);
+  assert.equal(await productState(current.ProductCode), 5);
+  assert.equal(await sha256(installedExe), await sha256(portableExe));
+  const upgradeLogBytes = await readFile(join(output, "upgrade-install.log"));
+  const upgradeLog = upgradeLogBytes.toString(
+    upgradeLogBytes[0] === 0xff && upgradeLogBytes[1] === 0xfe
+      ? "utf16le"
+      : "utf8",
+  );
+  assert.ok(
+    upgradeLog.includes(previous.properties.ProductCode),
+    "Upgrade log must reference the replaced MSI product",
+  );
+  assert.match(upgradeLog, /RemoveExistingProducts/);
+  cdp = await launch(installedExe, "installed-after-upgrade");
+  await verifyIdentity(cdp, false);
+  assert.deepEqual(
+    await cdp.invoke("get_providers", { app: "claude" }),
+    providersBefore,
+    "MSI upgrade must retain providers created by the previous version",
+  );
+  assert.deepEqual(await cdp.invoke("get_settings"), settingsBefore);
+  const command = await powershell(
+    String.raw`(Get-Item 'HKCU:\Software\Classes\yunswitch\shell\open\command').GetValue('')`,
+  );
+  const registeredExe = command.match(/^"([^"]+)"\s+"%1"$/)?.[1];
+  assert.ok(registeredExe);
+  assert.equal(await sha256(registeredExe), await sha256(installedExe));
+  assert.ok(
+    await exists(
+      join(
+        process.env.APPDATA,
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+        "YunSwitch",
+        "YunSwitch.lnk",
+      ),
+    ),
+    "Upgrade must retain the YunSwitch Start Menu shortcut",
+  );
+  const upgradeLicense = await readFile(
+    join(process.env.LOCALAPPDATA, "Programs", "YunSwitch", "LICENSE.rtf"),
+    "utf8",
+  );
+  assert.match(upgradeLicense, /Jason Young/);
+  assert.match(upgradeLicense, /yunhanhai/);
+  await verifySingleInstance(installedExe);
+  await cdp.screenshot("installed-after-upgrade.png");
+  await exitApp();
+  check(
+    "previous prerelease upgrades to current MSI and retains synthetic data",
+    {
+      previousVersion: previous.version,
+      currentVersion: expectedVersion,
+      previousProductCode: previous.properties.ProductCode,
+      currentProductCode: current.ProductCode,
+      previousProductRemoved: true,
+      databaseUnchangedDuringInstall: true,
+      databaseBeforeUpgradeSha256: databaseBefore,
+      providerIds: Object.keys(providersBefore).sort(),
+    },
+  );
+}
+
 async function main() {
   await freshRunnerGuard();
   assert.ok(
@@ -564,10 +711,66 @@ async function main() {
   );
   assert.ok(!(await exists(output)), "Evidence directory must be new");
   await mkdir(output, { recursive: true });
+  const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+  const pkg = JSON.parse(
+    await readFile(join(repoRoot, "package.json"), "utf8"),
+  );
+  const tauri = JSON.parse(
+    await readFile(join(repoRoot, "src-tauri/tauri.conf.json"), "utf8"),
+  );
+  expectedVersion = pkg.version;
+  assert.match(expectedVersion, /^\d+\.\d+\.\d+-yunswitch\.\d+$/);
+  assert.equal(tauri.version, expectedVersion);
+  const currentMsiProperties = await readMsiProperties(msi);
+  assert.equal(currentMsiProperties.ProductName, "YunSwitch");
+  assert.equal(currentMsiProperties.Manufacturer, "yunhanhai");
+  assert.equal(
+    currentMsiProperties.ProductVersion,
+    tauri.bundle.windows.wix.version,
+  );
+  assert.equal(
+    currentMsiProperties.UpgradeCode.toLowerCase(),
+    `{${tauri.bundle.windows.wix.upgradeCode.toLowerCase()}}`,
+  );
   evidence.artifacts = {
-    msi: { path: msi, sha256: await sha256(msi) },
+    msi: {
+      path: msi,
+      sha256: await sha256(msi),
+      properties: currentMsiProperties,
+    },
     zip: { path: zip, sha256: await sha256(zip) },
   };
+  evidence.expectedVersion = expectedVersion;
+  let previous;
+  if (args["previous-msi"]) {
+    assert.ok(args["previous-version"] && args["previous-msi-sha256"]);
+    const previousPath = resolve(args["previous-msi"]);
+    const previousSha256 = await sha256(previousPath);
+    assert.equal(previousSha256, args["previous-msi-sha256"].toLowerCase());
+    assert.match(args["previous-version"], /^\d+\.\d+\.\d+-yunswitch\.\d+$/);
+    assert.notEqual(args["previous-version"], expectedVersion);
+    const properties = await readMsiProperties(previousPath);
+    assert.equal(properties.ProductName, "YunSwitch");
+    assert.equal(properties.Manufacturer, "yunhanhai");
+    assert.equal(properties.UpgradeCode, currentMsiProperties.UpgradeCode);
+    assert.notEqual(properties.ProductCode, currentMsiProperties.ProductCode);
+    assert.equal(
+      properties.ProductVersion,
+      args["previous-version"].replace("-yunswitch.", "."),
+    );
+    previous = {
+      path: previousPath,
+      version: args["previous-version"],
+      sha256: previousSha256,
+      properties,
+    };
+    evidence.previousMsi = previous;
+    check("previous published MSI checksum and independent identity match", {
+      version: previous.version,
+      sha256: previousSha256,
+      properties,
+    });
+  }
   const portableRoot = join(output, "portable");
   await powershell(
     `Expand-Archive -LiteralPath ${psQuote(zip)} -DestinationPath ${psQuote(portableRoot)}`,
@@ -670,6 +873,16 @@ async function main() {
   await exitApp();
   await installOrUninstall("/x");
   installed = false;
+  if (previous) {
+    await verifyUpgrade(
+      previous,
+      currentMsiProperties,
+      installedExe,
+      portableExe,
+    );
+    await installOrUninstall("/x", msi, "upgraded-version-uninstall");
+    installed = false;
+  }
   assert.ok(!(await exists(installedExe)));
   assert.equal(
     await powershell(
@@ -701,6 +914,12 @@ async function main() {
     "Synthetic legacy provider",
   );
   assert.equal(await cdp.invoke("is_portable_mode"), true);
+  if (previous) {
+    assert.equal(
+      (await cdp.invoke("get_providers", { app: "claude" }))["upgrade-ci"].name,
+      "Synthetic provider created by previous YunSwitch version",
+    );
+  }
   await exitApp();
   check("portable launch after uninstall reads the retained migrated database");
   await cp(
