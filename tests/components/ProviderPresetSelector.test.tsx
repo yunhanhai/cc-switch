@@ -208,7 +208,7 @@ describe("ProviderPresetSelector pure helpers", () => {
 
     const original = sortPresetEntries(presetEntries, originalMode, t);
     expect(original).not.toBe(presetEntries);
-    // original 模式置顶官方分类（alpha）；其余均非赞助商，按显示名排序
+    // original 模式置顶官方分类（alpha）；其余按显示名排序
     // （Beta Gateway < Delta Mirror < Gamma 本地名）。
     expect(getIds(original)).toEqual(["alpha", "beta", "delta", "gamma"]);
 
@@ -231,15 +231,7 @@ describe("ProviderPresetSelector pure helpers", () => {
     ).toEqual(["alpha", "beta", "delta", "gamma"]);
   });
 
-  it("original 模式按「官方 → 尊享伙伴 → 赞助商 → 非赞助商」四段排序，前三组保序、末组按显示名，双重身份不重复", () => {
-    // 故意打乱传入顺序，验证：
-    // - official 组置顶（officialOnly、officialPrime 按出现顺序）；
-    // - 非官方且 primePartner 的预设次之（primeAndPartner）；
-    // - 赞助商（isPartner）第三段，保持传入（预设文件）顺序：
-    //   partnerZeta 在 partnerAlpha 前，不按字母重排；
-    // - 非赞助商按显示名排序：restAlpha 排到 restZulu 前；
-    // - 既是 official 又是 primePartner 的只归入官方组；
-    //   既是 primePartner 又是 isPartner 的只归入 prime 组、不在赞助商组重复。
+  it("默认官方保序置顶，其余按显示名排序，旧合作标记不影响顺序或重复条目", () => {
     const mixed: TestPresetEntry[] = [
       {
         id: "restZulu",
@@ -314,17 +306,38 @@ describe("ProviderPresetSelector pure helpers", () => {
     expect(getIds(sortPresetEntries(mixed, "original", t))).toEqual([
       "officialOnly",
       "officialPrime",
-      "primeAndPartner",
-      "partnerZeta",
       "partnerAlpha",
       "restAlpha",
+      "primeAndPartner",
+      "partnerZeta",
       "restZulu",
     ]);
+    expect(getIds(mixed)).toEqual([
+      "restZulu",
+      "partnerZeta",
+      "primeAndPartner",
+      "officialOnly",
+      "officialPrime",
+      "partnerAlpha",
+      "restAlpha",
+    ]);
+
+    const withoutLegacyFlags = mixed.map((entry) => ({
+      ...entry,
+      preset: {
+        ...entry.preset,
+        isPartner: undefined,
+        primePartner: undefined,
+      },
+    }));
+    expect(getIds(sortPresetEntries(mixed, "original", t))).toEqual(
+      getIds(sortPresetEntries(withoutLegacyFlags, "original", t)),
+    );
   });
 });
 
 describe("ProviderPresetSelector", () => {
-  it("默认（original 模式）将官方分类置顶，非赞助商按显示名排序", () => {
+  it("默认（original 模式）将官方分类置顶，其余按显示名排序", () => {
     renderSelector();
 
     // 组件内 t() 未配置翻译资源，显示名回退为 key 字面量：

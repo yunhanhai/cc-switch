@@ -1717,7 +1717,7 @@
     "searchPlaceholder": "名前、サイト、カテゴリで検索...",
     "sortAriaLabel": "プリセットの並び順を切り替え",
     "sortNameAscTooltip": "名前順 A-Z で並び替え",
-    "sortOriginalTooltip": "元の順序に戻す",
+    "sortOriginalTooltip": "標準の順序に戻す",
     "noSearchResults": "一致するプロバイダープリセットがありません。"
   },
   "usage": {

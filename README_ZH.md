@@ -57,6 +57,16 @@ AI 编程工具配置与路由管理，面向多供应商与多模型场景持�
 
 首个独立预发布 `3.20.1-yunswitch.1` 已提供 Windows x64 安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.1)。上游基线仍为 v3.20.1。安装、启动、代理、合成数据迁移和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[预发布说明](docs/releases/3.20.1-yunswitch.1.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
+后续源码维护已清理内置预设中继承的推广链接与商业合作标记，默认排序改为官方预设优先、其余按显示名称排序；必要的供应商识别与兼容字段仍保留。这些改动尚未包含在已公开的 `3.20.1-yunswitch.1` 安装包中，现有发布附件保持原样。
+
+| 平台          | 验证范围                                                                                                                                          | 发布状态             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/42464519875)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移等 | 已发布独立预览包     |
+| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42464523899)：前端检查、各平台后端测试与 Clippy                                     | 尚无独立包及安装验收 |
+| ARM64         | 尚无独立安装验收                                                                                                                                  | 尚未发布独立包       |
+
+以上记录对应预发布源码，后续维护改动以各自 PR 的检查为准。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
+
 - [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)
 - [版本与发布计划](docs/PROJECT.md#当前版本与发布状态)
@@ -114,7 +124,7 @@ GitHub 也可以作为克隆来源：`https://github.com/yunhanhai/yunswitch.git
 
 问题与建议请提交到 [Gitee Issues](https://gitee.com/yunhanhai/yunswitch/issues) 或 [GitHub Issues](https://github.com/yunhanhai/yunswitch/issues)，代码贡献请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题按 [SECURITY.md](SECURITY.md) 联系维护者。
 
-后续重点是独立版本与发布渠道、运行界面与安装标识整理、更多供应商兼容性验证，以及有明确来源记录的跨项目能力整合。具体待办见 [维护计划](docs/PROJECT.md#后续调整)。
+后续重点是继续验收与发布独立版本、更多客户端和供应商兼容性验证，以及有明确来源记录的跨项目能力整合。具体待办见 [维护计划](docs/PROJECT.md#后续调整)。
 
 ## 来源与许可证
 

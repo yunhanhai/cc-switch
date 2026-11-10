@@ -57,7 +57,7 @@ export function useApiKeyLink({
   const getWebsiteUrl = useMemo(() => {
     if (currentPresetEntry) {
       const preset = currentPresetEntry.preset;
-      // 对于 cn_official、aggregator、third_party，优先使用 apiKeyUrl（可能包含推广参数）
+      // 对于 cn_official、aggregator、third_party，优先使用专门的 API Key 管理页面。
       if (
         preset.category === "cn_official" ||
         preset.category === "aggregator" ||
