@@ -655,6 +655,26 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
   const registeredExe = command.match(/^"([^"]+)"\s+"%1"$/)?.[1];
   assert.ok(registeredExe);
   assert.equal(await sha256(registeredExe), await sha256(installedExe));
+  assert.ok(
+    await exists(
+      join(
+        process.env.APPDATA,
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+        "YunSwitch",
+        "YunSwitch.lnk",
+      ),
+    ),
+    "Upgrade must retain the YunSwitch Start Menu shortcut",
+  );
+  const upgradeLicense = await readFile(
+    join(process.env.LOCALAPPDATA, "Programs", "YunSwitch", "LICENSE.rtf"),
+    "utf8",
+  );
+  assert.match(upgradeLicense, /Jason Young/);
+  assert.match(upgradeLicense, /yunhanhai/);
   await verifySingleInstance(installedExe);
   await cdp.screenshot("installed-after-upgrade.png");
   await exitApp();
