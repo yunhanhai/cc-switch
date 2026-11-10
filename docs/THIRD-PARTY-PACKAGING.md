@@ -2,7 +2,7 @@
 
 源码仓库保存已核实的 [第三方通知](../THIRD-PARTY-NOTICES.md)、[CodexBar MIT 原文](../licenses/CodexBar-MIT.txt)与 [LobeHub MIT 原文](../licenses/LobeHub-Icons-MIT.txt)。来源及尚未确认的资源范围见[来源台账](PROVENANCE.md)和[图标记录](ICON-SOURCES.md)。许可副本保持原文字节，不通过格式化工具改写。
 
-## 后续打包配置
+## 已发布 Windows 包与其他平台配置
 
 - Windows MSI 在安装目录放置原文 `LICENSE`、已有 `LICENSE.rtf`、`THIRD-PARTY-NOTICES.md` 和 `licenses/` 中两份 MIT 文本。文件通过独立 WiX 组件安装，使用 HKCU key path；正式版与开发版具有不同且固定的组件 GUID。
 - 便携 ZIP 放置 `LICENSE`、`THIRD-PARTY-NOTICES.md`、两份许可、运行文件与数据目录说明。通知中的许可链接可在包内按相对路径读取。
@@ -18,6 +18,6 @@
 | `CodexBar-MIT.txt`      | `14293556b79940745123d0160c71d27ed0e9fe9b8a848093f3ed78f4853caafe` |
 | `LobeHub-Icons-MIT.txt` | `add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a` |
 
-发布工作流的 YAML、Bash、PowerShell 与 Node 语法、便携包文件集合及本地文档链接已检查。此记录确认打包内容，尚未验证新增组件的实际安装、升级和卸载；下一版需从本次源码重新构建并执行干净 runner 验收。
+随后从 `6f91d0cb9ab71dfd17f2bc8b7d37c8539f5f1787` 重新构建 `.3`，在[干净 Windows runner](https://github.com/yunhanhai/yunswitch/actions/runs/42860850983)完成 40 项运行验收。便携包、首次安装和 `.2`→`.3` 升级后的通知与许可逐字节核对通过；两次卸载均清除许可文件、目录和注册项，同时保留应用数据。源码 CI 和最终文件校验见[`.3` 发布记录](releases/3.20.1-yunswitch.3.md)。
 
-已公开的 `3.20.1-yunswitch.1`、`.2` 包保持历史内容。本次没有替换发布附件，也不将本机重新打包文件作为这两个版本的公开产物。新加入许可通知应在新的版本标签与发布记录中注明。
+`3.20.1-yunswitch.3` 已在 Gitee、GitHub 公开分发这些许可文件。已公开 `.1`、`.2` 包保持历史内容，本次未替换其附件；本机较早重新打包文件仍仅作为打包验证记录。其他平台的实际安装包许可内容仍需分别验收。

@@ -17,13 +17,13 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 2026-11-11，核查 [2026-01-22 的许可提交](https://github.com/steipete/CodexBar/commit/c1e05761e55ddd3d66cdd43edbe7823f627ee6a8)与 [当前核查快照许可](https://github.com/steipete/CodexBar/blob/7447bc77c2497323d9c41e40164ce705533493c8/LICENSE)：两者 `LICENSE` 的 Git blob 均为 `0ae0cb57d8c6c1417f796b39fc0d6a7f2f7c5c39`。本仓库按字节保存原文至 `licenses/CodexBar-MIT.txt`，1074 字节，SHA-256 为 `14293556b79940745123d0160c71d27ed0e9fe9b8a848093f3ed78f4853caafe`。
 
-该记录确认许可文本在 CC Switch 移植前已存在，保留完整版权与 MIT 条款；它不补写尚未找到的原代码提交号。后续安装包的许可分发应以实际打包内容和验收记录为准，已公开 `.1`、`.2` 包不会因源码新增副本而改变。
+该记录确认许可文本在 CC Switch 移植前已存在，保留完整版权与 MIT 条款；它不补写尚未找到的原代码提交号。许可副本已随 `.3` Windows 包分发，并通过实际安装与升级内容核对；见[许可分发记录](THIRD-PARTY-PACKAGING.md)。已公开 `.1`、`.2` 包保留历史内容。
 
 ### 图标与第三方通知
 
 图标来源核查见 [ICON-SOURCES.md](ICON-SOURCES.md)：49 个独立 SVG 与历史固定包 `@lobehub/icons-static-svg@1.73.0` 逐字节一致，对应 LobeHub MIT 许可原文保存于 [LobeHub-Icons-MIT.txt](../licenses/LobeHub-Icons-MIT.txt)。未匹配的 SVG、位图和自定义内联资源继续逐项追溯，不能用该子集结论覆盖全部图标。
 
-已确认来源的汇总见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。本次增加源码许可副本与后续打包规则，公开版本仍以各自发布记录为准。
+已确认来源的汇总见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。已核实副本与通知随 `.3` Windows 包公开分发，实际检查见[`.3` 发布记录](releases/3.20.1-yunswitch.3.md)。其他资源和平台的许可范围仍按逐项记录核查。
 
 ## 文档与设计参考
 
@@ -49,6 +49,6 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 ## 尚待补齐
 
-- 追溯 CodexBar 原代码移植版本与范围，核验许可副本随安装包分发的实际内容；本次新增副本不宣称已公开安装包已覆盖所有间接来源通知。
+- 追溯 CodexBar 原代码移植版本与范围；许可副本已在 `.3` Windows 包中验收，但不宣称覆盖所有间接来源通知。
 - 逐步核查继承的图标、图片和其他复制资源，分别记录来源与使用条款；包管理依赖以固定锁文件为入口另行核查。
 - 新引入能力在对应 PR 中记录固定来源，避免仅使用会随项目更新变化的默认分支链接。

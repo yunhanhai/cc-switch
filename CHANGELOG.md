@@ -1,11 +1,11 @@
 # 本仓库更新记录 / Changes in this distribution
 
-## 3.20.1-yunswitch.3 — Windows x64 预发布准备中
+## 3.20.1-yunswitch.3 — Windows x64 预发布（2026-11-11）
 
 - 增加已核实的 CodexBar、LobeHub MIT 许可副本和第三方通知，记录图标来源及仍待核查的资源范围。
 - Windows MSI 和便携 ZIP 随附通知与许可文件；正式版和开发版采用独立的固定文件组件 GUID。
-- 验收增加通知内容核对，并准备从已公开 `.2` 升级的检查；新包实际安装、升级及卸载验收尚待完成。
-- 源码版本 `3.20.1-yunswitch.3`、MSI 版本 `3.20.1.3`；已公开 `.2` 包保留历史内容。进度见[`.3` 准备记录](docs/releases/3.20.1-yunswitch.3.md)。
+- 新包实际安装、`.2`→`.3` 升级、三处许可内容核对和两次卸载清理均通过，Windows 运行验收共 40 项检查。
+- 源码版本 `3.20.1-yunswitch.3`、MSI 版本 `3.20.1.3`，已在 Gitee、GitHub 同步公开；源码 CI 全部通过。已公开 `.2` 包保留历史内容，校验与验证见[`.3` 发布记录](docs/releases/3.20.1-yunswitch.3.md)。
 
 ## 3.20.1-yunswitch.2 — Windows x64 预发布（2026-11-10）
 
