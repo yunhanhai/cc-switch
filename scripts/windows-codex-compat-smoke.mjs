@@ -20,8 +20,10 @@ async function openCompatibilitySettings(cdp, until) {
       cdp.evaluate(`(() => {
         const tab = document.querySelector('[role="tab"][id$="-trigger-proxy"]');
         if (!tab) return false;
-        tab.click();
-        return true;
+        if (tab.getAttribute('aria-selected') === 'true') return true;
+        // Radix Tabs activates on mousedown or keyboard input, not click().
+        tab.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0}));
+        return false;
       })()`),
     "open routing tab",
   );
@@ -223,7 +225,18 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     });
     await cdp.invoke("start_proxy_server");
     proxyStarted = true;
-    await openCompatibilitySettings(cdp, until);
+    try {
+      await openCompatibilitySettings(cdp, until);
+    } catch (error) {
+      await cdp.screenshot(
+        `${label.replaceAll(" ", "-")}-settings-failure.png`,
+      );
+      const controls = await cdp.evaluate(`JSON.stringify({
+        tabs: [...document.querySelectorAll('[role="tab"]')].map(item => ({text:item.innerText, selected:item.getAttribute('aria-selected')})),
+        sections: [...document.querySelectorAll('button[aria-expanded]')].map(item => ({text:item.innerText, expanded:item.getAttribute('aria-expanded')}))
+      })`);
+      throw new Error(`${error.message}; settings controls: ${controls}`);
+    }
     await setCompatibility(cdp, until, false);
     const disabled = await send(history);
     assert.equal(disabled.status, 200);
