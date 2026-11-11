@@ -40,6 +40,8 @@ YunSwitch 已拥有独立仓库、名称、应用 ID、配置目录、深链和�
 
 本次发现并修复：`ProxyError::RateLimited` 在 Codex 的手工错误响应路径此前可能落到默认 500，且没有 `Retry-After`。现在最终返回 HTTP 429、`rate_limit_error` 和上游等待秒数，客户端可据此作下一步决定。
 
+安装包验收还发现代理停止后旧 keep-alive 连接仍可处理请求，导致重新启动后的界面统计与实际处理实例不一致。代理现统一管理连接，停止时关闭并回收连接（包括等待请求头的空闲连接）；重启后的客户端需连接新实例。停止服务会终止尚未完成的请求，不自动重放已输出内容。
+
 ## 引入来源与验证
 
 请求兼容逻辑参考并移植自 [yunhanhai/agentrouter-responses-shim-sentry-fix](https://gitee.com/yunhanhai/agentrouter-responses-shim-sentry-fix) 的固定提交 `ff6277e05beff1bfc61e2a3abc0741deb0d42b3c`，基础包为 `agentrouter-responses-shim@2.0.1`。它的 Node 服务、前缀路由、重试循环和出站代理不另行运行：YunSwitch 复用已有原生代理、路由与重试机制，新增的是 Rust 请求兼容处理、设置开关及边界验证。原 MIT 许可见 [AgentRouter-Responses-Shim-MIT.txt](../licenses/AgentRouter-Responses-Shim-MIT.txt)。

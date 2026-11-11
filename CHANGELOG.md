@@ -4,6 +4,7 @@
 
 - 增加默认关闭的“Codex 加密历史兼容”开关，适用于经本地代理使用原生 Responses 的 API Key 供应商；移植 shim 的历史清理，并保护无法还原的压缩历史、状态引用和用户 JSON。
 - 修复最终 Codex 限流响应可能返回 500 和丢失 `Retry-After`，现在保留 HTTP 429、限流类型和等待秒数。
+- 修复代理停止/重启后旧 HTTP 长连接继续使用旧实例的问题，统一回收连接，保持实际路由与界面统计一致。
 - 随包分发 AgentRouter Responses Shim 的 MIT 原文，补充来源记录和重试边界说明。
 - 增加实际 Windows 包内的开关操作、重启保存、JSON/SSE 转发、429 重试和 `.3`→`.4` 升级验收。新包状态见[`.4` 发布记录](docs/releases/3.20.1-yunswitch.4.md)。
 

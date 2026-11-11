@@ -309,6 +309,12 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     const wireStatus = await fetch("http://127.0.0.1:15731/status", {
       signal: AbortSignal.timeout(5_000),
     }).then((response) => response.json());
+    assert.equal(status.running, true);
+    assert.equal(wireStatus.running, true);
+    assert.deepEqual(
+      status.rate_limit_waits_by_app,
+      wireStatus.rate_limit_waits_by_app,
+    );
     assert.ok(
       status.rate_limit_waits_by_app.codex,
       `Missing Codex wait bucket: ${JSON.stringify({ status, wireStatus })}`,
@@ -341,6 +347,44 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     await setCompatibility(cdp, until, true);
     check(
       `${label} compatibility UI saves on and off without changing other settings`,
+    );
+
+    // Reuse the fetch connection pool across stop/start. It must reconnect to
+    // the new instance instead of serving requests with a stopped status object.
+    await cdp.invoke("stop_proxy_server");
+    proxyStarted = false;
+    await cdp.invoke("start_proxy_server");
+    proxyStarted = true;
+    scenario = "retry-429";
+    hits = 0;
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: true,
+        rateLimitMaxWaitSecs: 5,
+      },
+    });
+    const afterRestart = await send({
+      model: "ci-model",
+      input: "After restart",
+    });
+    assert.equal(afterRestart.status, 200, afterRestart.text);
+    assert.equal(hits, 2);
+    const newStatus = await cdp.invoke("get_proxy_status");
+    assert.equal(newStatus.rate_limit_waits_by_app.codex.count, 1);
+    assert.equal(newStatus.total_requests, 1);
+    const newWireStatus = await fetch("http://127.0.0.1:15731/status", {
+      signal: AbortSignal.timeout(5_000),
+    }).then((response) => response.json());
+    assert.equal(newWireStatus.running, true);
+    assert.deepEqual(
+      newWireStatus.rate_limit_waits_by_app,
+      newStatus.rate_limit_waits_by_app,
+    );
+    check(
+      `${label} restarted proxy retires pooled connections and keeps live statistics`,
     );
   } finally {
     try {
