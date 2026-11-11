@@ -454,6 +454,9 @@
         "description": "Sync data across devices via WebDAV"
       },
       "rectifier": {
+        "codexResponsesCompatibility": "Codex encrypted-history compatibility",
+        "codexResponsesCompatibilityDescription": "Opt-in repair for all API-key providers using native Responses through the YunSwitch local proxy. Removes replayed reasoning ciphertext, nested encrypted protocol blocks and replayable item IDs to reduce invalid_encrypted_content errors on pooled gateways.",
+        "codexResponsesCompatibilityCaution": "Enable only for affected gateways. Removing encrypted reasoning can reduce context; opaque compaction or references are rejected with guidance. Official accounts, Chat/Anthropic bridges, direct connections and already-delivered streams are outside this repair.",
         "title": "Rectifier",
         "description": "Automatically fix API request compatibility issues",
         "enabled": "Enable Rectifier",

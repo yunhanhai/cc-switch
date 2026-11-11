@@ -33,7 +33,7 @@ on:
         description: "Previous public YunSwitch tag for MSI upgrade acceptance"
         required: false
         type: string
-        default: v3.20.1-yunswitch.2
+        default: v3.20.1-yunswitch.3
 
 permissions:
   actions: read
@@ -109,7 +109,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
           if ($version -notmatch '^\d+\.\d+\.\d+-yunswitch\.\d+$') { throw 'Use an independent YunSwitch source version' }
-          if (-not $env:PREVIOUS_TAG -and $version -ne '3.20.1-yunswitch.1') { $env:PREVIOUS_TAG = if ($version -eq '3.20.1-yunswitch.2') { 'v3.20.1-yunswitch.1' } else { 'v3.20.1-yunswitch.2' } }
+          if (-not $env:PREVIOUS_TAG -and $version -ne '3.20.1-yunswitch.1') {
+            $previousNumber = [int]($version.Split('.')[-1]) - 1
+            $env:PREVIOUS_TAG = 'v' + ($version -replace '\d+$', $previousNumber.ToString())
+          }
           $smokeArgs = @(
             'scripts/windows-release-smoke.mjs',
             '--msi', "release-assets/YunSwitch-v$version-Windows.msi",
@@ -135,6 +138,7 @@ jobs:
             if ($checksum -ne "$previousHash  $previousName") { throw 'Previous MSI checksum does not match its published sidecar' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.1' -and $previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'First prerelease MSI differs from the recorded accepted package' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.2' -and $previousHash -ne '2b0e1e88febe1c3f07862a381e1aefa21b90f9db547ef4995ed3aa345e951930') { throw 'Second prerelease MSI differs from the recorded accepted package' }
+            if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.3' -and $previousHash -ne '3cbf7344352229d17cf978889561cc31b115677080c6b0ab78ef4b87539aceb4') { throw 'Third prerelease MSI differs from the recorded accepted package' }
             $smokeArgs += @('--previous-msi', $previousPath, '--previous-msi-sha256', $previousHash, '--previous-version', $env:PREVIOUS_TAG.Substring(1))
           }
           node @smokeArgs

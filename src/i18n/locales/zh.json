@@ -454,6 +454,9 @@
         "description": "通过 WebDAV 在多设备间同步数据"
       },
       "rectifier": {
+        "codexResponsesCompatibility": "Codex 加密历史兼容",
+        "codexResponsesCompatibilityDescription": "默认关闭。对经 YunSwitch 本地代理使用原生 Responses 的所有 API Key 供应商生效：清理回放的推理密文、嵌套协议密文块和可重放条目的 ID，减少池化网关的 invalid_encrypted_content 错误。",
+        "codexResponsesCompatibilityCaution": "仅在受影响网关上启用。移除加密推理可能减少上下文；压缩历史或状态引用无法安全还原时会明确报错。官方账号、Chat/Anthropic 转换、直连请求及已经输出的流不在此修复范围。",
         "title": "整流器",
         "description": "自动修复 API 请求中的兼容性问题",
         "enabled": "启用整流器",

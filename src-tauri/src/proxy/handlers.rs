@@ -1868,25 +1868,38 @@ fn build_codex_proxy_error_response(
     endpoint: &str,
     error: &ProxyError,
 ) -> Result<axum::response::Response, ProxyError> {
+    build_codex_error_response(&ctx.provider.name, &ctx.request_model, endpoint, error)
+}
+
+fn build_codex_error_response(
+    provider_name: &str,
+    request_model: &str,
+    endpoint: &str,
+    error: &ProxyError,
+) -> Result<axum::response::Response, ProxyError> {
     let status = axum::http::StatusCode::from_u16(map_proxy_error_to_status(error))
         .unwrap_or(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
-    let body = codex_proxy_error_json(&ctx.provider.name, &ctx.request_model, endpoint, error);
+    let body = codex_proxy_error_json(provider_name, request_model, endpoint, error);
     let body = serde_json::to_vec(&body).map_err(|e| {
         log::error!("[Codex] 序列化代理错误体失败: {e}");
         ProxyError::Internal(format!("Failed to serialize proxy error: {e}"))
     })?;
 
-    axum::response::Response::builder()
-        .status(status)
-        .header(
-            axum::http::header::CONTENT_TYPE,
-            axum::http::HeaderValue::from_static("application/json"),
-        )
-        .body(axum::body::Body::from(body))
-        .map_err(|e| {
-            log::error!("[Codex] 构建代理错误响应失败: {e}");
-            ProxyError::Internal(format!("Failed to build proxy error response: {e}"))
-        })
+    let mut builder = axum::response::Response::builder().status(status).header(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    if let ProxyError::RateLimited {
+        retry_after_secs: Some(seconds),
+        ..
+    } = error
+    {
+        builder = builder.header(axum::http::header::RETRY_AFTER, seconds.to_string());
+    }
+    builder.body(axum::body::Body::from(body)).map_err(|e| {
+        log::error!("[Codex] 构建代理错误响应失败: {e}");
+        ProxyError::Internal(format!("Failed to build proxy error response: {e}"))
+    })
 }
 
 fn codex_proxy_error_json(
@@ -1896,6 +1909,17 @@ fn codex_proxy_error_json(
     error: &ProxyError,
 ) -> Value {
     let (mut body, upstream_status) = match error {
+        ProxyError::RateLimited {
+            retry_after_secs, ..
+        } => (
+            json!({"error":{
+                "message":"Upstream rate limit reached; retry after the indicated delay.",
+                "type":"rate_limit_error",
+                "code":"cc_switch_rate_limited",
+                "retry_after_seconds":retry_after_secs,
+            }}),
+            Some(429),
+        ),
         ProxyError::UpstreamError { status, body } => {
             let parsed_body = body
                 .as_deref()
@@ -1934,7 +1958,7 @@ fn codex_proxy_error_json(
             concat!(
                 "Upstream provider rejected the request with HTTP 413 (Payload Too Large). ",
                 "The request body exceeds the upstream gateway's size limit; this is the ",
-                "provider's server-side limit, not a CC Switch limit. ",
+                "provider's server-side limit, not a YunSwitch limit. ",
                 "Provider: {provider}; model: {model}; endpoint: {endpoint}. ",
                 "To recover, shrink the request: run /compact, remove large pasted logs or ",
                 "inline images, or ask the provider to raise its request body limit ",
@@ -1955,7 +1979,7 @@ fn codex_proxy_error_json(
             .map(|status| format!("; upstream_status: HTTP {status}"))
             .unwrap_or_default();
         format!(
-            "CC Switch local proxy failed while handling Codex endpoint {endpoint}. Provider: {provider_name}; model: {request_model}{status_fragment}; cause: {cause}"
+            "YunSwitch local proxy failed while handling Codex endpoint {endpoint}. Provider: {provider_name}; model: {request_model}{status_fragment}; cause: {cause}"
         )
     };
 
@@ -2847,6 +2871,37 @@ mod tests {
         Arc,
     };
 
+    #[tokio::test]
+    async fn codex_rate_limit_response_preserves_429_and_retry_after() {
+        use http_body_util::BodyExt;
+        for retry_after_secs in [Some(27), None] {
+            let error = ProxyError::RateLimited {
+                retry_after_secs,
+                body: Some("private upstream diagnostic".to_string()),
+            };
+            let response =
+                super::build_codex_error_response("Gateway", "model", "/responses", &error)
+                    .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(
+                response
+                    .headers()
+                    .get("retry-after")
+                    .map(|value| value.to_str().unwrap()),
+                retry_after_secs.map(|_| "27")
+            );
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(body["error"]["upstream_status"], 429);
+            assert_eq!(body["error"]["type"], "rate_limit_error");
+            assert_eq!(
+                body["error"]["retry_after_seconds"],
+                serde_json::json!(retry_after_secs)
+            );
+            assert!(!String::from_utf8_lossy(&bytes).contains("private upstream diagnostic"));
+        }
+    }
+
     #[test]
     fn body_looks_like_sse_detects_unlabeled_sse_prefixes() {
         assert!(body_looks_like_sse("data: {\"id\":\"1\"}\n\n"));
@@ -3523,7 +3578,7 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
         let body = codex_proxy_error_json("DeepSeek", "deepseek-chat", "/responses", &error);
 
         let message = body["error"]["message"].as_str().unwrap();
-        assert!(message.contains("CC Switch local proxy failed"));
+        assert!(message.contains("YunSwitch local proxy failed"));
         assert!(message.contains("DeepSeek"));
         assert!(message.contains("deepseek-chat"));
         assert!(message.contains("/responses"));
@@ -3568,7 +3623,7 @@ data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n
 
         let message = body["error"]["message"].as_str().unwrap();
         // 不再误导成「本地代理失败」
-        assert!(!message.contains("CC Switch local proxy failed"));
+        assert!(!message.contains("YunSwitch local proxy failed"));
         // 明确指向上游 + 体积超限 + 可操作指引
         assert!(message.contains("413"));
         assert!(message.to_lowercase().contains("upstream"));

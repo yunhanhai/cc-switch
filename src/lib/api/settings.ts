@@ -336,6 +336,7 @@ export interface RectifierConfig {
   requestThinkingBudget: boolean;
   requestMediaFallback: boolean;
   requestMediaHeuristic: boolean;
+  codexResponsesCompatibility: boolean;
 }
 
 export interface OptimizerConfig {

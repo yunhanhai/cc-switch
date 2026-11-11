@@ -28,6 +28,10 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         // 额度耗尽已被本地识别，客户端收到网关错误；代理会先尝试备用 Provider。
         ProxyError::BillingExhausted(_) => 502,
 
+        // The Codex error response is built manually from this mapper, rather
+        // than ProxyError::into_response. Preserve a final rate limit as 429.
+        ProxyError::RateLimited { .. } => 429,
+
         // 超时错误：504 Gateway Timeout
         ProxyError::Timeout(_) | ProxyError::StreamIdleTimeout(_) => 504,
 
@@ -125,6 +129,13 @@ mod tests {
 
     #[test]
     fn test_map_status_matches_proxy_error_response_semantics() {
+        assert_eq!(
+            map_proxy_error_to_status(&ProxyError::RateLimited {
+                retry_after_secs: Some(15),
+                body: None,
+            }),
+            429,
+        );
         assert_eq!(
             map_proxy_error_to_status(&ProxyError::AuthError("bad token".to_string())),
             401

@@ -454,6 +454,9 @@
         "description": "WebDAV でデバイス間のデータを同期"
       },
       "rectifier": {
+        "codexResponsesCompatibility": "Codex 暗号化履歴の互換処理",
+        "codexResponsesCompatibilityDescription": "既定では無効です。YunSwitch のローカルプロキシ経由でネイティブ Responses を使う API キープロバイダー全体に適用します。再送される推論暗号文、入れ子の暗号化プロトコルブロックと再生可能な項目の ID を取り除き、プール型ゲートウェイの invalid_encrypted_content を軽減します。",
+        "codexResponsesCompatibilityCaution": "問題があるゲートウェイでのみ有効にしてください。暗号化推論の削除で文脈が減る場合があります。圧縮履歴や状態参照を安全に復元できない場合は明示的にエラーを返します。公式アカウント、Chat/Anthropic 変換、直接接続、出力済みストリームは対象外です。",
         "title": "整流器",
         "description": "API リクエストの互換性問題を自動修正",
         "enabled": "整流器を有効化",

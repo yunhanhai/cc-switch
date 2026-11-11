@@ -27,7 +27,7 @@ use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
@@ -140,8 +140,20 @@ impl ProxyServer {
         let state = self.state.clone();
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            // The listener owns its connections. Detached keep-alive tasks must
+            // not survive a stop/restart and keep serving the previous state.
+            let mut connections = JoinSet::new();
             loop {
                 tokio::select! {
+                    biased;
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                    Some(result) = connections.join_next(), if !connections.is_empty() => {
+                        if let Err(error) = result {
+                            log::debug!("[{SRV}] connection task ended: {error}", SRV = log_srv::CONN_ERR);
+                        }
+                    }
                     result = listener.accept() => {
                         let (stream, _remote_addr) = match result {
                             Ok(v) => v,
@@ -153,7 +165,7 @@ impl ProxyServer {
                         };
 
                         let app = app.clone();
-                        tokio::spawn(async move {
+                        connections.spawn(async move {
                             // Peek raw TCP bytes to capture original header casing
                             // before hyper parses (and lowercases) the header names.
                             let original_cases = {
@@ -201,11 +213,13 @@ impl ProxyServer {
                             }
                         });
                     }
-                    _ = &mut shutdown_rx => {
-                        break;
-                    }
                 }
             }
+
+            // Include clients blocked in the initial peek as well as active
+            // HTTP connections; stop() waits until their sockets are released.
+            drop(listener);
+            connections.shutdown().await;
 
             // 服务器停止后更新状态
             state.status.write().await.running = false;
@@ -231,8 +245,8 @@ impl ProxyServer {
         }
 
         // 2. 等待服务器任务结束（带 5 秒超时保护）
-        if let Some(handle) = self.server_handle.write().await.take() {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+        if let Some(mut handle) = self.server_handle.write().await.take() {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), &mut handle).await {
                 Ok(Ok(())) => {
                     log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);
                     Ok(())
@@ -242,6 +256,12 @@ impl ProxyServer {
                     Err(ProxyError::StopFailed(e.to_string()))
                 }
                 Err(_) => {
+                    // Dropping a JoinHandle detaches it. Abort the owner so its
+                    // JoinSet also cancels every connection if shutdown stalls.
+                    handle.abort();
+                    let _ = handle.await;
+                    self.state.status.write().await.running = false;
+                    *self.state.start_time.write().await = None;
                     log::warn!(
                         "[{}] 代理服务器停止超时（5秒），强制继续",
                         log_srv::STOP_TIMEOUT
@@ -463,6 +483,110 @@ mod tests {
         path_and_query: String,
         authorization: Option<String>,
         body: Value,
+    }
+
+    async fn read_keep_alive_status(stream: &mut tokio::net::TcpStream) -> Value {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        stream
+            .write_all(b"GET /status HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
+            .await
+            .expect("write status request");
+        let mut headers = Vec::new();
+        while !headers.ends_with(b"\r\n\r\n") {
+            assert!(headers.len() < 8192, "bounded response headers");
+            headers.push(stream.read_u8().await.expect("response header"));
+        }
+        let headers = String::from_utf8(headers).expect("HTTP headers");
+        assert!(headers.starts_with("HTTP/1.1 200"));
+        let length = headers
+            .lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().expect("content length"))
+            })
+            .expect("JSON content length");
+        let mut body = vec![0; length];
+        stream.read_exact(&mut body).await.expect("response body");
+        serde_json::from_slice(&body).expect("status JSON")
+    }
+
+    #[tokio::test]
+    async fn stopped_proxy_closes_keep_alive_connections_before_restart() {
+        use tokio::io::AsyncReadExt;
+        use tokio::time::{timeout, Duration};
+
+        let db = Arc::new(Database::memory().expect("memory database"));
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        let info = proxy.start().await.expect("start old proxy");
+        let mut old_connection = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .expect("old keep-alive connection");
+        let status = timeout(
+            Duration::from_secs(3),
+            read_keep_alive_status(&mut old_connection),
+        )
+        .await
+        .expect("initial status completes");
+        assert_eq!(status["running"], true);
+
+        proxy.stop().await.expect("stop old proxy");
+        let replacement = ProxyServer::new(
+            ProxyConfig {
+                listen_port: info.port,
+                ..ProxyConfig::default()
+            },
+            db,
+            None,
+        );
+        replacement.start().await.expect("restart on same port");
+        let mut byte = [0];
+        let closed = timeout(Duration::from_secs(1), old_connection.read(&mut byte)).await;
+        replacement.stop().await.expect("stop replacement proxy");
+        assert!(
+            matches!(closed, Ok(Ok(0)) | Ok(Err(_))),
+            "stopped proxy must close old HTTP connections: {closed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stopped_proxy_closes_connections_waiting_for_request_headers() {
+        use tokio::io::AsyncReadExt;
+        use tokio::time::{timeout, Duration};
+
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                ..ProxyConfig::default()
+            },
+            Arc::new(Database::memory().expect("memory database")),
+            None,
+        );
+        let info = proxy.start().await.expect("start proxy");
+        let mut idle = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .expect("idle connection");
+        // A later processed request proves the accept loop ran after idle connected.
+        let mut ready = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .expect("status connection");
+        timeout(Duration::from_secs(3), read_keep_alive_status(&mut ready))
+            .await
+            .expect("status request completes");
+        proxy.stop().await.expect("stop with pending header read");
+        let mut byte = [0];
+        let closed = timeout(Duration::from_secs(1), idle.read(&mut byte)).await;
+        assert!(
+            matches!(closed, Ok(Ok(0)) | Ok(Err(_))),
+            "idle socket survived stop: {closed:?}"
+        );
     }
 
     #[tokio::test]
