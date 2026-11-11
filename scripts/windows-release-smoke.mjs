@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { mkdir, readFile, writeFile, stat, cp } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { exerciseCodexCompatibility } from "./windows-codex-compat-smoke.mjs";
 
 const execFileAsync = promisify(execFile);
 const args = Object.fromEntries(
@@ -612,6 +613,12 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
   );
   const providersBefore = await cdp.invoke("get_providers", { app: "claude" });
   const settingsBefore = await cdp.invoke("get_settings");
+  // Exercise an old record with non-default values before the new field exists.
+  const previousRectifier = await cdp.invoke("get_rectifier_config");
+  await cdp.invoke("set_rectifier_config", {
+    config: { ...previousRectifier, requestThinkingSignature: false },
+  });
+  const rectifierBefore = await cdp.invoke("get_rectifier_config");
   await cdp.screenshot("installed-previous-version.png");
   await exitApp();
   const databasePath = join(
@@ -649,6 +656,13 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     "MSI upgrade must retain providers created by the previous version",
   );
   assert.deepEqual(await cdp.invoke("get_settings"), settingsBefore);
+  assert.deepEqual(await cdp.invoke("get_rectifier_config"), {
+    ...rectifierBefore,
+    codexResponsesCompatibility: false,
+  });
+  check(
+    "upgrade preserves existing rectifiers and defaults Codex compatibility off",
+  );
   const command = await powershell(
     String.raw`(Get-Item 'HKCU:\Software\Classes\yunswitch\shell\open\command').GetValue('')`,
   );
@@ -682,6 +696,11 @@ async function verifyUpgrade(previous, current, installedExe, portableExe) {
     );
   }
   await verifySingleInstance(installedExe);
+  await exerciseCodexCompatibility(cdp, {
+    check,
+    until,
+    label: "upgraded MSI",
+  });
   await cdp.screenshot("installed-after-upgrade.png");
   await exitApp();
   check(
@@ -851,6 +870,7 @@ async function main() {
   );
   check("first-run UI renders and its confirmation persists");
   await exerciseProxy(cdp);
+  await exerciseCodexCompatibility(cdp, { check, until, label: "portable" });
   await exitApp();
   // A fresh installation may create tool directories. They must remain inside
   // this disposable runner profile; the upstream app database stays absent.
@@ -867,6 +887,11 @@ async function main() {
   );
   await cdp.screenshot("portable-relaunch.png");
   check("portable relaunch retains provider and welcome state");
+  assert.equal(
+    (await cdp.invoke("get_rectifier_config")).codexResponsesCompatibility,
+    true,
+  );
+  check("portable relaunch retains Codex compatibility setting");
   await exitApp();
   installed = true;
   await installOrUninstall("/i");
