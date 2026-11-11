@@ -644,7 +644,7 @@ jobs:
             Copy-Item -LiteralPath THIRD-PARTY-NOTICES.md -Destination $portableDir
             $portableLicenses = Join-Path $portableDir 'licenses'
             New-Item -ItemType Directory -Path $portableLicenses | Out-Null
-            foreach ($licenseName in @('CodexBar-MIT.txt', 'LobeHub-Icons-MIT.txt')) {
+            foreach ($licenseName in @('CodexBar-MIT.txt', 'LobeHub-Icons-MIT.txt', 'AgentRouter-Responses-Shim-MIT.txt')) {
               Copy-Item -LiteralPath (Join-Path 'licenses' $licenseName) -Destination $portableLicenses
             }
             @(

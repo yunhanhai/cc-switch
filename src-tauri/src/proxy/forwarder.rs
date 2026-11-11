@@ -2093,6 +2093,30 @@ impl RequestForwarder {
                 }
             }
         }
+        // Apply after body overrides so the final outgoing native Responses
+        // history is repaired, including provider-specific input overrides.
+        // Each attempt owns its body: failover never mutates another provider's
+        // input or the original client request. No domain-specific allowlist.
+        if super::codex_responses_compat::applies_to(
+            self.rectifier_config.enabled && self.rectifier_config.codex_responses_compatibility,
+            app_type,
+            method,
+            endpoint,
+            provider,
+        ) {
+            let (cleaned, stats) = super::codex_responses_compat::sanitize(&filtered_body)?;
+            if stats.changed() {
+                log::info!(
+                    "[Codex Responses compatibility] provider={} reasoning_items={} item_ids={} encrypted_fields={} encrypted_blocks={}",
+                    provider.id,
+                    stats.reasoning_items,
+                    stats.item_ids,
+                    stats.encrypted_fields,
+                    stats.encrypted_blocks
+                );
+            }
+            filtered_body = cleaned;
+        }
         // 出站 body 定稿后刷新真值（覆盖 Codex chat 上游模型覆写、转换层模型改写）
         if let Some(m) = filtered_body
             .get("model")
@@ -5673,6 +5697,201 @@ mod tests {
         fwd.rate_limit_retry_enabled = enabled;
         fwd.rate_limit_max_wait_secs = max_wait_secs;
         fwd
+    }
+
+    fn codex_api_provider(id: &str, base: &str) -> Provider {
+        Provider::with_id(
+            id.to_string(),
+            id.to_string(),
+            json!({"base_url":base,"auth":{"OPENAI_API_KEY":"fake-codex-key"}}),
+            None,
+        )
+    }
+
+    async fn codex_compat_upstream() -> (
+        String,
+        Arc<tokio::sync::Mutex<Vec<Value>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let requests = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let app = axum::Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+            let recorded = recorded.clone();
+            async move {
+                let contains_ciphertext = body.to_string().contains("opaque-upstream-ciphertext");
+                let streaming = body["stream"] == true;
+                recorded.lock().await.push(body);
+                if contains_ciphertext {
+                    (StatusCode::OK, [("content-type","text/event-stream")],
+                        "event: error\ndata: {\"type\":\"error\",\"error\":{\"code\":\"invalid_encrypted_content\",\"message\":\"cannot decrypt history\"}}\n\nevent: response.failed\ndata: {\"type\":\"response.failed\"}\n\n".to_string())
+                } else if streaming {
+                    (StatusCode::OK, [("content-type","text/event-stream")],
+                        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_clean\",\"status\":\"completed\",\"output\":[]}}\n\n".to_string())
+                } else {
+                    (StatusCode::OK, [("content-type","application/json")],
+                        r#"{"id":"resp_clean","object":"response","status":"completed","output":[]}"#.to_string())
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, requests, handle)
+    }
+
+    fn encrypted_codex_history() -> Value {
+        json!({"model":"example-model","stream":true,"input":[
+            {"type":"agent_message","content":[
+                {"type":"input_text","text":"keep the handoff"},
+                {"type":"encrypted_content","encrypted_content":"opaque-upstream-ciphertext"}
+            ]}
+        ]})
+    }
+
+    async fn send_codex(
+        fwd: &RequestForwarder,
+        body: Value,
+        providers: Vec<Provider>,
+    ) -> Result<ForwardResult, ForwardError> {
+        fwd.forward_with_retry(
+            &AppType::Codex,
+            http::Method::POST,
+            "/responses",
+            body,
+            HeaderMap::new(),
+            Extensions::new(),
+            providers,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn codex_compatibility_recovers_nested_ciphertext_for_unlisted_api_hosts() {
+        for streaming in [false, true] {
+            let (base, requests, upstream) = codex_compat_upstream().await;
+            let original = encrypted_codex_history();
+            let mut body = original.clone();
+            body["stream"] = json!(streaming);
+            let mut fwd = test_forwarder(Duration::from_secs(10), Duration::from_secs(10));
+            fwd.rectifier_config.codex_responses_compatibility = true;
+            let result = send_codex(
+                &fwd,
+                body.clone(),
+                vec![codex_api_provider("unlisted", &base)],
+            )
+            .await;
+            assert!(
+                result.is_ok(),
+                "repair should produce a successful Responses request"
+            );
+            let sent = requests.lock().await;
+            assert_eq!(
+                sent.len(),
+                1,
+                "preventive repair should need only one upstream request"
+            );
+            assert_eq!(
+                sent[0]["input"][0]["content"],
+                json!([{"type":"input_text","text":"keep the handoff"}])
+            );
+            assert_eq!(body["input"], original["input"]);
+            upstream.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_compatibility_disabled_and_master_off_preserve_history() {
+        for (enabled, compat) in [(true, false), (false, true)] {
+            let (base, requests, upstream) = codex_compat_upstream().await;
+            let mut fwd = test_forwarder(Duration::from_secs(10), Duration::from_secs(10));
+            fwd.rectifier_config.enabled = enabled;
+            fwd.rectifier_config.codex_responses_compatibility = compat;
+            let body = encrypted_codex_history();
+            let result = send_codex(
+                &fwd,
+                body.clone(),
+                vec![codex_api_provider("unlisted", &base)],
+            )
+            .await;
+            // With compatibility off, native Responses stays passthrough: an
+            // HTTP 200 can still contain the gateway's error SSE.
+            let response = result
+                .ok()
+                .expect("native response should pass through")
+                .response;
+            let bytes = response
+                .bytes_with_limit(MAX_RESPONSE_BODY_BYTES)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&bytes).contains("invalid_encrypted_content"));
+            assert_eq!(requests.lock().await[0]["input"], body["input"]);
+            upstream.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_compatibility_rejects_compaction_before_network_or_failover() {
+        let (base, requests, upstream) = codex_compat_upstream().await;
+        let mut fwd = test_forwarder(Duration::from_secs(10), Duration::from_secs(10));
+        fwd.rectifier_config.codex_responses_compatibility = true;
+        fwd.max_attempts = 2;
+        let body = json!({"model":"example-model","input":[{"type":"compaction","encrypted_content":"private"}]});
+        let result = send_codex(
+            &fwd,
+            body,
+            vec![
+                codex_api_provider("a", &base),
+                codex_api_provider("b", &base),
+            ],
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(ForwardError {
+                error: ProxyError::InvalidRequest(_),
+                ..
+            })
+        ));
+        assert!(requests.lock().await.is_empty());
+        upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn codex_429_wait_retries_once_then_succeeds() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let recorded = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            let recorded = recorded.clone();
+            async move {
+                if recorded.fetch_add(1, Ordering::SeqCst) == 0 {
+                    (StatusCode::TOO_MANY_REQUESTS, [("retry-after","1")], r#"{"error":{"message":"rate limit"}}"#)
+                } else {
+                    (StatusCode::OK, [("content-type","application/json")], r#"{"id":"resp_retry","object":"response","status":"completed","output":[]}"#)
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(10), Duration::from_secs(10));
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 5;
+        let result = send_codex(
+            &fwd,
+            json!({"model":"example-model","input":"hello"}),
+            vec![codex_api_provider("rate-limited", &base)],
+        )
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        let status = fwd.status.read().await;
+        assert_eq!(status.rate_limit_wait_count, 1);
+        assert_eq!(status.rate_limit_wait_total_secs, 1);
+        upstream.abort();
     }
 
     fn provider_for_alias(id: &str) -> Provider {

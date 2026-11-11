@@ -11,6 +11,29 @@ use serde_json::json;
 use std::collections::HashMap;
 use tempfile::NamedTempFile;
 
+#[test]
+fn codex_responses_compatibility_persists_with_legacy_settings() {
+    let db = Database::memory().unwrap();
+    assert!(
+        !db.get_rectifier_config()
+            .unwrap()
+            .codex_responses_compatibility
+    );
+    db.set_setting(
+        "rectifier_config",
+        r#"{"enabled":true,"requestThinkingSignature":false}"#,
+    )
+    .unwrap();
+    let mut config = db.get_rectifier_config().unwrap();
+    assert!(!config.codex_responses_compatibility);
+    assert!(!config.request_thinking_signature);
+    config.codex_responses_compatibility = true;
+    db.set_rectifier_config(&config).unwrap();
+    let loaded = db.get_rectifier_config().unwrap();
+    assert!(loaded.codex_responses_compatibility);
+    assert!(!loaded.request_thinking_signature);
+}
+
 const LEGACY_SCHEMA_SQL: &str = r#"
     CREATE TABLE providers (
         id TEXT NOT NULL,

@@ -356,6 +356,10 @@ pub struct RectifierConfig {
     /// 仍保留「显式声明」与「上游兜底」，且不改变 Codex 模型目录声明。
     #[serde(default = "default_true")]
     pub request_media_heuristic: bool,
+    /// Optional history portability repair for API-key Codex Responses providers.
+    /// Disabled by default: dropping reasoning ciphertext can change context.
+    #[serde(default)]
+    pub codex_responses_compatibility: bool,
 }
 
 fn default_true() -> bool {
@@ -374,6 +378,7 @@ impl Default for RectifierConfig {
             request_thinking_budget: true,
             request_media_fallback: true,
             request_media_heuristic: true,
+            codex_responses_compatibility: false,
         }
     }
 }
@@ -562,8 +567,9 @@ mod tests {
 
     #[test]
     fn test_rectifier_config_default_enabled() {
-        // 验证 RectifierConfig::default() 返回全开启状态
+        // General rectifiers stay enabled; lossy Codex history repair is opt-in.
         let config = RectifierConfig::default();
+        assert!(!config.codex_responses_compatibility);
         assert!(config.enabled, "整流器总开关默认应为 true");
         assert!(
             config.request_thinking_signature,
@@ -588,6 +594,7 @@ mod tests {
         // 验证反序列化缺字段时使用默认值 true
         let json = "{}";
         let config: RectifierConfig = serde_json::from_str(json).unwrap();
+        assert!(!config.codex_responses_compatibility);
         assert!(config.enabled);
         assert!(config.request_thinking_signature);
         assert!(config.request_thinking_budget);
@@ -633,6 +640,20 @@ mod tests {
         assert!(config.enabled);
         assert!(config.request_thinking_signature);
         assert!(config.request_thinking_budget);
+    }
+
+    #[test]
+    fn codex_responses_compatibility_setting_round_trips_without_changing_other_rectifiers() {
+        let config: RectifierConfig = serde_json::from_str(
+            r#"{"codexResponsesCompatibility":true,"requestThinkingSignature":false}"#,
+        )
+        .unwrap();
+        assert!(config.codex_responses_compatibility);
+        assert!(!config.request_thinking_signature);
+        assert!(config.request_thinking_budget);
+        let saved = serde_json::to_value(config).unwrap();
+        assert_eq!(saved["codexResponsesCompatibility"], true);
+        assert_eq!(saved["requestThinkingSignature"], false);
     }
 
     #[test]

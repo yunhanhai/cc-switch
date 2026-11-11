@@ -25,6 +25,14 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 已确认来源的汇总见 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。已核实副本与通知随 `.3` Windows 包公开分发，实际检查见[`.3` 发布记录](releases/3.20.1-yunswitch.3.md)。其他资源和平台的许可范围仍按逐项记录核查。
 
+### Codex Responses shim 兼容移植
+
+本次工作分支将 [agentrouter-responses-shim-sentry-fix](https://gitee.com/yunhanhai/agentrouter-responses-shim-sentry-fix) 提交 `ff6277e05beff1bfc61e2a3abc0741deb0d42b3c` 中 `src-patched/sanitize.mjs` 的协议历史清理和嵌套密文修复改编为 Rust，位于 `src-tauri/src/proxy/codex_responses_compat.rs`。Node HTTP 服务、重试与路由代码未复制执行，继续使用 YunSwitch 的原生实现。
+
+基础包 `agentrouter-responses-shim@2.0.1` 使用 MIT，通知为 `Copyright (c) 2026 stevenarai`。原文副本见 [AgentRouter-Responses-Shim-MIT.txt](../licenses/AgentRouter-Responses-Shim-MIT.txt)；输入补丁由 yunhanhai 维护，已保留出处。副本取自固定提交的原始 Git blob，1067 字节，SHA-256 为 `2a9691565b7d9d3770d90c035f865153f1d830c1edd7887a338ec4165202f84c`。
+
+改编内容包括默认关闭的 UI 开关、仅原生 Codex Responses/API Key 路径生效、协议容器限定、压缩历史/状态引用保护、对出站副本处理和回归测试。具体范围与限流边界见 [Codex 兼容说明](CODEX-RESPONSES-COMPATIBILITY.md)。新增副本将随后续新包分发，当前公开 `.3` 包不因此改变。
+
 ## 文档与设计参考
 
 [RuoYi](https://gitee.com/y_project/RuoYi)、[RuoYi-Vue-Plus](https://gitee.com/dromara/RuoYi-Vue-Plus) 和 [RuoYi-Vue-Pro](https://gitee.com/zhijiantianya/ruoyi-vue-pro) 用于参考如何说明上游关系、独立维护主体和功能差异；当前没有因此新增这些项目的框架代码。今后若引入代码或资源，应新增对应条目，核查所选版本的许可证，不能沿用“仅参考”的描述。

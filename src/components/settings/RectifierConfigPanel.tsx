@@ -17,6 +17,7 @@ export function RectifierConfigPanel() {
     requestThinkingBudget: true,
     requestMediaFallback: true,
     requestMediaHeuristic: true,
+    codexResponsesCompatibility: false,
   });
   const [optimizerConfig, setOptimizerConfig] = useState<OptimizerConfig>({
     enabled: false,
@@ -28,7 +29,13 @@ export function RectifierConfigPanel() {
   useEffect(() => {
     settingsApi
       .getRectifierConfig()
-      .then(setConfig)
+      .then((loaded) =>
+        setConfig({
+          ...loaded,
+          codexResponsesCompatibility:
+            loaded.codexResponsesCompatibility ?? false,
+        }),
+      )
       .catch((e) => console.error("Failed to load rectifier config:", e))
       .finally(() => setIsLoading(false));
     settingsApi
@@ -145,6 +152,35 @@ export function RectifierConfigPanel() {
       </div>
 
       <div className="border-t pt-6 mt-6">
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div className="space-y-1">
+            <Label htmlFor="codex-responses-compatibility">
+              {t("settings.advanced.rectifier.codexResponsesCompatibility")}
+            </Label>
+            <p
+              id="codex-responses-compatibility-description"
+              className="text-xs text-muted-foreground"
+            >
+              {t(
+                "settings.advanced.rectifier.codexResponsesCompatibilityDescription",
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "settings.advanced.rectifier.codexResponsesCompatibilityCaution",
+              )}
+            </p>
+          </div>
+          <Switch
+            id="codex-responses-compatibility"
+            aria-describedby="codex-responses-compatibility-description"
+            checked={config.codexResponsesCompatibility}
+            disabled={!config.enabled}
+            onCheckedChange={(checked) =>
+              handleChange({ codexResponsesCompatibility: checked })
+            }
+          />
+        </div>
         <div className="space-y-1 mb-4">
           <h3 className="text-sm font-medium">
             {t("settings.advanced.optimizer.title")}
