@@ -55,19 +55,19 @@ AI 编程工具配置与路由管理，面向多供应商与多模型场景持�
 
 ## 获取与使用
 
-Windows x64 预发布 `3.20.1-yunswitch.3` 已提供安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.3) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.3)。上游基线仍为 v3.20.1。安装、启动、模拟代理请求、合成数据迁移、从 `.2` 升级和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[本次发布记录](docs/releases/3.20.1-yunswitch.3.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
+Windows x64 预发布 `3.20.1-yunswitch.4` 已提供安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4)。上游基线仍为 v3.20.1。安装、启动、模拟代理请求、合成数据迁移、从 `.3` 升级和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[本次发布记录](docs/releases/3.20.1-yunswitch.4.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
-本版在 Windows 安装包与便携 ZIP 中随附已核实的 CodexBar、LobeHub MIT 许可副本及第三方通知。安装、从 `.2` 升级、许可内容核对及卸载清理验收通过，详见[`.3` 发布记录](docs/releases/3.20.1-yunswitch.3.md)。
+本版新增默认关闭的 Codex 加密历史兼容开关，修复最终 429 状态和 Retry-After；便携版及升级后的 MSI 已验证开关、JSON/SSE 与重试，随包附 shim 的 MIT 原文。使用入口为“设置 → 路由 → 整流器”，详见[兼容与重试说明](docs/CODEX-RESPONSES-COMPATIBILITY.md)和[`.4` 发布记录](docs/releases/3.20.1-yunswitch.4.md)。
 
-上一版[`.2`](docs/releases/3.20.1-yunswitch.2.md)已清理内置推广链接与商业合作标记，默认排序为官方预设优先、其余按显示名称排序；必要的供应商识别与兼容字段保留，已有用户配置不执行清洗。首个独立预发布及其历史验收记录保留在[`.1` 发布记录](docs/releases/3.20.1-yunswitch.1.md)。
+早期版本[`.2`](docs/releases/3.20.1-yunswitch.2.md)已清理内置推广链接与商业合作标记，默认排序为官方预设优先、其余按显示名称排序；必要的供应商识别与兼容字段保留，已有用户配置不执行清洗。首个独立预发布及其历史验收记录保留在[`.1` 发布记录](docs/releases/3.20.1-yunswitch.1.md)。
 
 | 平台          | 验证范围                                                                                                                                                    | 发布状态             |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/42860850983)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移与 `.2` 升级 | 已发布独立预览包     |
-| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42860851450)：前端检查、各平台后端测试与 Clippy                                               | 尚无独立包及安装验收 |
+| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移与 `.3` 升级 | 已发布独立预览包     |
+| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42999648172)：前端检查、各平台后端测试与 Clippy                                               | 尚无独立包及安装验收 |
 | ARM64         | 尚无独立安装验收                                                                                                                                            | 尚未发布独立包       |
 
-以上记录对应 `.3` 预发布源码和安装包。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
+以上记录对应 `.4` 预发布源码和安装包。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
 
 - [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)

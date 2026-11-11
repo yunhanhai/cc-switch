@@ -37,21 +37,21 @@ Claude Code、Codex、Gemini CLI などの設定管理とローカルルーテ�
 
 ## 現在のバージョンと入手方法
 
-Windows x64 のプレビュー版 `3.20.1-yunswitch.3` をインストーラーとポータブル ZIP で公開しました：[GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.3) / [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.3)。インストール、起動、模擬プロキシ要求、合成データ移行、`.2` からのアップグレードとアンインストールを検証済みです。Windows 署名は未設定で、自動更新は無効です。上流の基準バージョンは v3.20.1 のままです。
-[今回のリリース記録](docs/releases/3.20.1-yunswitch.3.md)と[データ移行ガイド](docs/MIGRATION-YUNSWITCH.md)を参照してください。開発版は `~/.yunswitch-dev`、配布版は `~/.yunswitch` を使用します。
+Windows x64 のプレビュー版 `3.20.1-yunswitch.4` をインストーラーとポータブル ZIP で公開しました：[GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) / [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4)。インストール、起動、模擬プロキシ要求、合成データ移行、`.3` からのアップグレードとアンインストールを検証済みです。Windows 署名は未設定で、自動更新は無効です。上流の基準バージョンは v3.20.1 のままです。
+[今回のリリース記録](docs/releases/3.20.1-yunswitch.4.md)と[データ移行ガイド](docs/MIGRATION-YUNSWITCH.md)を参照してください。開発版は `~/.yunswitch-dev`、配布版は `~/.yunswitch` を使用します。
 上流のインストーラーやパッケージ管理コマンドは、本リポジトリの追加機能を配布するものではありません。
 
-本版は Windows インストーラーとポータブル ZIP に、確認済みの CodexBar と LobeHub の MIT ライセンス複製および第三者通知を同梱します。インストール、`.2` からのアップグレード、ライセンス内容とアンインストール時の削除を検証済みです。[`.3` リリース記録](docs/releases/3.20.1-yunswitch.3.md)を参照してください。
+`.4` は既定で無効の Codex 暗号化履歴互換スイッチを追加し、最終レート制限の HTTP 429 と Retry-After を保持します。ポータブル版とアップグレード後の MSI で設定、JSON/SSE、再試行を検証し、shim の MIT ライセンスを同梱します。[互換性と再試行の範囲](docs/CODEX-RESPONSES-COMPATIBILITY.md)と[`.4` リリース記録](docs/releases/3.20.1-yunswitch.4.md)を参照してください。
 
 以前の[`.2` リリース](docs/releases/3.20.1-yunswitch.2.md)は組み込みプリセットの紹介リンクと商業パートナー表示を削除し、既定の並び順は公式プリセットを先頭に、残りを表示名で並べます。必要な識別・互換フィールドと既存ユーザー設定は保持します。最初のプレビュー版とその検証履歴は[`.1` リリース記録](docs/releases/3.20.1-yunswitch.1.md)に保存しています。
 
 | プラットフォーム | 検証範囲                                                                                                                                                                                                | 配布状況                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Windows x64      | [クリーン runner でのインストール検証](https://github.com/yunhanhai/yunswitch/actions/runs/42860850983)：ポータブル ZIP と MSI の画面起動、模擬プロキシ要求、合成データ移行と `.2` からのアップグレード | 独立プレビュー版を公開済み               |
-| macOS / Linux    | [ソース CI](https://github.com/yunhanhai/yunswitch/actions/runs/42860851450)：フロントエンド検証、各 OS のバックエンドテストと Clippy                                                                   | 独立パッケージとインストール検証は未提供 |
+| Windows x64      | [クリーン runner でのインストール検証](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461)：ポータブル ZIP と MSI の画面起動、模擬プロキシ要求、合成データ移行と `.3` からのアップグレード | 独立プレビュー版を公開済み               |
+| macOS / Linux    | [ソース CI](https://github.com/yunhanhai/yunswitch/actions/runs/42999648172)：フロントエンド検証、各 OS のバックエンドテストと Clippy                                                                   | 独立パッケージとインストール検証は未提供 |
 | ARM64            | 独立したインストール検証は未実施                                                                                                                                                                        | 独立パッケージは未公開                   |
 
-この記録は `.3` プレビュー版のソースとパッケージに対応します。プリセットは設定の出発点です。すべての有料プロバイダーへの実接続や個人データ移行を一括して検証したものではありません。[検証範囲](docs/PROJECT.md#供应商目录维护与验证范围)も参照してください。
+この記録は `.4` プレビュー版のソースとパッケージに対応します。プリセットは設定の出発点です。すべての有料プロバイダーへの実接続や個人データ移行を一括して検証したものではありません。[検証範囲](docs/PROJECT.md#供应商目录维护与验证范围)も参照してください。
 
 ## ソースから開発する
 
