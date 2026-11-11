@@ -306,6 +306,13 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     assert.equal(retry.status, 200, retry.text);
     assert.equal(hits, 2);
     const status = await cdp.invoke("get_proxy_status");
+    const wireStatus = await fetch("http://127.0.0.1:15731/status", {
+      signal: AbortSignal.timeout(5_000),
+    }).then((response) => response.json());
+    assert.ok(
+      status.rate_limit_waits_by_app.codex,
+      `Missing Codex wait bucket: ${JSON.stringify({ status, wireStatus })}`,
+    );
     assert.equal(status.rate_limit_waits_by_app.codex.count, 1);
     assert.equal(status.rate_limit_waits_by_app.codex.totalSecs, 1);
     check(
