@@ -787,6 +787,95 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn codex_stream_guard_preserves_final_429_headers_and_recovers_before_output() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let mock_app = Router::new().fallback(move || {
+            let counter = counter.clone();
+            async move {
+                let index = counter.fetch_add(1, Ordering::SeqCst);
+                let text = if index < 2 {
+                    concat!(
+                        "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\",\"output\":[]}}\n\n",
+                        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"failed_attempt\",\"status\":\"failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"private_error\",\"retry_after_seconds\":1}}}\n\n"
+                    )
+                } else {
+                    "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"successful_attempt\",\"status\":\"completed\",\"output\":[]}}\n\n"
+                };
+                (
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "text/event-stream")],
+                    text,
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let mock_handle =
+            tokio::spawn(async move { axum::serve(listener, mock_app).await.unwrap() });
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id(
+            "guard-gateway".into(),
+            "Guard gateway".into(),
+            json!({"base_url":format!("http://{address}/v1"),"auth":{"OPENAI_API_KEY":"fake"}}),
+            None,
+        );
+        db.save_provider("codex", &provider).unwrap();
+        db.set_current_provider("codex", &provider.id).unwrap();
+        let mut app_config = db.get_proxy_config_for_app("codex").await.unwrap();
+        app_config.auto_failover_enabled = false;
+        app_config.rate_limit_retry_enabled = false;
+        app_config.same_provider_retries = 0;
+        db.update_proxy_config_for_app(app_config.clone())
+            .await
+            .unwrap();
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        let info = proxy.start().await.unwrap();
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/v1/responses", info.port);
+        let body = json!({"model":"fake-model","stream":true,"input":"hello"});
+        let first = client.post(&url).json(&body).send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(first.headers()[header::RETRY_AFTER], "1");
+        let error = first.json::<Value>().await.unwrap();
+        assert_eq!(error["error"]["type"], "rate_limit_error");
+        assert_eq!(error["error"]["retry_after_seconds"], 1);
+        assert!(!error.to_string().contains("private_error"));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        app_config.rate_limit_retry_enabled = true;
+        app_config.rate_limit_max_wait_secs = 5;
+        db.update_proxy_config_for_app(app_config).await.unwrap();
+        let recovered = client.post(&url).json(&body).send().await.unwrap();
+        assert_eq!(recovered.status(), StatusCode::OK);
+        assert!(recovered.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .contains("text/event-stream"));
+        let text = recovered.text().await.unwrap();
+        assert!(text.contains("successful_attempt"));
+        assert!(!text.contains("failed_attempt"));
+        assert!(!text.contains("response.failed"));
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        let status = proxy.get_status().await;
+        assert_eq!(status.rate_limit_waits_for("codex").count, 1);
+        assert_eq!(status.total_requests, 2);
+        proxy.stop().await.unwrap();
+        mock_handle.abort();
+    }
+
     // End-to-end runtime check for the Claude→Codex converted-provider shape:
     // a real ProxyServer forwards a Codex Responses request through the real
     // forwarder to a mock Anthropic Messages upstream, and we assert the wire

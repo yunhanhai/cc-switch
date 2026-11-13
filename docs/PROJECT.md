@@ -36,7 +36,9 @@
 
 ## 当前版本与发布状态
 
-当前源码版本为 `3.20.1-yunswitch.4`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Codex 兼容与限流修复版已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 同步公开 Windows x64 安装版与便携 ZIP。安装、从 `.3` 升级、开关及模拟网关验收通过，校验与来源见[`.4` 发布记录](releases/3.20.1-yunswitch.4.md)。之前的 [`.3` 版本](releases/3.20.1-yunswitch.3.md)保留原附件与验收记录。
+当前工作分支准备 `3.20.1-yunswitch.5`，增加原生 Codex HTTP 200 流内错误的输出前恢复，见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.5` 准备记录](releases/3.20.1-yunswitch.5.md)。当前公开安装包仍为 `.4`。
+
+当前源码版本为 `3.20.1-yunswitch.5`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。已公开的 Codex 兼容与限流修复版 `.4` 在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 提供 Windows x64 安装版与便携 ZIP。其安装、从 `.3` 升级和模拟网关验收通过，见[`.4` 发布记录](releases/3.20.1-yunswitch.4.md)。`.5` 新包仍按准备记录推进。
 
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
@@ -52,7 +54,7 @@
 
 开发命令通过 `tauri.dev.conf.json` 覆盖身份，Cargo debug profile 使用隔离布局；发布构建使用正式布局。运行时按布局设置窗口标题。显式应用设置可以覆盖 CLI 目录；开发布局默认优先于 Hermes、OpenCode 和 Pi 的环境变量目录。测试沙盒保留旧夹具布局，仅用于兼容现有测试。
 
-Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1.4`，已公开 `.3` 安装版本为 `3.20.1.3`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2` 与 `.2`→`.3` 升级均已实际通过验收，`.3`→`.4` 也已通过旧设置、安装后功能和许可内容验收。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
+Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1.5`，已公开 `.4` 为 `3.20.1.4`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2`、`.2`→`.3`、`.3`→`.4` 升级已通过，`.4`→`.5` 正在验收。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
 
 自动更新关闭、更新地址为空，上游签名公钥已移除。更新按钮打开本项目的 Releases 页面；后续配置本项目签名后再启用自动更新。R2 镜像默认停用，仅通过本项目显式配置启用。
 

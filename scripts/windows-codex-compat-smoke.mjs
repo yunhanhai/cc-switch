@@ -101,6 +101,37 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         );
         return;
       }
+      const streamFailure =
+        scenario === "always-stream-429" ||
+        ((scenario === "retry-stream-429" || scenario === "retry-stream-503") &&
+          hits === 1);
+      if (streamFailure || scenario === "late-stream-error") {
+        const code =
+          scenario === "retry-stream-503" || scenario === "late-stream-error"
+            ? "server_error"
+            : "rate_limit_exceeded";
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(
+          'event: response.created\ndata: {"type":"response.created","response":{"status":"in_progress","output":[]}}\n\n',
+        );
+        if (scenario === "late-stream-error") {
+          response.write(
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"only-once"}\n\n',
+          );
+        }
+        response.end(
+          "event: response.failed\ndata: " +
+            JSON.stringify({
+              type: "response.failed",
+              response: {
+                status: "failed",
+                error: { code, retry_after_seconds: 1 },
+              },
+            }) +
+            "\n\n",
+        );
+        return;
+      }
       if (JSON.stringify(body).includes(ciphertext)) {
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.end(
@@ -239,7 +270,7 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     }
     await setCompatibility(cdp, until, false);
     const disabled = await send(history);
-    assert.equal(disabled.status, 200);
+    assert.equal(disabled.status, 400);
     assert.match(disabled.text, /invalid_encrypted_content/);
     assert.equal(hits, 1);
     assert.equal(
@@ -385,6 +416,82 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     );
     check(
       `${label} restarted proxy retires pooled connections and keeps live statistics`,
+    );
+
+    scenario = "retry-stream-429";
+    hits = 0;
+    const earlyLimited = await send({
+      model: "ci-model",
+      input: "Early limit",
+      stream: true,
+    });
+    assert.equal(earlyLimited.status, 200, earlyLimited.text);
+    assert.equal(hits, 2);
+    assert.match(earlyLimited.text, /YunSwitch Codex smoke/);
+    assert.doesNotMatch(earlyLimited.text, /response.failed/);
+    const afterStreamWait = await cdp.invoke("get_proxy_status");
+    assert.equal(afterStreamWait.rate_limit_waits_by_app.codex.count, 2);
+    check(label + " Codex HTTP 200 stream rate limits retry before output");
+
+    scenario = "retry-stream-503";
+    hits = 0;
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 1,
+        sameProviderRetryBackoffMs: 1,
+        sameProviderRetryMaxBackoffMs: 1,
+      },
+    });
+    const earlyServer = await send({
+      model: "ci-model",
+      input: "Early server error",
+      stream: true,
+    });
+    assert.equal(earlyServer.status, 200, earlyServer.text);
+    assert.equal(hits, 2);
+    assert.match(earlyServer.text, /YunSwitch Codex smoke/);
+    assert.doesNotMatch(earlyServer.text, /response.failed/);
+    check(label + " Codex stream service errors obey same-provider retry");
+
+    scenario = "late-stream-error";
+    hits = 0;
+    const partial = await send({
+      model: "ci-model",
+      input: "Partial output",
+      stream: true,
+    });
+    assert.equal(partial.status, 200, partial.text);
+    assert.equal(hits, 1);
+    assert.equal(partial.text.match(/only-once/g)?.length, 1);
+    assert.match(partial.text, /response.failed/);
+    check(label + " Codex errors after output never replay text or tools");
+
+    scenario = "always-stream-429";
+    hits = 0;
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: false,
+      },
+    });
+    const finalStreamLimit = await send({
+      model: "ci-model",
+      input: "Final stream limit",
+      stream: true,
+    });
+    assert.equal(finalStreamLimit.status, 429, finalStreamLimit.text);
+    assert.equal(finalStreamLimit.retryAfter, "1");
+    assert.equal(
+      JSON.parse(finalStreamLimit.text).error.type,
+      "rate_limit_error",
+    );
+    assert.equal(hits, 1);
+    check(
+      label + " Codex final stream rate limit preserves 429 and Retry-After",
     );
   } finally {
     try {

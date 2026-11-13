@@ -1,5 +1,12 @@
 # 本仓库更新记录 / Changes in this distribution
 
+## 3.20.1-yunswitch.5 — Codex 输出前流内错误恢复（准备中）
+
+- 识别原生 Codex Responses HTTP 200 中输出前的明确限流/服务端错误，复用已有等待、同家重试和故障转移。
+- 限制首段检查的时间、字节与数据块；出现输出、工具活动、未知扩展或不可重放状态后保持原样交付。
+- 保留明确错误码和最终 429 等待头，不将失败流混入成功流；补充 Windows 包内恢复和 `.4` 升级验收。
+- 适用范围与进度见[恢复说明](docs/CODEX-STREAM-RECOVERY.md)和[`.5` 发布记录](docs/releases/3.20.1-yunswitch.5.md)。
+
 ## 3.20.1-yunswitch.4 — Codex 兼容与限流修复（2026-11-11）
 
 - 增加默认关闭的“Codex 加密历史兼容”开关，适用于经本地代理使用原生 Responses 的 API Key 供应商；移植 shim 的历史清理，并保护无法还原的压缩历史、状态引用和用户 JSON。
