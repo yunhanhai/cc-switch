@@ -55,19 +55,19 @@ AI 编程工具配置与路由管理，面向多供应商与多模型场景持�
 
 ## 获取与使用
 
-Windows x64 预发布 `3.20.1-yunswitch.5` 已提供安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.5) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.5)。上游基线仍为 v3.20.1。安装、启动、模拟代理请求、合成数据迁移、从 `.4` 升级和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[本次发布记录](docs/releases/3.20.1-yunswitch.5.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
+Windows x64 预发布 `3.20.1-yunswitch.6` 已提供安装版与免安装版：[GitHub 下载](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.6) / [Gitee 下载](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.6)。上游基线仍为 v3.20.1。安装、启动、模拟代理请求、合成数据迁移、从 `.5` 升级和卸载验收通过；当前未配置 Windows 发布者签名，自动更新关闭。详见[本次发布记录](docs/releases/3.20.1-yunswitch.6.md)与[数据迁移指南](docs/MIGRATION-YUNSWITCH.md)。
 
-本版进一步处理 Codex HTTP 200 响应中的输出前限流与服务端暂时错误，复用已有等待、同家重试和故障转移设置；出现输出、工具活动或未知事件后原样交付。便携和升级后的 MSI 均已验收，见[输出前恢复说明](docs/CODEX-STREAM-RECOVERY.md)和[`.5` 发布记录](docs/releases/3.20.1-yunswitch.5.md)。
+本版支持压缩 Codex Responses 的输出前限流恢复，并修复并发等待与请求取消后的状态、熔断探测清理。其他请求成功不会清掉当前等待提示；已有输出或工具活动后的错误不会重放。便携和升级后程序均已验收，见[恢复说明](docs/CODEX-STREAM-RECOVERY.md)与[`.6` 发布记录](docs/releases/3.20.1-yunswitch.6.md)。
 
 早期版本[`.2`](docs/releases/3.20.1-yunswitch.2.md)已清理内置推广链接与商业合作标记，默认排序为官方预设优先、其余按显示名称排序；必要的供应商识别与兼容字段保留，已有用户配置不执行清洗。首个独立预发布及其历史验收记录保留在[`.1` 发布记录](docs/releases/3.20.1-yunswitch.1.md)。
 
 | 平台          | 验证范围                                                                                                                                                    | 发布状态             |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移与 `.4` 升级 | 已发布独立预览包     |
-| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)：前端检查、各平台后端测试与 Clippy                                               | 尚无独立包及安装验收 |
+| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43445087046)：便携 ZIP 与 MSI 的界面启动、模拟代理请求、合成数据迁移与 `.5` 升级 | 已发布独立预览包     |
+| macOS / Linux | [源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43445225978)：前端检查、各平台后端测试与 Clippy                                               | 尚无独立包及安装验收 |
 | ARM64         | 尚无独立安装验收                                                                                                                                            | 尚未发布独立包       |
 
-以上记录对应 `.5` 预发布源码和安装包。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
+以上记录对应 `.6` 预发布源码和安装包。内置预设是配置起点，尚未统一验证所有真实付费供应商的连通性与用户私有数据迁移。详见[验证范围](docs/PROJECT.md#供应商目录维护与验证范围)。
 
 - [Gitee 仓库](https://gitee.com/yunhanhai/yunswitch)
 - [GitHub Releases](https://github.com/yunhanhai/yunswitch/releases)

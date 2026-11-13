@@ -2,7 +2,7 @@
 
 `.5` Windows x64 已公开，原生 Codex Responses 入口增加首段检查。`.4` 包保留原有处理；构建、安装与升级证据见[`.5` 发布记录](releases/3.20.1-yunswitch.5.md)。
 
-`.6` 源码加入受支持压缩响应的增量解码，以及等待状态与半开探测在请求取消后的清理；发布和验收状态见[`.6` 记录](releases/3.20.1-yunswitch.6.md)。当前公开 `.5` 包保持该版原有行为。
+`.6` Windows x64 已公开，支持压缩响应增量解码以及请求取消后的等待与半开探测清理，见[发布记录](releases/3.20.1-yunswitch.6.md)。`.5` 及更早包保持各版原行为。
 
 ## 处理的问题
 
@@ -12,7 +12,7 @@
 
 ## 生效范围与设置
 
-适用于经 YunSwitch 本地路由使用 API Key 的原生 Codex `/responses`、`/v1/responses` 请求，不按网站域名限制。识别 SSE 和 JSON，含未标注 Content-Type 的可识别响应。`.5` 的压缩响应不执行首段检查；`.6` 源码支持 gzip / x-gzip、zlib 和常见 raw deflate、Brotli、zstd / zst，并在解码后使用同一恢复判断。
+适用于经 YunSwitch 本地路由使用 API Key 的原生 Codex `/responses`、`/v1/responses` 请求，不按网站域名限制。识别 SSE 和 JSON，含未标注 Content-Type 的可识别响应。`.5` 的压缩响应不执行首段检查；`.6` 支持 gzip / x-gzip、zlib 和常见 raw deflate、Brotli、zstd / zst，并在解码后使用同一恢复判断。
 
 设置入口为**设置 → 路由 → 故障转移 → Codex**：
 
@@ -43,7 +43,7 @@
 
 错误分类只使用结构化字段，不按上游消息中的关键词猜测。诊断采用固定文本和已知错误码，不回显私人错误内容。失败尝试的生命周期和错误事件不混入最终成功响应。
 
-`.6` 增量解码按 8 KiB 分块，不收集整段长流。压缩输入和每层解码输出最多 128 MiB，最多四层编码，zstd 窗口最多 8 MiB；超过编码层数或存在未知编码时保留原压缩体与头。已知编码的损坏、截断或超限会终止响应；输出前失败仍按既有重试预算处理，已有输出后不会重放。解码后移除原压缩编码、长度和表示校验头，保留状态、Content-Type、Retry-After 和请求标识。
+`.6` 增量解码按 8 KiB 分块，不收集整段长流。压缩输入和每层解码输出最多 128 MiB，最多四层编码，zstd 窗口最多 8 MiB；超过编码层数或存在未知编码时保留原压缩体与头。已知编码的损坏或截断会终止响应，输出前失败按既有重试预算处理；字节超限直接返回大小上限错误，不重试，已有输出后也不会重放。解码后移除原压缩编码、长度和表示校验头，保留状态、Content-Type、Retry-After 和请求标识。
 
 ## 验证范围
 
@@ -53,4 +53,4 @@ Windows 包验收在便携和升级后安装程序中验证流内 429、暂时�
 
 官方文档请求在本轮环境返回 403，未据未读取的网页宣称全部协议兼容。实现依照仓库已有 Responses 结构与可复现测试，保守透传未知扩展。
 
-本版[最终 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)和[新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)通过。Windows 共 64 项运行检查，便携与升级后程序分别验证流内限流等待、服务端错误重试、输出后禁止重试、最终 429 状态与头，以及重启和旧设置保留。
+`.5` 的[源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)和[安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)记录保留。`.6` [最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43445225978)和[新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/43445087046)通过，Windows 共 72 项运行检查；新增压缩限流、最终错误头、并发等待保留及取消后停止重试。
