@@ -33,6 +33,12 @@ CodexBar 对应的公开参考文件为 [GrokAuth.swift](https://github.com/stei
 
 改编内容包括默认关闭的 UI 开关、仅原生 Codex Responses/API Key 路径生效、协议容器限定、压缩历史/状态引用保护、对出站副本处理和回归测试。具体范围与限流边界见 [Codex 兼容说明](CODEX-RESPONSES-COMPATIBILITY.md)。新增副本将随后续新包分发，当前公开 `.3` 包不因此改变。
 
+### 增量压缩响应依赖
+
+`.6` 使用 `async-compression 0.4.41`、`compression-codecs 0.4.37` 和 `compression-core 0.4.31` 作为 Cargo 依赖，版本与校验值固定在 `src-tauri/Cargo.lock`。crate 的来源分别为提交 `269174b4be20e3cfcbb7e7fa4d7d9596183e287b`、`9d848a02f13f3a56542e4123be8947a8da06097e` 和 `2a28343998e67ea519b87005b9d295b134c00dd0`，原项目为 [async-compression](https://github.com/Nullus157/async-compression)。依赖许可为 MIT OR Apache-2.0，本项目采用 MIT 选项；[MIT 原文](https://github.com/Nullus157/async-compression/blob/269174b4be20e3cfcbb7e7fa4d7d9596183e287b/LICENSE-MIT)保存于 [Async-Compression-MIT.txt](../licenses/Async-Compression-MIT.txt)。
+
+HTTP 解码接线、预算和取消管理由本项目实现，位于 `src-tauri/src/proxy/response_decompression.rs`；未复制其他代理框架。通知与许可加入 MSI/绿色包，实际随包内容由 Windows 验收检查。此记录仅覆盖本次新增来源。
+
 ## 文档与设计参考
 
 [RuoYi](https://gitee.com/y_project/RuoYi)、[RuoYi-Vue-Plus](https://gitee.com/dromara/RuoYi-Vue-Plus) 和 [RuoYi-Vue-Pro](https://gitee.com/zhijiantianya/ruoyi-vue-pro) 用于参考如何说明上游关系、独立维护主体和功能差异；当前没有因此新增这些项目的框架代码。今后若引入代码或资源，应新增对应条目，核查所选版本的许可证，不能沿用“仅参考”的描述。

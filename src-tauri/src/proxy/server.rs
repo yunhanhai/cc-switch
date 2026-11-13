@@ -876,6 +876,312 @@ mod tests {
         mock_handle.abort();
     }
 
+    #[tokio::test]
+    async fn cancelled_codex_wait_drops_request_and_clears_waiting_snapshot() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::AsyncWriteExt;
+        use tokio::time::{timeout, Duration};
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let upstream = Router::new().fallback(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "3")],
+                    r#"{"error":{"code":"rate_limit_exceeded"}}"#,
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let upstream_handle =
+            tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id(
+            "cancel-gateway".into(),
+            "Cancel gateway".into(),
+            json!({"base_url":format!("http://{address}/v1"),"auth":{"OPENAI_API_KEY":"fake"}}),
+            None,
+        );
+        db.save_provider("codex", &provider).unwrap();
+        db.set_current_provider("codex", &provider.id).unwrap();
+        let mut config = db.get_proxy_config_for_app("codex").await.unwrap();
+        config.rate_limit_retry_enabled = true;
+        config.rate_limit_max_wait_secs = 5;
+        config.auto_failover_enabled = false;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                ..ProxyConfig::default()
+            },
+            db,
+            None,
+        );
+        let info = proxy.start().await.unwrap();
+        let body = r#"{"model":"synthetic","stream":true,"input":"cancel"}"#;
+        let wire = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",body.len());
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .unwrap();
+        stream.write_all(wire.as_bytes()).await.unwrap();
+        timeout(Duration::from_secs(3), async {
+            loop {
+                if proxy.get_status().await.rate_limit_waiting.is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("request enters retry wait");
+        drop(stream);
+        let cleared = timeout(Duration::from_millis(800), async {
+            loop {
+                let status = proxy.get_status().await;
+                if status.active_connections == 0 && status.rate_limit_waiting.is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        let cooldown_after_cancel = proxy
+            .state
+            .provider_router
+            .rate_limit_cooldown_secs(&provider.id, "codex")
+            .await;
+        tokio::time::sleep(Duration::from_millis(3100)).await;
+        let final_status = proxy.get_status().await;
+        proxy.stop().await.unwrap();
+        upstream_handle.abort();
+        assert!(
+            cleared.is_ok(),
+            "client disconnect left waiting state behind: {final_status:?}"
+        );
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "cancelled request must not retry"
+        );
+        assert!(
+            final_status.last_error.is_none(),
+            "cancellation left a wait message in last_error"
+        );
+        assert!(
+            cooldown_after_cancel > 0,
+            "cancellation erased a real upstream cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_codex_success_does_not_clear_another_requests_wait() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::time::{timeout, Duration};
+        let upstream = Router::new().fallback(|axum::Json(body): axum::Json<Value>| async move {
+            if body["input"] == "waiting" {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "5")],
+                    axum::Json(json!({"error":{"code":"rate_limit_exceeded"}})),
+                )
+            } else {
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/json")],
+                    axum::Json(json!({"id":"resp_once","object":"response","status":"completed","output":[]})),
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let upstream_handle =
+            tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        let db = Arc::new(Database::memory().unwrap());
+        let provider = Provider::with_id(
+            "concurrent-gateway".into(),
+            "Concurrent gateway".into(),
+            json!({"base_url":format!("http://{address}/v1"),"auth":{"OPENAI_API_KEY":"fake"}}),
+            None,
+        );
+        db.save_provider("codex", &provider).unwrap();
+        db.set_current_provider("codex", &provider.id).unwrap();
+        let mut config = db.get_proxy_config_for_app("codex").await.unwrap();
+        config.rate_limit_retry_enabled = true;
+        config.rate_limit_max_wait_secs = 10;
+        config.auto_failover_enabled = false;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                ..ProxyConfig::default()
+            },
+            db,
+            None,
+        );
+        let info = proxy.start().await.unwrap();
+        let body = r#"{"model":"synthetic","stream":true,"input":"waiting"}"#;
+        let mut waiting = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .unwrap();
+        waiting.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        timeout(Duration::from_secs(2), async {
+            while proxy.get_status().await.rate_limit_waiting.is_none() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("first request waits");
+        let response = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/v1/responses", info.port))
+            .json(&json!({"model":"synthetic","input":"success"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.bytes().await.unwrap();
+        let status = proxy.get_status().await;
+        assert!(
+            status.rate_limit_waiting.is_some(),
+            "success cleared another request's wait"
+        );
+        assert_eq!(status.success_requests, 1);
+        drop(waiting);
+        timeout(Duration::from_secs(1), async {
+            while proxy.get_status().await.rate_limit_waiting.is_some() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("cancelled request clears only its wait");
+        proxy.stop().await.unwrap();
+        upstream_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn cancelled_codex_half_open_request_releases_probe_for_the_next_request() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::time::{timeout, Duration};
+        let (entered_tx, mut entered_rx) = tokio::sync::mpsc::unbounded_channel();
+        let upstream = Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+            let entered = entered_tx.clone();
+            async move {
+                if body["input"] == "cancel" {
+                    entered.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                }
+                axum::Json(json!({"id":"resp_recovered","object":"response","status":"completed","output":[]}))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let upstream_handle =
+            tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        let db = Arc::new(Database::memory().unwrap());
+        for id in ["probe-a", "probe-b"] {
+            let provider = Provider::with_id(
+                id.into(),
+                id.into(),
+                json!({"base_url":format!("http://{address}/v1"),"auth":{"OPENAI_API_KEY":"fake"}}),
+                None,
+            );
+            db.save_provider("codex", &provider).unwrap();
+            db.add_to_failover_queue("codex", id).unwrap();
+        }
+        db.set_current_provider("codex", "probe-a").unwrap();
+        let mut config = db.get_proxy_config_for_app("codex").await.unwrap();
+        config.auto_failover_enabled = true;
+        config.circuit_failure_threshold = 1;
+        config.circuit_timeout_seconds = 0;
+        db.update_proxy_config_for_app(config).await.unwrap();
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                enable_logging: false,
+                ..ProxyConfig::default()
+            },
+            db.clone(),
+            None,
+        );
+        proxy
+            .state
+            .provider_router
+            .record_result(
+                "probe-a",
+                "codex",
+                None,
+                false,
+                Some("synthetic failure".into()),
+            )
+            .await
+            .unwrap();
+        let before = db.get_provider_health("probe-a", "codex").await.unwrap();
+        let info = proxy.start().await.unwrap();
+        let body = r#"{"model":"synthetic","stream":true,"input":"cancel"}"#;
+        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .unwrap();
+        client.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        timeout(Duration::from_secs(2), entered_rx.recv())
+            .await
+            .expect("upstream receives the probe")
+            .unwrap();
+        assert_eq!(
+            proxy
+                .state
+                .provider_router
+                .get_circuit_breaker_stats("probe-a", "codex")
+                .await
+                .unwrap()
+                .half_open_probes,
+            1
+        );
+        drop(client);
+        timeout(Duration::from_secs(1), async {
+            loop {
+                let status = proxy.get_status().await;
+                let stats = proxy
+                    .state
+                    .provider_router
+                    .get_circuit_breaker_stats("probe-a", "codex")
+                    .await
+                    .unwrap();
+                if status.active_connections == 0 && stats.half_open_probes == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("disconnect releases the actual forwarder's probe");
+        let after = db.get_provider_health("probe-a", "codex").await.unwrap();
+        assert_eq!(after.consecutive_failures, before.consecutive_failures);
+        assert_eq!(after.last_failure_at, before.last_failure_at);
+        let response = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/v1/responses", info.port))
+            .json(&json!({"model":"synthetic","input":"recover"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.text().await.unwrap().contains("resp_recovered"));
+        assert_eq!(
+            proxy.get_status().await.current_provider_id.as_deref(),
+            Some("probe-a")
+        );
+        proxy.stop().await.unwrap();
+        upstream_handle.abort();
+    }
+
     // End-to-end runtime check for the Claude→Codex converted-provider shape:
     // a real ProxyServer forwards a Codex Responses request through the real
     // forwarder to a mock Anthropic Messages upstream, and we assert the wire

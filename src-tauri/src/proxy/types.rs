@@ -104,12 +104,14 @@ pub struct ProxyStatus {
     pub rate_limit_waits_by_app: std::collections::HashMap<String, AppRateLimitWaits>,
     /// 当前是否有请求正在 429 等待循环中（本次轮询快照）。
     ///
-    /// 用于解决"等待期间显示陈旧错误"：429 内层 `loop { sleep; continue }`
-    /// 可能持续 30-120s，期间若不更新 `last_error`，前端会一直显示上一家
-    /// provider 的旧错误。等待态让 UI 能在该期间展示"正在等待限流恢复"
-    /// 而非陈旧的 `Provider X 失败`。
+    /// Shows the most recent live request wait. A concurrent success does not
+    /// clear another request's entry; cancellation removes only its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_waiting: Option<RateLimitWaiting>,
+    /// Request-owned waits; the public snapshot shows the most recent live wait.
+    /// Runtime ownership must never be persisted or sent to the frontend.
+    #[serde(skip)]
+    pub(crate) active_rate_limit_waits: std::collections::BTreeMap<u64, RateLimitWaiting>,
     /// 当前活跃的代理目标列表
     #[serde(default)]
     pub active_targets: Vec<ActiveTarget>,
@@ -144,6 +146,24 @@ pub struct AppRateLimitWaits {
 }
 
 impl ProxyStatus {
+    pub(crate) fn begin_rate_limit_wait(&mut self, id: u64, waiting: RateLimitWaiting) {
+        self.record_rate_limit_wait(&waiting.app_type, waiting.wait_secs);
+        self.active_rate_limit_waits.insert(id, waiting);
+        self.refresh_rate_limit_waiting();
+    }
+
+    pub(crate) fn end_rate_limit_wait(&mut self, id: u64) {
+        self.active_rate_limit_waits.remove(&id);
+        self.refresh_rate_limit_waiting();
+    }
+
+    fn refresh_rate_limit_waiting(&mut self) {
+        self.rate_limit_waiting = self
+            .active_rate_limit_waits
+            .last_key_value()
+            .map(|(_, waiting)| waiting.clone());
+    }
+
     /// 读取指定应用的 429 等待统计；无记录时返回全零。
     pub fn rate_limit_waits_for(&self, app_type: &str) -> AppRateLimitWaits {
         self.rate_limit_waits_by_app
@@ -514,6 +534,32 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_waits_restore_the_previous_live_snapshot_without_stale_errors() {
+        let mut status = ProxyStatus::default();
+        let waiting = |provider: &str| RateLimitWaiting {
+            provider_id: provider.into(),
+            provider_name: provider.into(),
+            app_type: "codex".into(),
+            wait_secs: 2,
+            attempt: 1,
+            started_at: "2026-11-13T00:00:00Z".into(),
+        };
+        status.begin_rate_limit_wait(1, waiting("a"));
+        status.begin_rate_limit_wait(2, waiting("b"));
+        assert_eq!(status.rate_limit_waiting.as_ref().unwrap().provider_id, "b");
+        status.end_rate_limit_wait(2);
+        assert_eq!(status.rate_limit_waiting.as_ref().unwrap().provider_id, "a");
+        status.end_rate_limit_wait(2); // Duplicate cleanup must not affect a.
+        assert_eq!(status.rate_limit_waiting.as_ref().unwrap().provider_id, "a");
+        assert_eq!(status.rate_limit_waits_for("codex").count, 2);
+        assert!(status.last_error.is_none());
+        let serialized = serde_json::to_value(&status).unwrap();
+        assert!(serialized.get("active_rate_limit_waits").is_none());
+        status.end_rate_limit_wait(1);
+        assert!(status.rate_limit_waiting.is_none());
+    }
 
     /// 429 等待必须按 app 分桶：韧性摘要按应用展示，只记全局会让
     /// claude 的限流等待出现在 codex 的卡片上。

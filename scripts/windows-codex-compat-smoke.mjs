@@ -1,6 +1,8 @@
 // Called only after windows-release-smoke.mjs validates a disposable runner.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { connect } from "node:net";
+import { gzipSync, brotliCompressSync } from "node:zlib";
 
 async function openCompatibilitySettings(cdp, until) {
   await until(
@@ -71,6 +73,26 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
   const requests = [];
   let scenario = "history";
   let hits = 0;
+  function sendStream(response, text) {
+    const coding = scenario.includes("gzip")
+      ? "gzip"
+      : scenario.includes("brotli")
+        ? "br"
+        : null;
+    const data =
+      coding === "gzip"
+        ? gzipSync(text)
+        : coding === "br"
+          ? brotliCompressSync(text)
+          : Buffer.from(text);
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      ...(coding ? { "content-encoding": coding } : {}),
+    });
+    for (let offset = 0; offset < data.length; offset += 7)
+      response.write(data.subarray(offset, offset + 7));
+    response.end();
+  }
   const ciphertext = "synthetic-ciphertext-from-another-pool-resource";
   const upstream = createServer(async (request, response) => {
     try {
@@ -85,11 +107,12 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
       hits += 1;
       if (
         scenario === "always-429" ||
+        (scenario === "cancel-wait" && body.input === "Cancelled retry") ||
         (scenario === "retry-429" && hits === 1)
       ) {
         response.writeHead(429, {
           "content-type": "application/json",
-          "retry-after": "1",
+          "retry-after": scenario === "cancel-wait" ? "5" : "1",
         });
         response.end(
           JSON.stringify({
@@ -103,33 +126,38 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
       }
       const streamFailure =
         scenario === "always-stream-429" ||
-        ((scenario === "retry-stream-429" || scenario === "retry-stream-503") &&
+        scenario === "always-gzip-stream-429" ||
+        ((scenario === "retry-stream-429" ||
+          scenario === "retry-stream-503" ||
+          scenario === "retry-gzip-stream-429" ||
+          scenario === "retry-brotli-stream-429") &&
           hits === 1);
-      if (streamFailure || scenario === "late-stream-error") {
+      if (
+        streamFailure ||
+        scenario === "late-stream-error" ||
+        scenario === "late-gzip-stream-error"
+      ) {
         const code =
-          scenario === "retry-stream-503" || scenario === "late-stream-error"
+          scenario === "retry-stream-503" || scenario.includes("late-")
             ? "server_error"
             : "rate_limit_exceeded";
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.write(
-          'event: response.created\ndata: {"type":"response.created","response":{"status":"in_progress","output":[]}}\n\n',
-        );
-        if (scenario === "late-stream-error") {
-          response.write(
-            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"only-once"}\n\n',
-          );
+        let text =
+          'event: response.created\ndata: {"type":"response.created","response":{"status":"in_progress","output":[]}}\n\n';
+        if (scenario.includes("late-")) {
+          text +=
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"only-once"}\n\n';
         }
-        response.end(
+        text +=
           "event: response.failed\ndata: " +
-            JSON.stringify({
-              type: "response.failed",
-              response: {
-                status: "failed",
-                error: { code, retry_after_seconds: 1 },
-              },
-            }) +
-            "\n\n",
-        );
+          JSON.stringify({
+            type: "response.failed",
+            response: {
+              status: "failed",
+              error: { code, retry_after_seconds: 1 },
+            },
+          }) +
+          "\n\n";
+        sendStream(response, text);
         return;
       }
       if (JSON.stringify(body).includes(ciphertext)) {
@@ -155,14 +183,15 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         ],
         usage: { input_tokens: 1, output_tokens: 4, total_tokens: 5 },
       };
-      response.writeHead(200, {
-        "content-type": body.stream ? "text/event-stream" : "application/json",
-      });
-      response.end(
-        body.stream
-          ? `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: result })}\n\n`
-          : JSON.stringify(result),
-      );
+      if (body.stream) {
+        sendStream(
+          response,
+          `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: result })}\n\n`,
+        );
+      } else {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(result));
+      }
     } catch (error) {
       response.writeHead(500, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: String(error) }));
@@ -236,6 +265,7 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     return {
       status: response.status,
       retryAfter: response.headers.get("retry-after"),
+      contentEncoding: response.headers.get("content-encoding"),
       text: await response.text(),
     };
   }
@@ -493,6 +523,129 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     check(
       label + " Codex final stream rate limit preserves 429 and Retry-After",
     );
+
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: true,
+        rateLimitMaxWaitSecs: 10,
+      },
+    });
+    for (const coding of ["gzip", "brotli"]) {
+      scenario = `retry-${coding}-stream-429`;
+      hits = 0;
+      const compressed = await send({
+        model: "ci-model",
+        input: "Compressed early limit",
+        stream: true,
+      });
+      assert.equal(compressed.status, 200, compressed.text);
+      assert.equal(compressed.contentEncoding, null);
+      assert.match(compressed.text, /YunSwitch Codex smoke/);
+      assert.doesNotMatch(compressed.text, /response.failed/);
+      assert.equal(hits, 2);
+    }
+    check(
+      label +
+        " Codex gzip and Brotli early rate limits recover without failed output",
+    );
+
+    scenario = "late-gzip-stream-error";
+    hits = 0;
+    const compressedPartial = await send({
+      model: "ci-model",
+      input: "Compressed partial output",
+      stream: true,
+    });
+    assert.equal(compressedPartial.status, 200, compressedPartial.text);
+    assert.equal(compressedPartial.contentEncoding, null);
+    assert.equal(hits, 1);
+    assert.equal(compressedPartial.text.match(/only-once/g)?.length, 1);
+    assert.match(compressedPartial.text, /response.failed/);
+    check(label + " Codex compressed errors after output never replay");
+
+    scenario = "always-gzip-stream-429";
+    hits = 0;
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: false,
+      },
+    });
+    const compressedFinal = await send({
+      model: "ci-model",
+      input: "Compressed final limit",
+      stream: true,
+    });
+    assert.equal(compressedFinal.status, 429, compressedFinal.text);
+    assert.equal(compressedFinal.retryAfter, "1");
+    assert.equal(
+      JSON.parse(compressedFinal.text).error.type,
+      "rate_limit_error",
+    );
+    assert.equal(hits, 1);
+    check(
+      label + " Codex final compressed limit preserves 429 and Retry-After",
+    );
+
+    scenario = "cancel-wait";
+    hits = 0;
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: true,
+        rateLimitMaxWaitSecs: 10,
+      },
+    });
+    const cancelledBody = JSON.stringify({
+      model: "ci-model",
+      input: "Cancelled retry",
+      stream: true,
+    });
+    const client = connect({ host: "127.0.0.1", port: 15731 });
+    try {
+      await new Promise((done, reject) =>
+        client.once("connect", done).once("error", reject),
+      );
+      client.write(
+        `POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(cancelledBody)}\r\n\r\n${cancelledBody}`,
+      );
+      await until(
+        async () =>
+          Boolean((await cdp.invoke("get_proxy_status")).rate_limit_waiting),
+        "cancelled request enters wait",
+      );
+      assert.equal(hits, 1);
+      const concurrent = await send({
+        model: "ci-model",
+        input: "Concurrent success",
+      });
+      assert.equal(concurrent.status, 200, concurrent.text);
+      assert.ok(
+        (await cdp.invoke("get_proxy_status")).rate_limit_waiting,
+        "another request cleared the wait",
+      );
+      client.destroy();
+      await until(async () => {
+        const state = await cdp.invoke("get_proxy_status");
+        return state.active_connections === 0 && !state.rate_limit_waiting;
+      }, "cancelled request cleans waiting and connection state");
+      assert.equal((await cdp.invoke("get_proxy_status")).last_error, null);
+      await new Promise((done) => setTimeout(done, 5200));
+      assert.equal(hits, 2, "cancelled request retried after its wait");
+      check(
+        label +
+          " Codex concurrent success preserves waiting and cancellation stops retries",
+      );
+    } finally {
+      client.destroy();
+    }
   } finally {
     try {
       if (proxyStarted) await cdp.invoke("stop_proxy_with_restore");
