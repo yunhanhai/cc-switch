@@ -2835,6 +2835,19 @@ impl RequestForwarder {
             let mut response = self
                 .prepare_success_response_for_failover(response, request_is_streaming)
                 .await?;
+            if super::codex_response_guard::applies_to(
+                app_type,
+                method,
+                endpoint,
+                provider,
+                &filtered_body,
+            ) {
+                response = super::codex_response_guard::inspect(
+                    response,
+                    self.streaming_first_byte_timeout,
+                )
+                .await?
+            }
             // Streaming requests normally return SSE. If a compatible gateway
             // explicitly returns JSON instead, buffer and validate it inside the retry
             // loop as well so a 2xx Anthropic error envelope can still fail over. Do
@@ -5815,17 +5828,16 @@ mod tests {
                 vec![codex_api_provider("unlisted", &base)],
             )
             .await;
-            // With compatibility off, native Responses stays passthrough: an
-            // HTTP 200 can still contain the gateway's error SSE.
-            let response = result
-                .ok()
-                .expect("native response should pass through")
-                .response;
-            let bytes = response
-                .bytes_with_limit(MAX_RESPONSE_BODY_BYTES)
-                .await
-                .unwrap();
-            assert!(String::from_utf8_lossy(&bytes).contains("invalid_encrypted_content"));
+            // The response guard reports a deterministic gateway error without
+            // changing request history or retrying it when cleanup is disabled.
+            assert!(matches!(
+                result,
+                Err(ForwardError {
+                    error: ProxyError::UpstreamError { status: 400, .. },
+                    ..
+                })
+            ));
+            assert_eq!(requests.lock().await.len(), 1);
             assert_eq!(requests.lock().await[0]["input"], body["input"]);
             upstream.abort();
         }
@@ -5892,6 +5904,271 @@ mod tests {
         assert_eq!(status.rate_limit_wait_count, 1);
         assert_eq!(status.rate_limit_wait_total_secs, 1);
         upstream.abort();
+    }
+
+    async fn spawn_codex_guard_upstream(
+        failures: usize,
+        code: &str,
+        prefix_event: &str,
+        format: &str,
+    ) -> (
+        String,
+        Arc<tokio::sync::Mutex<Vec<Value>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let requests = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        let code = code.to_string();
+        let prefix_event = prefix_event.to_string();
+        let format = format.to_string();
+        let app = axum::Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+            let recorded = recorded.clone();
+            let code = code.clone();
+            let prefix_event = prefix_event.clone();
+            let format = format.clone();
+            async move {
+                let mut sent = recorded.lock().await;
+                let index = sent.len();
+                sent.push(body);
+                drop(sent);
+                let failed = index < failures;
+                let response = if failed {
+                    json!({"id":"resp_failed","object":"response","status":"failed","output":[],
+                        "error":{"type":"server_error","code":code,"message":"private-upstream-value","retry_after_seconds":1}})
+                } else {
+                    json!({"id":"resp_recovered","object":"response","status":"completed","output":[
+                        {"type":"message","id":"msg_recovered","role":"assistant","content":[{"type":"output_text","text":"recovered"}]}]})
+                };
+                let data = if format.ends_with("json") {
+                    response.to_string()
+                } else {
+                    let event = if failed { "response.failed" } else { "response.completed" };
+                    format!(
+                        "event: response.created\ndata: {{\"type\":\"response.created\",\"response\":{{\"id\":\"resp_start\",\"status\":\"in_progress\",\"output\":[]}}}}\n\n{prefix_event}event: {event}\ndata: {}\n\n",
+                        json!({"type":event,"response":response})
+                    )
+                };
+                let chunks: Vec<_> = data.as_bytes().chunks(13).map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk))).collect();
+                let mut builder = axum::response::Response::builder().status(StatusCode::OK);
+                if !format.starts_with("unlabelled") {
+                    builder = builder.header("content-type", if format == "json" {"application/json"} else {"text/event-stream"});
+                }
+                builder.body(axum::body::Body::from_stream(futures::stream::iter(chunks))).unwrap()
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        (base, requests, handle)
+    }
+
+    #[tokio::test]
+    async fn codex_stream_rate_limit_obeys_existing_wait_switch_and_discards_failed_prefix() {
+        for enabled in [false, true] {
+            let (base, requests, upstream) =
+                spawn_codex_guard_upstream(1, "rate_limit_exceeded", "", "sse").await;
+            let mut fwd = test_forwarder(Duration::ZERO, Duration::ZERO);
+            fwd.rate_limit_retry_enabled = enabled;
+            fwd.rate_limit_max_wait_secs = 5;
+            let body = json!({"model":"test-model","stream":true,"input":"hello"});
+            let result = send_codex(&fwd, body.clone(), vec![codex_api_provider("a", &base)]).await;
+            if enabled {
+                let bytes = result
+                    .ok()
+                    .expect("429 retry succeeds")
+                    .response
+                    .bytes_with_limit(1024 * 1024)
+                    .await
+                    .unwrap();
+                assert!(String::from_utf8_lossy(&bytes).contains("resp_recovered"));
+                assert!(!String::from_utf8_lossy(&bytes).contains("resp_failed"));
+                let sent = requests.lock().await;
+                assert_eq!(sent.len(), 2);
+                assert_eq!(sent[0], sent[1]);
+                let status = fwd.status.read().await;
+                assert_eq!(status.rate_limit_waits_for("codex").count, 1);
+                assert_eq!(status.rate_limit_waits_for("codex").total_secs, 1);
+                assert_eq!(status.total_requests, 1);
+                assert_eq!(status.success_requests, 1);
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(ForwardError {
+                        error: ProxyError::RateLimited {
+                            retry_after_secs: Some(1),
+                            ..
+                        },
+                        ..
+                    })
+                ));
+                assert_eq!(requests.lock().await.len(), 1);
+                assert_eq!(fwd.status.read().await.rate_limit_wait_count, 0);
+            }
+            upstream.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_stream_service_error_retries_for_sse_and_json_and_respects_budget() {
+        for format in ["sse", "json", "unlabelled_sse", "unlabelled_json"] {
+            let (base, requests, upstream) =
+                spawn_codex_guard_upstream(1, "server_error", "", format).await;
+            let fwd =
+                test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(2, 1, 1);
+            let result = send_codex(
+                &fwd,
+                json!({"model":"test-model","input":"hello","stream":true}),
+                vec![codex_api_provider("a", &base)],
+            )
+            .await;
+            let bytes = result
+                .ok()
+                .expect("early server error retry")
+                .response
+                .bytes_with_limit(1024 * 1024)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&bytes).contains("resp_recovered"));
+            assert!(!String::from_utf8_lossy(&bytes).contains("private-upstream-value"));
+            assert_eq!(requests.lock().await.len(), 2);
+            upstream.abort();
+        }
+        let (base, requests, upstream) =
+            spawn_codex_guard_upstream(usize::MAX, "server_error", "", "sse").await;
+        let fwd = test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(2, 1, 1);
+        let result = send_codex(
+            &fwd,
+            json!({"model":"test-model","stream":true,"input":"hello"}),
+            vec![codex_api_provider("a", &base)],
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(ForwardError {
+                error: ProxyError::UpstreamError { status: 502, .. },
+                ..
+            })
+        ));
+        assert_eq!(requests.lock().await.len(), 3);
+        upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn codex_stream_failover_after_same_provider_budget_exposes_only_successful_provider() {
+        let (first, first_requests, first_upstream) =
+            spawn_codex_guard_upstream(usize::MAX, "server_error", "", "sse").await;
+        let (second, second_requests, second_upstream) =
+            spawn_codex_guard_upstream(0, "", "", "sse").await;
+        let mut fwd =
+            test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(1, 1, 1);
+        fwd.max_attempts = 2;
+        fwd.current_provider_id_at_start = "a".into();
+        let result = send_codex(
+            &fwd,
+            json!({"model":"test-model","stream":true,"input":"hello"}),
+            vec![
+                codex_api_provider("a", &first),
+                codex_api_provider("b", &second),
+            ],
+        )
+        .await
+        .ok()
+        .expect("fallback succeeds");
+        assert_eq!(result.provider.id, "b");
+        let bytes = result.response.bytes_with_limit(1024 * 1024).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("resp_recovered"));
+        assert!(!String::from_utf8_lossy(&bytes).contains("resp_failed"));
+        assert_eq!(first_requests.lock().await.len(), 2);
+        assert_eq!(second_requests.lock().await.len(), 1);
+        first_upstream.abort();
+        second_upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn codex_stream_output_tool_and_unknown_events_prevent_retry_or_failover() {
+        for event in [
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"only-once\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_once\"}}\n\n",
+            "data: {\"type\":\"response.web_search_call.in_progress\"}\n\n",
+            "data: {\"type\":\"unknown.extension\"}\n\n",
+        ] {
+            let (first, first_requests, first_upstream) = spawn_codex_guard_upstream(usize::MAX, "server_error", event, "sse").await;
+            let (second, second_requests, second_upstream) = spawn_codex_guard_upstream(0, "", "", "sse").await;
+            let mut fwd = test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(2, 1, 1);
+            fwd.rate_limit_retry_enabled = true;
+            fwd.max_attempts = 2;
+            let result = send_codex(&fwd,json!({"model":"test-model","stream":true,"input":"hello"}),vec![codex_api_provider("a",&first),codex_api_provider("b",&second)]).await.ok().expect("output must pass through");
+            let bytes = result.response.bytes_with_limit(1024*1024).await.unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert_eq!(text.matches(event).count(), 1);
+            assert!(text.contains("response.failed"));
+            assert_eq!(first_requests.lock().await.len(), 1);
+            assert!(second_requests.lock().await.is_empty());
+            first_upstream.abort();
+            second_upstream.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_stream_deterministic_errors_do_not_retry_same_provider() {
+        for (code, status) in [
+            ("invalid_encrypted_content", 400),
+            ("context_length_exceeded", 400),
+            ("invalid_api_key", 401),
+        ] {
+            let (base, requests, upstream) =
+                spawn_codex_guard_upstream(usize::MAX, code, "", "sse").await;
+            let mut fwd =
+                test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(2, 1, 1);
+            fwd.rate_limit_retry_enabled = true;
+            let result = send_codex(
+                &fwd,
+                json!({"model":"test-model","stream":true,"input":"hello"}),
+                vec![codex_api_provider("a", &base)],
+            )
+            .await;
+            let error = result.err().expect("deterministic error");
+            assert!(
+                matches!(error.error, ProxyError::UpstreamError {status:actual,..} if actual == status)
+            );
+            assert!(!error.error.to_string().contains("private-upstream-value"));
+            assert_eq!(requests.lock().await.len(), 1);
+            upstream.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_stream_opaque_requests_and_unknown_errors_remain_passthrough() {
+        for (code, extra) in [
+            ("server_error", json!({"previous_response_id":"resp_state"})),
+            ("server_error", json!({"background":true})),
+            (
+                "server_error",
+                json!({"tools":[{"type":"mcp","server_label":"external"}]}),
+            ),
+            ("unknown_error", json!({})),
+        ] {
+            let (base, requests, upstream) =
+                spawn_codex_guard_upstream(usize::MAX, code, "", "sse").await;
+            let mut body = json!({"model":"test-model","stream":true,"input":"hello"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let fwd =
+                test_forwarder(Duration::ZERO, Duration::ZERO).with_same_provider_retry(2, 1, 1);
+            let result = send_codex(&fwd, body, vec![codex_api_provider("a", &base)])
+                .await
+                .ok()
+                .expect("opaque passthrough");
+            assert!(String::from_utf8_lossy(
+                &result.response.bytes_with_limit(1024 * 1024).await.unwrap()
+            )
+            .contains("resp_failed"));
+            assert_eq!(requests.lock().await.len(), 1);
+            upstream.abort();
+        }
     }
 
     fn provider_for_alias(id: &str) -> Provider {
