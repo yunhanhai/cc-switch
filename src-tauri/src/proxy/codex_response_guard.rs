@@ -1,8 +1,8 @@
 //! Bounded inspection of native Codex Responses before exposing any response.
 //!
 //! Only explicit, recognised early failures enter the existing retry policy.
-//! Unknown events, output/tool activity, compressed bodies and exhausted
-//! inspection budgets are replayed byte for byte without retrying this stream.
+//! Unknown events, output/tool activity and exhausted inspection budgets commit
+//! the stream. Supported compression is decoded with bounded incremental reads.
 
 use super::{content_encoding::get_content_encoding, hyper_client::ProxyResponse, ProxyError};
 use bytes::BytesMut;
@@ -102,6 +102,10 @@ pub(crate) async fn inspect(
     response: ProxyResponse,
     configured_timeout: Duration,
 ) -> Result<ProxyResponse, ProxyError> {
+    let response = super::response_decompression::decode_response(
+        response,
+        super::hyper_client::MAX_RESPONSE_BODY_BYTES,
+    );
     let window = if configured_timeout.is_zero() {
         MAX_INSPECTION_TIME
     } else {
@@ -116,8 +120,7 @@ async fn inspect_with_limits(
     max_bytes: usize,
     max_chunks: usize,
 ) -> Result<ProxyResponse, ProxyError> {
-    // Streaming requests already ask for identity encoding. Do not try to parse
-    // compressed bytes or decompress an unbounded live response in this guard.
+    // Unknown or excessive content codings remain observable to the client.
     if get_content_encoding(response.headers()).is_some() {
         return Ok(response);
     }
@@ -144,8 +147,12 @@ async fn inspect_with_limits(
                 Decision::Commit => break,
             }
         };
-        let chunk = chunk.map_err(|_| {
-            ProxyError::ForwardFailed("Codex Responses stream failed before output".into())
+        let chunk = chunk.map_err(|error| {
+            if let Some(limit) = super::response_decompression::exceeded_byte_budget(&error) {
+                ProxyError::ResponseBodyTooLarge(limit)
+            } else {
+                ProxyError::ForwardFailed("Codex Responses stream failed before output".into())
+            }
         })?;
         chunks += 1;
         if prefix.len().saturating_add(chunk.len()) > max_bytes {
@@ -572,9 +579,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compressed_and_over_budget_prefixes_are_replayed_without_parsing() {
+    async fn unknown_compression_and_over_budget_prefixes_are_replayed_without_parsing() {
         let mut headers = HeaderMap::new();
-        headers.insert("content-encoding", "gzip".parse().unwrap());
+        headers.insert("content-encoding", "snappy".parse().unwrap());
         assert_eq!(
             replay(response(
                 vec![Bytes::from_static(LIMITED.as_bytes())],
@@ -669,6 +676,52 @@ mod tests {
         .unwrap();
         let mut replay = Box::pin(guarded.bytes_stream());
         assert_eq!(replay.next().await.unwrap().unwrap(), productive);
+    }
+
+    #[tokio::test]
+    async fn gzip_responses_failure_reaches_guard_as_decoded_early_rate_limit() {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(LIMITED.as_bytes()).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        headers.insert("content-type", "text/event-stream".parse().unwrap());
+        let upstream = response(
+            compressed.chunks(7).map(Bytes::copy_from_slice).collect(),
+            headers,
+        );
+        // Normal forwarding must decode a supported compressed Responses stream
+        // before the guard decides whether an early failure can be recovered.
+        let inspected = inspect(upstream, Duration::ZERO).await;
+        assert!(
+            matches!(
+                inspected,
+                Err(ProxyError::RateLimited {
+                    retry_after_secs: Some(2),
+                    ..
+                })
+            ),
+            "compressed rate limit bypassed response inspection"
+        );
+    }
+
+    #[tokio::test]
+    async fn decoding_budget_failure_stays_non_retryable_before_output() {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&vec![b'a'; 4096]).unwrap();
+        let encoded = encoder.finish().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+        let decoded = super::super::response_decompression::decode_response(
+            response(vec![Bytes::from(encoded)], headers),
+            128,
+        );
+        assert!(matches!(
+            inspect(decoded, Duration::ZERO).await,
+            Err(ProxyError::ResponseBodyTooLarge(128))
+        ));
     }
 
     #[tokio::test]

@@ -29,6 +29,10 @@
           <File Id="AgentRouterShimLicenseFile" Name="AgentRouter-Responses-Shim-MIT.txt" Source="$(sys.SOURCEFILEDIR)..\..\licenses\AgentRouter-Responses-Shim-MIT.txt" KeyPath="no" />
           <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="AgentRouterShim" Type="integer" Value="1" KeyPath="yes" />
         </Component>
+        <Component Id="AsyncCompressionLicense" Guid="A542EF4F-A73E-4629-9CA3-EEAAE9EBAB68" Win64="$(var.NoticeWin64)">
+          <File Id="AsyncCompressionLicenseFile" Name="Async-Compression-MIT.txt" Source="$(sys.SOURCEFILEDIR)..\..\licenses\Async-Compression-MIT.txt" KeyPath="no" />
+          <RegistryValue Root="HKCU" Key="Software\[Manufacturer]\[ProductName]\ThirdPartyNotices" Name="AsyncCompression" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
       </Directory>
     </DirectoryRef>
   </Fragment>
@@ -39,6 +43,7 @@
       <ComponentRef Id="CodexBarLicense" />
       <ComponentRef Id="LobeHubLicense" />
       <ComponentRef Id="AgentRouterShimLicense" />
+      <ComponentRef Id="AsyncCompressionLicense" />
     </ComponentGroup>
   </Fragment>
 </Wix>

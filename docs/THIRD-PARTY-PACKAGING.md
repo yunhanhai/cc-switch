@@ -25,3 +25,7 @@
 ## `.4` 新增 shim 许可分发
 
 `.4` 增加 `AgentRouter-Responses-Shim-MIT.txt`（SHA-256 `2a9691565b7d9d3770d90c035f865153f1d830c1edd7887a338ec4165202f84c`）。[实际新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461)在便携 ZIP、首次 MSI 安装和 `.3` 升级后的目录逐字节核对三份原文许可；卸载文件/目录/登记清除检查通过。[发布记录](releases/3.20.1-yunswitch.4.md)包含同批包校验值，旧版包保持原内容。
+
+## `.6` 增量解码依赖许可
+
+`.6` 准备加入第四份文本 `Async-Compression-MIT.txt`，SHA-256 为 `88d1e3160df48926ad3310a8ec5699b502889565908f1be7e77cd21282c7a709`。许可按固定来源原文保存，正式/开发版采用不同组件 GUID，便携和安装后的内容均加入逐字节验收。发布与实际包验证状态见[`.6` 记录](releases/3.20.1-yunswitch.6.md)，已公开 `.5` 及更早包保持原内容。

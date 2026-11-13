@@ -155,6 +155,54 @@ impl Drop for ActiveConnectionGuard {
     }
 }
 
+/// A cancelled sleep drops this guard and removes only its own waiting entry.
+struct RateLimitWaitGuard {
+    status: Arc<RwLock<ProxyStatus>>,
+    id: u64,
+    active: bool,
+}
+
+impl RateLimitWaitGuard {
+    async fn acquire(
+        status: Arc<RwLock<ProxyStatus>>,
+        waiting: super::types::RateLimitWaiting,
+    ) -> Self {
+        static NEXT_WAIT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let mut guard = Self {
+            status,
+            id: NEXT_WAIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            active: false,
+        };
+        {
+            let mut status = guard.status.write().await;
+            status.begin_rate_limit_wait(guard.id, waiting);
+            guard.active = true;
+        }
+        guard
+    }
+
+    async fn finish(mut self) {
+        let mut status = self.status.write().await;
+        status.end_rate_limit_wait(self.id);
+        self.active = false;
+    }
+}
+
+impl Drop for RateLimitWaitGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        if let Ok(mut status) = self.status.try_write() {
+            status.end_rate_limit_wait(self.id);
+        } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let status = self.status.clone();
+            let id = self.id;
+            handle.spawn(async move { status.write().await.end_rate_limit_wait(id) });
+        }
+    }
+}
+
 pub struct RequestForwarder {
     /// 共享的 ProviderRouter（持有熔断器状态）
     router: Arc<ProviderRouter>,
@@ -416,17 +464,17 @@ impl RequestForwarder {
         &self,
         provider_id: &str,
         app_type: &str,
-        used_half_open_permit: bool,
+        permit: &mut super::circuit_breaker::AllowResult,
     ) {
         // 成功即意味着限流窗口已过：清掉共享冷却，别让后来请求继续绕开它。
         self.router
             .clear_rate_limit_cooldown(provider_id, app_type)
             .await;
 
-        if used_half_open_permit {
+        if permit.used_half_open_permit {
             if let Err(e) = self
                 .router
-                .record_result(provider_id, app_type, true, true, None)
+                .record_result(provider_id, app_type, Some(permit), true, None)
                 .await
             {
                 log::warn!(
@@ -441,7 +489,7 @@ impl RequestForwarder {
         let app_type = app_type.to_string();
         tokio::spawn(async move {
             if let Err(e) = router
-                .record_result(&provider_id, &app_type, false, true, None)
+                .record_result(&provider_id, &app_type, None, true, None)
                 .await
             {
                 log::warn!(
@@ -463,7 +511,7 @@ impl RequestForwarder {
         retry_err: ProxyError,
         provider: &Provider,
         app_type_str: &str,
-        used_half_open_permit: bool,
+        permit: &mut super::circuit_breaker::AllowResult,
         rectifier_label: &str,
         last_error: &mut Option<ProxyError>,
         last_provider: &mut Option<Provider>,
@@ -482,7 +530,7 @@ impl RequestForwarder {
                 .record_result(
                     &provider.id,
                     app_type_str,
-                    used_half_open_permit,
+                    Some(permit),
                     false,
                     Some(retry_err.to_string()),
                 )
@@ -499,9 +547,7 @@ impl RequestForwarder {
             return None;
         }
 
-        self.router
-            .release_permit_neutral(&provider.id, app_type_str, used_half_open_permit)
-            .await;
+        permit.release();
         let mut status = self.status.write().await;
         status.failed_requests += 1;
         status.last_error = Some(retry_err.to_string());
@@ -618,7 +664,7 @@ impl RequestForwarder {
             // 发起请求前先获取熔断器放行许可（HalfOpen 会占用探测名额）
             // 单 Provider 场景下跳过此检查，避免熔断器阻塞所有请求；
             // 但额度耗尽属于终态，恢复窗口内快速失败而不是重复打上游。
-            let (allowed, used_half_open_permit) = if bypass_circuit_breaker {
+            let mut permit = if bypass_circuit_breaker {
                 if self
                     .router
                     .is_fatally_open(&provider.id, app_type_str)
@@ -635,16 +681,14 @@ impl RequestForwarder {
                         provider: Some(provider.clone()),
                     });
                 }
-                (true, false)
+                super::circuit_breaker::AllowResult::without_probe(true)
             } else {
-                let permit = self
-                    .router
+                self.router
                     .allow_provider_request(&provider.id, app_type_str)
-                    .await;
-                (permit.allowed, permit.used_half_open_permit)
+                    .await
             };
 
-            if !allowed {
+            if !permit.allowed {
                 continue;
             }
 
@@ -710,27 +754,6 @@ impl RequestForwarder {
                                     "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
                                     provider.name
                                 );
-                                // 韧性统计 + 等待态快照：让前端在 `sleep` 期间不要
-                                // 一直显示上一家 provider 的陈旧 last_error。
-                                {
-                                    let mut st = self.status.write().await;
-                                    st.record_rate_limit_wait(app_type_str, wait_secs);
-                                    st.rate_limit_waiting =
-                                        Some(crate::proxy::types::RateLimitWaiting {
-                                            provider_name: provider.name.clone(),
-                                            provider_id: provider.id.clone(),
-                                            app_type: app_type_str.to_string(),
-                                            wait_secs,
-                                            attempt: rate_limit_attempt,
-                                            started_at: chrono::Utc::now().to_rfc3339(),
-                                        });
-                                    // last_error 在等待期间展示为"正在等待"而非旧错误，
-                                    // 避免 ResilienceSummaryBar 在 30-120s 等待中误导。
-                                    st.last_error = Some(format!(
-                                        "Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
-                                        provider.name
-                                    ));
-                                }
                                 // 共享冷却：让并发的其他请求别再来撞同一个限流窗口。
                                 // 只有「本请求决定等」时才登记——放弃等待走故障转移的
                                 // 情形已经被 attempted_providers 跳过，不存在并发放大。
@@ -747,7 +770,23 @@ impl RequestForwarder {
                                         )
                                         .await;
                                 }
+                                // Register the real upstream cooldown before publishing
+                                // a cancellable wait. Only the request's UI entry is owned
+                                // by this guard; cancellation must not erase the cooldown.
+                                let waiting = RateLimitWaitGuard::acquire(
+                                    self.status.clone(),
+                                    super::types::RateLimitWaiting {
+                                        provider_name: provider.name.clone(),
+                                        provider_id: provider.id.clone(),
+                                        app_type: app_type_str.to_string(),
+                                        wait_secs,
+                                        attempt: rate_limit_attempt,
+                                        started_at: chrono::Utc::now().to_rfc3339(),
+                                    },
+                                )
+                                .await;
                                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                                waiting.finish().await;
                                 continue;
                             }
                             None => {
@@ -786,15 +825,14 @@ impl RequestForwarder {
 
             match forward_outcome {
                 Ok((response, claude_api_format, outbound_model)) => {
-                    // 成功：清除等待态快照 + 恢复 last_error，再记录熔断状态。
+                    // Success clears the last error; live waits belong to their requests.
                     {
                         let mut st = self.status.write().await;
-                        st.rate_limit_waiting = None;
                         st.last_error = None;
                     }
                     // 普通闭合熔断状态异步记录，避免阻塞流式首包返回；
                     // HalfOpen 探测仍同步等待，保证 permit 与熔断状态及时释放。
-                    self.record_success_result(&provider.id, app_type_str, used_half_open_permit)
+                    self.record_success_result(&provider.id, app_type_str, &mut permit)
                         .await;
 
                     // 更新当前应用类型使用的 provider
@@ -900,7 +938,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        &mut permit,
                                     )
                                     .await;
 
@@ -965,7 +1003,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            &mut permit,
                                             "media 降级",
                                             &mut last_error,
                                             &mut last_provider,
@@ -990,13 +1028,7 @@ impl RequestForwarder {
                             if rectifier_retried {
                                 log::warn!("[{app_type_str}] [RECT-005] 整流器已触发过，不再重试");
                                 // 释放 HalfOpen permit（不记录熔断器，这是客户端兼容性问题）
-                                self.router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        used_half_open_permit,
-                                    )
-                                    .await;
+                                permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
                                 status.last_error = Some(e.to_string());
@@ -1051,7 +1083,7 @@ impl RequestForwarder {
                                         self.record_success_result(
                                             &provider.id,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            &mut permit,
                                         )
                                         .await;
 
@@ -1121,7 +1153,7 @@ impl RequestForwarder {
                                                 retry_err,
                                                 provider,
                                                 app_type_str,
-                                                used_half_open_permit,
+                                                &mut permit,
                                                 "整流",
                                                 &mut last_error,
                                                 &mut last_provider,
@@ -1149,13 +1181,7 @@ impl RequestForwarder {
                                 log::warn!(
                                     "[{app_type_str}] [RECT-013] budget 整流器已触发过，不再重试"
                                 );
-                                self.router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        used_half_open_permit,
-                                    )
-                                    .await;
+                                permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
                                 status.last_error = Some(e.to_string());
@@ -1175,13 +1201,7 @@ impl RequestForwarder {
                                 log::warn!(
                                     "[{app_type_str}] [RECT-014] budget 整流器触发但无可整流内容，不做无意义重试"
                                 );
-                                self.router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        used_half_open_permit,
-                                    )
-                                    .await;
+                                permit.release();
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
                                 status.last_error = Some(e.to_string());
@@ -1224,7 +1244,7 @@ impl RequestForwarder {
                                     self.record_success_result(
                                         &provider.id,
                                         app_type_str,
-                                        used_half_open_permit,
+                                        &mut permit,
                                     )
                                     .await;
 
@@ -1288,7 +1308,7 @@ impl RequestForwarder {
                                             retry_err,
                                             provider,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            &mut permit,
                                             "budget 整流",
                                             &mut last_error,
                                             &mut last_provider,
@@ -1304,13 +1324,7 @@ impl RequestForwarder {
                     }
 
                     if signature_rectifier_non_retryable_client_error {
-                        self.router
-                            .release_permit_neutral(
-                                &provider.id,
-                                app_type_str,
-                                used_half_open_permit,
-                            )
-                            .await;
+                        permit.release();
                         let mut status = self.status.write().await;
                         status.failed_requests += 1;
                         status.last_error = Some(e.to_string());
@@ -1327,7 +1341,7 @@ impl RequestForwarder {
 
                     // 先分类错误，决定是否计入 provider 健康度
                     // —— NonRetryable / ClientAbort 是客户端层错误，无论换哪家 provider 都会被拒绝，
-                    //    不应污染熔断器和数据库健康度（与 release_permit_neutral 同语义）。
+                    //    不应污染熔断器和数据库健康度（仅释放本请求的探测名额）。
                     let category = self.categorize_proxy_error(&e, provider);
 
                     match category {
@@ -1357,25 +1371,7 @@ impl RequestForwarder {
                                         )
                                         .await;
                                 }
-                                self.router
-                                    .release_permit_neutral(
-                                        &provider.id,
-                                        app_type_str,
-                                        used_half_open_permit,
-                                    )
-                                    .await;
-                                // 该 provider 的 429 等待循环已结束（破圈走 failover），
-                                // 清掉等待态快照，避免 UI 一直显示"等待中"直到下次成功。
-                                {
-                                    let mut st = self.status.write().await;
-                                    if st
-                                        .rate_limit_waiting
-                                        .as_ref()
-                                        .is_some_and(|w| w.provider_id == provider.id)
-                                    {
-                                        st.rate_limit_waiting = None;
-                                    }
-                                }
+                                permit.release();
                             } else {
                                 // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
                                 let record_result = if matches!(&e, ProxyError::BillingExhausted(_))
@@ -1384,7 +1380,7 @@ impl RequestForwarder {
                                         .record_fatal_result(
                                             &provider.id,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            Some(&mut permit),
                                             e.to_string(),
                                         )
                                         .await
@@ -1393,7 +1389,7 @@ impl RequestForwarder {
                                         .record_result(
                                             &provider.id,
                                             app_type_str,
-                                            used_half_open_permit,
+                                            Some(&mut permit),
                                             false,
                                             Some(e.to_string()),
                                         )
@@ -1427,13 +1423,7 @@ impl RequestForwarder {
                         }
                         ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
                             // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
-                            self.router
-                                .release_permit_neutral(
-                                    &provider.id,
-                                    app_type_str,
-                                    used_half_open_permit,
-                                )
-                                .await;
+                            permit.release();
                             {
                                 let mut status = self.status.write().await;
                                 status.failed_requests += 1;
@@ -5948,8 +5938,31 @@ mod tests {
                         json!({"type":event,"response":response})
                     )
                 };
-                let chunks: Vec<_> = data.as_bytes().chunks(13).map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk))).collect();
+                let encoding = format.split(':').nth(1);
+                let encoded = match encoding {
+                    Some("gzip") => {
+                        use std::io::Write;
+                        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                        encoder.write_all(data.as_bytes()).unwrap();
+                        encoder.finish().unwrap()
+                    }
+                    Some("br") => {
+                        use std::io::Write;
+                        let mut output = Vec::new();
+                        {
+                            let mut encoder = brotli::CompressorWriter::new(&mut output, 4096, 5, 22);
+                            encoder.write_all(data.as_bytes()).unwrap();
+                        }
+                        output
+                    }
+                    Some("zstd") => zstd::stream::encode_all(std::io::Cursor::new(data.as_bytes()), 1).unwrap(),
+                    _ => data.into_bytes(),
+                };
+                let chunks: Vec<_> = encoded.chunks(7).map(|chunk| Ok::<_, std::io::Error>(Bytes::copy_from_slice(chunk))).collect();
                 let mut builder = axum::response::Response::builder().status(StatusCode::OK);
+                if let Some(encoding) = encoding {
+                    builder = builder.header("content-encoding", encoding);
+                }
                 if !format.starts_with("unlabelled") {
                     builder = builder.header("content-type", if format == "json" {"application/json"} else {"text/event-stream"});
                 }
@@ -6053,6 +6066,46 @@ mod tests {
         ));
         assert_eq!(requests.lock().await.len(), 3);
         upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn compressed_codex_early_errors_retry_but_output_and_tools_never_replay() {
+        for format in ["sse:gzip", "sse:br", "sse:zstd"] {
+            let (base, requests, upstream) =
+                spawn_codex_guard_upstream(1, "rate_limit_exceeded", "", format).await;
+            let mut fwd = test_forwarder(Duration::ZERO, Duration::ZERO);
+            fwd.rate_limit_retry_enabled = true;
+            fwd.rate_limit_max_wait_secs = 5;
+            let body = json!({"model":"test-model","input":"hello","stream":true});
+            let result = send_codex(&fwd, body.clone(), vec![codex_api_provider("a", &base)])
+                .await
+                .ok()
+                .expect("compressed 429 recovers");
+            assert!(!result.response.headers().contains_key("content-encoding"));
+            let bytes = result.response.bytes_with_limit(1024 * 1024).await.unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(text.contains("resp_recovered"));
+            assert!(!text.contains("response.failed"));
+            assert_eq!(
+                requests.lock().await.as_slice(),
+                &[body.clone(), body.clone()]
+            );
+            assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+            upstream.abort();
+            for event in [
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"only-once\"}\n\n",
+                "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_once\"}}\n\n",
+            ] {
+                let (base, requests, upstream) = spawn_codex_guard_upstream(usize::MAX, "rate_limit_exceeded", event, format).await;
+                let result = send_codex(&fwd, body.clone(), vec![codex_api_provider("a", &base)]).await.ok().expect("compressed output commits");
+                let bytes = result.response.bytes_with_limit(1024 * 1024).await.unwrap();
+                let text = String::from_utf8_lossy(&bytes);
+                assert_eq!(text.matches(event).count(), 1);
+                assert!(text.contains("response.failed"));
+                assert_eq!(requests.lock().await.len(), 1);
+                upstream.abort();
+            }
+        }
     }
 
     #[tokio::test]
