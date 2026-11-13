@@ -1,6 +1,6 @@
 # Codex Responses 输出前错误恢复
 
-`.5` 准备源码在原生 Codex Responses 入口增加首段检查。`.4` 安装包保留原有流内错误处理；本轮构建与实际验收状态见[`.5` 发布记录](releases/3.20.1-yunswitch.5.md)。
+`.5` Windows x64 已公开，原生 Codex Responses 入口增加首段检查。`.4` 包保留原有处理；构建、安装与升级证据见[`.5` 发布记录](releases/3.20.1-yunswitch.5.md)。
 
 ## 处理的问题
 
@@ -46,3 +46,5 @@
 Windows 包验收在便携和升级后安装程序中验证流内 429、暂时服务错误和输出后失败。只用合成历史、虚构密钥、回环上游，不代表所有 API 网站或长会话均已验证。
 
 官方文档请求在本轮环境返回 403，未据未读取的网页宣称全部协议兼容。实现依照仓库已有 Responses 结构与可复现测试，保守透传未知扩展。
+
+本版[最终 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)和[新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)通过。Windows 共 64 项运行检查，便携与升级后程序分别验证流内限流等待、服务端错误重试、输出后禁止重试、最终 429 状态与头，以及重启和旧设置保留。

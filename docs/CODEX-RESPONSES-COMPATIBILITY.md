@@ -25,7 +25,7 @@ YunSwitch 已拥有独立仓库、名称、应用 ID、配置目录、深链和�
 
 ## 限流、重试与“自动继续”的边界
 
-`.5` 准备源码进一步识别原生 Responses 输出前的 HTTP 200 流内错误，见[恢复说明](CODEX-STREAM-RECOVERY.md)。以下表格描述已公开 `.4` 的边界；`.5` 的状态以[发布记录](releases/3.20.1-yunswitch.5.md)为准。
+`.5` 已进一步识别原生 Responses 输出前的 HTTP 200 流内错误，见[恢复说明](CODEX-STREAM-RECOVERY.md)。以下表格保留 `.4` 的历史边界；`.5` 的实际验证与恢复范围见[发布记录](releases/3.20.1-yunswitch.5.md)。
 
 以下均要求请求经过本地代理。设置位于**设置 → 路由 → 故障转移 → Codex**，Codex 接管启用后可配置。
 

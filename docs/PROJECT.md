@@ -36,9 +36,9 @@
 
 ## 当前版本与发布状态
 
-当前工作分支准备 `3.20.1-yunswitch.5`，增加原生 Codex HTTP 200 流内错误的输出前恢复，见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.5` 准备记录](releases/3.20.1-yunswitch.5.md)。当前公开安装包仍为 `.4`。
+当前公开版本为 `3.20.1-yunswitch.5`，新增原生 Codex HTTP 200 流内错误的输出前恢复，见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.5` 发布记录](releases/3.20.1-yunswitch.5.md)。
 
-当前源码版本为 `3.20.1-yunswitch.5`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。已公开的 Codex 兼容与限流修复版 `.4` 在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.4) 提供 Windows x64 安装版与便携 ZIP。其安装、从 `.3` 升级和模拟网关验收通过，见[`.4` 发布记录](releases/3.20.1-yunswitch.4.md)。`.5` 新包仍按准备记录推进。
+当前源码版本为 `3.20.1-yunswitch.5`，package.json、Cargo.toml、Cargo.lock 与 Tauri 配置保持一致。Windows x64 安装版与便携 ZIP 已在 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.5) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.5) 公开；安装、`.4` 升级及输出前恢复通过验收。之前的[`.4` 版本](releases/3.20.1-yunswitch.4.md)保留原附件和验收记录。
 
 已公开的 `3.20.1-yunswitch.2` Windows x64 安装版与免安装版见 [GitHub](https://github.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2) 和 [Gitee](https://gitee.com/yunhanhai/yunswitch/releases/tag/v3.20.1-yunswitch.2)，其安装与首版升级验收通过。文件校验与运行记录见[`.2` 发布记录](releases/3.20.1-yunswitch.2.md)。
 
@@ -54,7 +54,7 @@
 
 开发命令通过 `tauri.dev.conf.json` 覆盖身份，Cargo debug profile 使用隔离布局；发布构建使用正式布局。运行时按布局设置窗口标题。显式应用设置可以覆盖 CLI 目录；开发布局默认优先于 Hermes、OpenCode 和 Pi 的环境变量目录。测试沙盒保留旧夹具布局，仅用于兼容现有测试。
 
-Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1.5`，已公开 `.4` 为 `3.20.1.4`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2`、`.2`→`.3`、`.3`→`.4` 升级已通过，`.4`→`.5` 正在验收。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
+Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1.5`，已公开 `.4` 为 `3.20.1.4`；应用显示与 Git 标签使用完整预发布版本。`.1`→`.2`、`.2`→`.3`、`.3`→`.4` 升级已通过，`.4`→`.5` 也已通过旧设置与流内恢复的安装升级验收。内部可执行文件 `cc-switch`、数据库文件 `cc-switch.db` 和兼容字段暂时保留。配置迁移见[迁移指南](MIGRATION-YUNSWITCH.md)。
 
 自动更新关闭、更新地址为空，上游签名公钥已移除。更新按钮打开本项目的 Releases 页面；后续配置本项目签名后再启用自动更新。R2 镜像默认停用，仅通过本项目显式配置启用。
 
@@ -66,13 +66,13 @@ Windows MSI 沿用固定独立 UpgradeCode，当前源码安装版本为 `3.20.1
 
 这些目录改动已包含在 `3.20.1-yunswitch.2` 安装包中。首版 `.1` 及旧手册保留其历史描述。
 
-| 范围          | 已验证                                                                                                                                                                                                                | 当前边界                                                     |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461)：便携版与 MSI 的启动、实际界面、模拟代理请求、重启、单实例、合成数据迁移、`.3` 升级及 Codex 开关/限流功能、许可内容与卸载清理 | 已发布独立包；未统一验证所有真实付费供应商与用户私有数据迁移 |
-| macOS / Linux | [跨平台源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42999648172)：前端检查、各平台后端测试与 Clippy                                                                                                   | 尚无独立发布包及安装验收；源码测试通过不等同于安装可用       |
-| ARM64         | 尚无独立安装验收记录                                                                                                                                                                                                  | 尚未发布或确认平台兼容性                                     |
+| 范围          | 已验证                                                                                                                                                                                                                 | 当前边界                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Windows x64   | [干净 runner 安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)：便携版与 MSI 的启动、实际界面、模拟代理请求、重启、单实例、合成数据迁移、`.4` 升级及 Codex 输出前流内恢复、许可内容与卸载清理 | 已发布独立包；未统一验证所有真实付费供应商与用户私有数据迁移 |
+| macOS / Linux | [跨平台源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)：前端检查、各平台后端测试与 Clippy                                                                                                    | 尚无独立发布包及安装验收；源码测试通过不等同于安装可用       |
+| ARM64         | 尚无独立安装验收记录                                                                                                                                                                                                   | 尚未发布或确认平台兼容性                                     |
 
-以上平台记录对应 `.4` 预发布。[最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/42999648172)通过 144 个前端测试文件、1099 项测试及三平台后端检查；[Windows 安装升级验收](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461)通过 56 项运行检查。来源与校验见[本次发布记录](releases/3.20.1-yunswitch.4.md)。供应商预设仅提供配置起点，不能保证所有网站、模型和长会话均兼容。
+以上记录对应 `.5`。[最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)通过 144 个前端文件、1099 项测试及三平台后端检查；[Windows 安装升级](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)通过 64 项运行检查。来源和校验见[本次发布记录](releases/3.20.1-yunswitch.5.md)。供应商预设仍是配置起点，不保证所有网站或长会话都兼容。
 
 ## 仓库维护方式
 
