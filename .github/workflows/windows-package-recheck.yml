@@ -33,7 +33,7 @@ on:
         description: "Previous public YunSwitch tag for MSI upgrade acceptance"
         required: false
         type: string
-        default: v3.20.1-yunswitch.3
+        default: v3.20.1-yunswitch.4
 
 permissions:
   actions: read
@@ -139,6 +139,7 @@ jobs:
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.1' -and $previousHash -ne 'faccd91fc892a4b060ece561b5e908f7e8c8db9f7aeab7a3741864f15ee0480b') { throw 'First prerelease MSI differs from the recorded accepted package' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.2' -and $previousHash -ne '2b0e1e88febe1c3f07862a381e1aefa21b90f9db547ef4995ed3aa345e951930') { throw 'Second prerelease MSI differs from the recorded accepted package' }
             if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.3' -and $previousHash -ne '3cbf7344352229d17cf978889561cc31b115677080c6b0ab78ef4b87539aceb4') { throw 'Third prerelease MSI differs from the recorded accepted package' }
+            if ($env:PREVIOUS_TAG -eq 'v3.20.1-yunswitch.4' -and $previousHash -ne 'a534673e35a98ed5f2a5877237e027c756e21c188895de78349bb5adeb1bbb3d') { throw 'Fourth prerelease MSI differs from the recorded accepted package' }
             $smokeArgs += @('--previous-msi', $previousPath, '--previous-msi-sha256', $previousHash, '--previous-version', $env:PREVIOUS_TAG.Substring(1))
           }
           node @smokeArgs
