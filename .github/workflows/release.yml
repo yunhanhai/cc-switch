@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.5)"
+        description: "Existing YunSwitch tag to build (e.g. v3.20.1-yunswitch.6)"
         required: false
         type: string
       source_ref:
@@ -27,10 +27,10 @@ on:
         required: false
         type: string
       previous_tag:
-        description: "Previous public release to test upgrading; defaults to v3.20.1-yunswitch.4"
+        description: "Previous public release to test upgrading; defaults to v3.20.1-yunswitch.5"
         required: false
         type: string
-        default: v3.20.1-yunswitch.4
+        default: v3.20.1-yunswitch.5
       scope:
         description: "Packages to build; all platforms require separate installation acceptance"
         required: true
@@ -644,7 +644,7 @@ jobs:
             Copy-Item -LiteralPath THIRD-PARTY-NOTICES.md -Destination $portableDir
             $portableLicenses = Join-Path $portableDir 'licenses'
             New-Item -ItemType Directory -Path $portableLicenses | Out-Null
-            foreach ($licenseName in @('CodexBar-MIT.txt', 'LobeHub-Icons-MIT.txt', 'AgentRouter-Responses-Shim-MIT.txt')) {
+            foreach ($licenseName in @('CodexBar-MIT.txt', 'LobeHub-Icons-MIT.txt', 'AgentRouter-Responses-Shim-MIT.txt', 'Async-Compression-MIT.txt')) {
               Copy-Item -LiteralPath (Join-Path 'licenses' $licenseName) -Destination $portableLicenses
             }
             @(
@@ -752,7 +752,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $acceptanceArgs = @('--require-third-party-notices', 'true')
-          $previousTag = if ($env:PREVIOUS_TAG) { $env:PREVIOUS_TAG } else { 'v3.20.1-yunswitch.4' }
+          $previousTag = if ($env:PREVIOUS_TAG) { $env:PREVIOUS_TAG } else { 'v3.20.1-yunswitch.5' }
           if ($previousTag -notmatch '^v\d+\.\d+\.\d+-yunswitch\.\d+$' -or $previousTag -eq "v$version") { throw 'Previous public tag must differ from the new source version' }
           if ($previousTag) {
             $previousName = "YunSwitch-$previousTag-Windows.msi"
@@ -766,6 +766,7 @@ jobs:
             if ($previousTag -eq 'v3.20.1-yunswitch.2' -and $previousHash -ne '2b0e1e88febe1c3f07862a381e1aefa21b90f9db547ef4995ed3aa345e951930') { throw 'Previous MSI differs from the accepted second prerelease' }
             if ($previousTag -eq 'v3.20.1-yunswitch.3' -and $previousHash -ne '3cbf7344352229d17cf978889561cc31b115677080c6b0ab78ef4b87539aceb4') { throw 'Previous MSI differs from the accepted third prerelease' }
             if ($previousTag -eq 'v3.20.1-yunswitch.4' -and $previousHash -ne 'a534673e35a98ed5f2a5877237e027c756e21c188895de78349bb5adeb1bbb3d') { throw 'Previous MSI differs from the accepted fourth prerelease' }
+            if ($previousTag -eq 'v3.20.1-yunswitch.5' -and $previousHash -ne '54e1a2de96be0cd9b46d2b818dee63d6a95f4194669677d197b9ad049ec27b14') { throw 'Previous MSI differs from the accepted fifth prerelease' }
             $acceptanceArgs += @('--previous-msi', $previousMsi, '--previous-version', $previousTag.Substring(1), '--previous-msi-sha256', $previousHash)
           }
           node scripts/windows-release-smoke.mjs `

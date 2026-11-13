@@ -726,6 +726,7 @@ async function verifyThirdPartyNotices(packageRoot, label) {
     "licenses/CodexBar-MIT.txt",
     "licenses/LobeHub-Icons-MIT.txt",
     "licenses/AgentRouter-Responses-Shim-MIT.txt",
+    "licenses/Async-Compression-MIT.txt",
   ]) {
     const expected = await readFile(join(repoRoot, path));
     const actual = await readFile(join(packageRoot, path));

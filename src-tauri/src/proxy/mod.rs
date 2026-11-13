@@ -27,6 +27,7 @@ pub mod model_mapper;
 pub mod provider_router;
 pub mod providers;
 pub mod rate_limit;
+pub(crate) mod response_decompression;
 pub mod response_processor;
 pub(crate) mod server;
 pub mod session;
