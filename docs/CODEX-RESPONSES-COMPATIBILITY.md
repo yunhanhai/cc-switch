@@ -61,3 +61,5 @@ YunSwitch 已拥有独立仓库、名称、应用 ID、配置目录、深链和�
 `.6` 已发布压缩响应恢复及请求取消清理，复用已有重试偏好；兼容开关仍独立，见[恢复说明](CODEX-STREAM-RECOVERY.md)和[`.6` 发布记录](releases/3.20.1-yunswitch.6.md)。
 
 `.7` 进一步修复原生状态请求遇 HTTP 错误或断连时的重复发送，并改善并发冷却和 429 额度判断；见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.7` 发布记录](releases/3.20.1-yunswitch.7.md)。
+
+`.8` 补充已限流请求的恢复协调，使用既有等待开关和预算；同一供应商恢复尝试逐个处理，并遵守较晚的共享期限。见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.8` 发布记录](releases/3.20.1-yunswitch.8.md)。
