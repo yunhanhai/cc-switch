@@ -331,10 +331,12 @@ fn failure_from_document(value: &Value, headers: &HeaderMap) -> Option<ProxyErro
         .filter(|status| (400..600).contains(status));
     // Classification uses protocol fields, never substrings in user-supplied
     // messages. Only fixed diagnostics are returned/logged, not upstream bodies.
+    if super::error::is_billing_error_object(error) {
+        return Some(ProxyError::BillingExhausted(
+            "Responses upstream reports exhausted billing quota".into(),
+        ));
+    }
     let (status, error_type, error_code, message) = match tag {
-        "insufficient_quota" | "billing_hard_limit_reached" | "billing_error" | "payment_required" => {
-            return Some(ProxyError::BillingExhausted("Responses upstream reports exhausted billing quota".into()));
-        }
         "rate_limit_exceeded" | "rate_limit_error" | "too_many_requests" => (429, "rate_limit_error", tag, "Responses upstream is rate limited."),
         "server_error" | "internal_server_error" | "internal_error" => (502, "server_error", tag, "Responses upstream reported an internal error before output."),
         "overloaded_error" | "service_unavailable" => (503, "server_error", tag, "Responses upstream is temporarily unavailable."),
@@ -349,11 +351,8 @@ fn failure_from_document(value: &Value, headers: &HeaderMap) -> Option<ProxyErro
         },
     };
     if status == 429 {
-        let retry_after_secs = headers
-            .get(http::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(super::error::parse_retry_after)
-            .or_else(|| retry_after(error));
+        let retry_after_secs = super::error::retry_after_from_headers(headers)
+            .or_else(|| super::error::retry_after_from_error(error));
         return Some(ProxyError::RateLimited {
             retry_after_secs,
             body: None,
@@ -365,15 +364,6 @@ fn failure_from_document(value: &Value, headers: &HeaderMap) -> Option<ProxyErro
             json!({"error":{"type":error_type,"code":error_code,"message":message}}).to_string(),
         ),
     })
-}
-
-fn retry_after(error: &Value) -> Option<u64> {
-    let value = error
-        .get("retry_after_seconds")
-        .or_else(|| error.get("retry_after"))?;
-    value
-        .as_u64()
-        .or_else(|| value.as_str().and_then(super::error::parse_retry_after))
 }
 
 #[cfg(test)]
@@ -522,6 +512,20 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn stream_wait_hints_share_http_header_precedence_and_body_fallback() {
+        let body = Bytes::from_static(b"data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"retry_after_seconds\":null,\"retry_after\":\"17\"}\n\n");
+        for (values, expected) in [(vec![], 17), (vec!["invalid", "11", "23"], 23)] {
+            let mut headers = HeaderMap::new();
+            for value in values {
+                headers.append(http::header::RETRY_AFTER, value.parse().unwrap());
+            }
+            assert!(
+                matches!(inspect(response(vec![body.clone()], headers), Duration::ZERO).await, Err(ProxyError::RateLimited { retry_after_secs: Some(seconds), .. }) if seconds == expected)
+            );
+        }
     }
 
     #[tokio::test]

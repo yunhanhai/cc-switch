@@ -831,8 +831,11 @@ async function main() {
     });
   }
   const portableRoot = join(output, "portable");
+  // Windows PowerShell can discover an Archive module intended for newer .NET,
+  // whose ExtractToDirectory overload is unavailable on .NET Framework. Use
+  // the common two-argument API and its default refusal to overwrite files.
   await powershell(
-    `Expand-Archive -LiteralPath ${psQuote(zip)} -DestinationPath ${psQuote(portableRoot)}`,
+    `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory(${psQuote(zip)}, ${psQuote(portableRoot)})`,
   );
   const portableExe = join(portableRoot, "cc-switch.exe");
   assert.ok(await exists(portableExe));
