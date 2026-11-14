@@ -157,6 +157,24 @@ impl ProxyStatus {
         self.refresh_rate_limit_waiting();
     }
 
+    /// A shared cooldown extension is still the same wait, not another retry.
+    pub(crate) fn extend_rate_limit_wait(&mut self, id: u64, total_secs: u64) {
+        if let Some(waiting) = self.active_rate_limit_waits.get_mut(&id) {
+            let extra = total_secs.saturating_sub(waiting.wait_secs);
+            if extra == 0 {
+                return;
+            }
+            waiting.wait_secs = total_secs;
+            self.rate_limit_wait_total_secs = self.rate_limit_wait_total_secs.saturating_add(extra);
+            let bucket = self
+                .rate_limit_waits_by_app
+                .entry(waiting.app_type.clone())
+                .or_default();
+            bucket.total_secs = bucket.total_secs.saturating_add(extra);
+            self.refresh_rate_limit_waiting();
+        }
+    }
+
     fn refresh_rate_limit_waiting(&mut self) {
         self.rate_limit_waiting = self
             .active_rate_limit_waits
@@ -534,6 +552,33 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_wait_extension_adds_duration_without_counting_another_retry() {
+        let mut status = ProxyStatus::default();
+        status.begin_rate_limit_wait(
+            1,
+            RateLimitWaiting {
+                provider_id: "a".into(),
+                provider_name: "A".into(),
+                app_type: "codex".into(),
+                wait_secs: 1,
+                attempt: 1,
+                started_at: "2026-11-14T00:00:00Z".into(),
+            },
+        );
+        status.extend_rate_limit_wait(1, 3);
+        status.extend_rate_limit_wait(1, 2);
+        assert_eq!(status.rate_limit_wait_count, 1);
+        assert_eq!(status.rate_limit_wait_total_secs, 3);
+        assert_eq!(status.rate_limit_waits_for("codex").count, 1);
+        assert_eq!(status.rate_limit_waits_for("codex").total_secs, 3);
+        assert_eq!(status.rate_limit_waiting.as_ref().unwrap().wait_secs, 3);
+        status.end_rate_limit_wait(1);
+        status.extend_rate_limit_wait(1, 10);
+        assert_eq!(status.rate_limit_wait_total_secs, 3);
+        assert!(status.rate_limit_waiting.is_none());
+    }
 
     #[test]
     fn concurrent_waits_restore_the_previous_live_snapshot_without_stale_errors() {
