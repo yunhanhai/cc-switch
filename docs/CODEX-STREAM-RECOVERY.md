@@ -4,7 +4,7 @@
 
 `.6` Windows x64 已公开，支持压缩响应增量解码以及请求取消后的等待与半开探测清理，见[发布记录](releases/3.20.1-yunswitch.6.md)。`.5` 及更早包保持各版原行为。
 
-`.7` 准备源码进一步限制状态型请求在 HTTP 错误或断连后的重发，并修复旧成功请求清掉新冷却窗口的问题，见[`.7` 记录](releases/3.20.1-yunswitch.7.md)。旧包保持各版原有策略。
+`.7` Windows x64 已公开，进一步限制状态型请求在 HTTP 错误或断连后的重发，并修复旧成功请求清掉新冷却窗口的问题，见[发布记录](releases/3.20.1-yunswitch.7.md)。旧包保持各版原有策略。
 
 ## 处理的问题
 
@@ -60,3 +60,5 @@ Windows 包验收在便携和升级后安装程序中验证流内 429、暂时�
 官方文档请求在本轮环境返回 403，未据未读取的网页宣称全部协议兼容。实现依照仓库已有 Responses 结构与可复现测试，保守透传未知扩展。
 
 `.5` 的[源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43419996978)和[安装验收](https://github.com/yunhanhai/yunswitch/actions/runs/43420003872)记录保留。`.6` [最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43445225978)和[新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/43445087046)通过，Windows 共 72 项运行检查；新增压缩限流、最终错误头、并发等待保留及取消后停止重试。
+
+`.7` [最终源码 CI](https://github.com/yunhanhai/yunswitch/actions/runs/43573524560)与[Windows 新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/43573825505)通过。共 82 项运行检查，便携与升级后新增状态请求一次发送、429 等待提示、重复等待头、并发冷却及额度耗尽检查。

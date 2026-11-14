@@ -59,3 +59,5 @@ YunSwitch 已拥有独立仓库、名称、应用 ID、配置目录、深链和�
 最终版本 [CI](https://github.com/yunhanhai/yunswitch/actions/runs/42999648172) 全部通过，前端 144 文件/1099 项及三平台后端/WSL2 检查成功。[Windows 新包验收](https://github.com/yunhanhai/yunswitch/actions/runs/42999640461) 56 项通过，其中便携和升级后的 MSI 实际操作新开关，验证 JSON/SSE、压缩历史拒绝、429 重试/最终头、重启和旧设置。它们使用合成上游；真实供应商与长会话仍需按组合验证。
 
 `.6` 已发布压缩响应恢复及请求取消清理，复用已有重试偏好；兼容开关仍独立，见[恢复说明](CODEX-STREAM-RECOVERY.md)和[`.6` 发布记录](releases/3.20.1-yunswitch.6.md)。
+
+`.7` 进一步修复原生状态请求遇 HTTP 错误或断连时的重复发送，并改善并发冷却和 429 额度判断；见[恢复说明](CODEX-STREAM-RECOVERY.md)与[`.7` 发布记录](releases/3.20.1-yunswitch.7.md)。
