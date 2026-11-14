@@ -7,7 +7,7 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
 use crate::proxy::circuit_breaker::{AllowResult, CircuitBreaker, CircuitBreakerConfig};
-use crate::proxy::rate_limit::{CooldownSnapshot, RateLimitCooldown};
+use crate::proxy::rate_limit::{CooldownEpoch, CooldownSnapshot, RateLimitCooldown};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -410,9 +410,8 @@ impl ProviderRouter {
 
     /// 登记一次限流冷却。
     ///
-    /// 由 forwarder 在「决定等待后重试同一 provider」时调用。登记之后，
-    /// 其他并发请求在 `select_providers` 里就不会再把这家当首选，避免
-    /// N 个请求同时撞同一个上游限流窗口。
+    /// Records shared routing preference after rate limits. Cooling providers
+    /// remain candidates; this does not serialize or throttle concurrent calls.
     pub async fn note_rate_limited(
         &self,
         provider_id: &str,
@@ -436,9 +435,25 @@ impl ProviderRouter {
             .await
     }
 
-    /// 清除该 provider 的限流冷却（请求成功后调用）。
+    /// Explicitly reset this provider's cooldown.
+    #[cfg(test)]
     pub async fn clear_rate_limit_cooldown(&self, provider_id: &str, app_type: &str) {
         self.rate_limit_cooldown.clear(app_type, provider_id).await;
+    }
+
+    pub(crate) fn cooldown_epoch(&self) -> CooldownEpoch {
+        self.rate_limit_cooldown.epoch()
+    }
+
+    pub(crate) async fn clear_cooldown_after_success(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+        observed: CooldownEpoch,
+    ) {
+        self.rate_limit_cooldown
+            .clear_after_success(app_type, provider_id, observed)
+            .await;
     }
 
     /// 导出所有活跃冷却快照，并顺带清理过期条目。

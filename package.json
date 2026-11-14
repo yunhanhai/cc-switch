@@ -1,6 +1,6 @@
 {
   "name": "yunswitch",
-  "version": "3.20.1-yunswitch.6",
+  "version": "3.20.1-yunswitch.7",
   "description": "YunSwitch: configuration and routing manager for AI coding tools, independently maintained from CC Switch",
   "type": "module",
   "scripts": {
