@@ -466,11 +466,6 @@ impl RequestForwarder {
         app_type: &str,
         permit: &mut super::circuit_breaker::AllowResult,
     ) {
-        // 成功即意味着限流窗口已过：清掉共享冷却，别让后来请求继续绕开它。
-        self.router
-            .clear_rate_limit_cooldown(provider_id, app_type)
-            .await;
-
         if permit.used_half_open_permit {
             if let Err(e) = self
                 .router
@@ -497,6 +492,58 @@ impl RequestForwarder {
                 );
             }
         });
+    }
+
+    /// Provider health and shared cooldown reflect the error even when the
+    /// request's state makes replay unsafe. Replay eligibility is a separate
+    /// decision and must not turn a real 5xx into a healthy provider result.
+    async fn record_provider_failure(
+        &self,
+        provider: &Provider,
+        app_type: &str,
+        permit: &mut super::circuit_breaker::AllowResult,
+        error: &ProxyError,
+    ) {
+        if self.categorize_proxy_error(error, provider) != ErrorCategory::Retryable {
+            permit.release();
+            return;
+        }
+        if let ProxyError::RateLimited { .. } = error {
+            let seconds = rate_limit_cooling_for_rate_limited(error);
+            if super::rate_limit::should_register_cooldown(
+                self.rate_limit_retry_enabled,
+                Some(seconds),
+            ) {
+                self.router
+                    .note_rate_limited(
+                        &provider.id,
+                        app_type,
+                        seconds,
+                        extract_rate_limited_retry_after(error),
+                    )
+                    .await;
+            }
+            permit.release();
+            return;
+        }
+        let result = if matches!(error, ProxyError::BillingExhausted(_)) {
+            self.router
+                .record_fatal_result(&provider.id, app_type, Some(permit), error.to_string())
+                .await
+        } else {
+            self.router
+                .record_result(
+                    &provider.id,
+                    app_type,
+                    Some(permit),
+                    false,
+                    Some(error.to_string()),
+                )
+                .await
+        };
+        if let Err(error) = result {
+            log::warn!("[{app_type}] failed to record provider failure: {error}");
+        }
     }
 
     /// 整流（thinking signature 或 budget）重试失败后的统一收尾。
@@ -692,6 +739,13 @@ impl RequestForwarder {
                 continue;
             }
 
+            // The response guard alone cannot prevent retries on HTTP errors
+            // or disconnects. Apply the same native Responses replay boundary
+            // to every retry path, including rectifiers and provider failover.
+            let can_replay = !super::codex_responses_compat::applies_to(
+                true, app_type, &method, endpoint, provider,
+            ) || super::codex_response_guard::request_is_replayable(&body);
+
             // PRE-SEND 优化器：每个 provider 独立决定是否优化
             // clone body 以避免 Bedrock 优化字段泄漏到非 Bedrock provider（failover 场景）
             let mut provider_body =
@@ -743,6 +797,7 @@ impl RequestForwarder {
                     .await
                 {
                     Ok(ok) => break Ok(ok),
+                    Err(error) if !can_replay => break Err(error),
                     Err(ProxyError::RateLimited {
                         retry_after_secs,
                         body,
@@ -754,9 +809,8 @@ impl RequestForwarder {
                                     "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
                                     provider.name
                                 );
-                                // 共享冷却：让并发的其他请求别再来撞同一个限流窗口。
-                                // 只有「本请求决定等」时才登记——放弃等待走故障转移的
-                                // 情形已经被 attempted_providers 跳过，不存在并发放大。
+                                // Shared cooldown makes other healthy providers preferred.
+                                // It does not queue or block other in-flight requests.
                                 if super::rate_limit::should_register_cooldown(
                                     self.rate_limit_retry_enabled,
                                     Some(wait_secs),
@@ -798,11 +852,9 @@ impl RequestForwarder {
                         }
                     }
                     Err(e) => {
-                        // 重试边界：只在 forward() 返回 Err 时重发。forward() 返回 Ok 之前
-                        // 下游客户端还没收到任何字节（流式请求也要等首个 chunk 到达才返回），
-                        // 所以这里重发是安全的。返回 Ok 之后流中途出错时数据已交给客户端、
-                        // 无法撤回，保持报错由客户端决定——不要在 response_processor 的
-                        // 透传流里加重试，也不要拼接半截内容续写。
+                        // Only replayable requests reach this branch. Receiving no
+                        // output does not by itself prove a stateful request is safe
+                        // to repeat. Once forward returns Ok, no later body retry runs.
                         let next_attempt = same_provider_attempt + 1;
                         let Some(wait_ms) =
                             self.same_provider_retry_wait_ms(&e, provider, next_attempt)
@@ -885,6 +937,22 @@ impl RequestForwarder {
                     });
                 }
                 Err(e) => {
+                    if !can_replay {
+                        self.record_provider_failure(provider, app_type_str, &mut permit, &e)
+                            .await;
+                        let mut status = self.status.write().await;
+                        status.failed_requests += 1;
+                        status.last_error = Some(e.to_string());
+                        if status.total_requests > 0 {
+                            status.success_rate = (status.success_requests as f32
+                                / status.total_requests as f32)
+                                * 100.0;
+                        }
+                        return Err(ForwardError {
+                            error: e,
+                            provider: Some(provider.clone()),
+                        });
+                    }
                     // 检测是否需要触发整流器（仅 Claude/ClaudeAuth 供应商）
                     let provider_type = ProviderType::from_app_type_and_config(app_type, provider);
                     let is_anthropic_provider = matches!(
@@ -1346,61 +1414,8 @@ impl RequestForwarder {
 
                     match category {
                         ErrorCategory::Retryable => {
-                            // 429 限流不该污染熔断器：冷却表已经把该 provider 推到队尾
-                            // 并登记了共享冷却，再记一次熔断失败等于把"忙"当成"坏"。
-                            // 仅释放 HalfOpen permit，不更新连续失败/错误率/健康度。
-                            // BillingExhausted 虽也语义特殊，但它已被上方 retry 家族
-                            // 单独处理为 record_fatal_result（真正的终态），与 429 不同。
-                            let is_rate_limited = matches!(&e, ProxyError::RateLimited { .. });
-                            if is_rate_limited {
-                                // 已在 forward 超限破圈处对该 provider 做过 429 共享冷却登记：
-                                // - 开关开启且决定等待时登记（逐次 waiting）
-                                // - 超限/关闭时直接破圈未登记，这里补上最长 30s 的保守冷却
-                                //   （让并发请求别立刻再撞同一个窗口）。
-                                if super::rate_limit::should_register_cooldown(
-                                    self.rate_limit_retry_enabled,
-                                    Some(rate_limit_cooling_for_rate_limited(&e)),
-                                ) {
-                                    let cooling_secs = rate_limit_cooling_for_rate_limited(&e);
-                                    self.router
-                                        .note_rate_limited(
-                                            &provider.id,
-                                            app_type_str,
-                                            cooling_secs,
-                                            extract_rate_limited_retry_after(&e),
-                                        )
-                                        .await;
-                                }
-                                permit.release();
-                            } else {
-                                // 可重试：真正的 provider 故障 → 记录失败并更新熔断器/DB 健康度
-                                let record_result = if matches!(&e, ProxyError::BillingExhausted(_))
-                                {
-                                    self.router
-                                        .record_fatal_result(
-                                            &provider.id,
-                                            app_type_str,
-                                            Some(&mut permit),
-                                            e.to_string(),
-                                        )
-                                        .await
-                                } else {
-                                    self.router
-                                        .record_result(
-                                            &provider.id,
-                                            app_type_str,
-                                            Some(&mut permit),
-                                            false,
-                                            Some(e.to_string()),
-                                        )
-                                        .await
-                                };
-                                if let Err(record_error) = record_result {
-                                    log::warn!(
-                                        "[{app_type_str}] failed to record provider failure: {record_error}"
-                                    );
-                                }
-                            }
+                            self.record_provider_failure(provider, app_type_str, &mut permit, &e)
+                                .await;
 
                             {
                                 let mut status = self.status.write().await;
@@ -2760,6 +2775,10 @@ impl RequestForwarder {
             is_copilot,
         );
 
+        // Capture immediately before each wire attempt, including rectifier
+        // retries. A newer overlapping 429 must survive this attempt's success.
+        let cooldown_epoch = self.router.cooldown_epoch();
+
         // 发送请求
         let response = if is_socks_proxy || !preserve_exact_header_case {
             // OpenAI / Copilot / Codex 类后端不依赖原始 header 大小写；走 reqwest
@@ -2862,6 +2881,9 @@ impl RequestForwarder {
                     response = self.validate_responses_stream_start(response).await?;
                 }
             }
+            self.router
+                .clear_cooldown_after_success(&provider.id, app_type.as_str(), cooldown_epoch)
+                .await;
             Ok((response, resolved_claude_api_format, outbound_model))
         } else {
             let status_code = status.as_u16();
@@ -2871,11 +2893,7 @@ impl RequestForwarder {
             let encoding = get_content_encoding(response.headers());
             // bytes_with_limit 会消费 response；先提取 Retry-After 供 429 决策
             let retry_after_header = if status_code == 429 {
-                response
-                    .headers()
-                    .get(http::header::RETRY_AFTER)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(super::error::parse_retry_after)
+                super::error::retry_after_from_headers(response.headers())
             } else {
                 None
             };
@@ -2903,8 +2921,18 @@ impl RequestForwarder {
 
             // 429 限流：携带 Retry-After 供等待重试决策
             if status_code == 429 {
+                let parsed = body_text
+                    .as_deref()
+                    .and_then(|body| serde_json::from_str::<Value>(body).ok());
+                let error = parsed.as_ref().and_then(|body| body.get("error"));
+                if error.is_some_and(super::error::is_billing_error_object) {
+                    return Err(ProxyError::BillingExhausted(
+                        "Upstream reports exhausted billing quota".into(),
+                    ));
+                }
                 return Err(ProxyError::RateLimited {
-                    retry_after_secs: retry_after_header,
+                    retry_after_secs: retry_after_header
+                        .or_else(|| error.and_then(super::error::retry_after_from_error)),
                     body: body_text,
                 });
             }
@@ -5768,6 +5796,344 @@ mod tests {
             providers,
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn stateful_codex_http_failure_is_not_replayed_or_failed_over() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            async {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    r#"{"error":{"code":"server_error"}}"#,
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3))
+            .with_same_provider_retry(2, 1, 1);
+        fwd.max_attempts = 2;
+        let cases = [
+            json!({"background":true}),
+            json!({"previous_response_id":"resp_existing"}),
+            json!({"conversation":"conv_existing"}),
+            json!({"context_management":[{"type":"compaction"}]}),
+            json!({"input":[{"type":"item_reference","id":"item_existing"}]}),
+            json!({"tools":[{"type":"mcp","server_label":"external"}]}),
+            json!({"tools":[{"type":"web_search"}]}),
+        ];
+        for (index, extra) in cases.iter().enumerate() {
+            let mut body = json!({"model":"synthetic","input":"run once"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let result = send_codex(
+                &fwd,
+                body,
+                vec![
+                    codex_api_provider("a", &base),
+                    codex_api_provider("b", &base),
+                ],
+            )
+            .await;
+            assert!(matches!(
+                result,
+                Err(ForwardError {
+                    error: ProxyError::UpstreamError { status: 503, .. },
+                    ..
+                })
+            ));
+            assert_eq!(
+                hits.load(Ordering::SeqCst),
+                index + 1,
+                "a stateful request was replayed: {extra}"
+            );
+            // Reset only to exercise each protocol shape with both candidates.
+            fwd.router.reset_provider_breaker("a", "codex").await;
+        }
+        upstream.abort();
+        assert!(
+            fwd.router
+                .get_circuit_breaker_stats("b", "codex")
+                .await
+                .is_none(),
+            "fallback provider was touched"
+        );
+    }
+
+    #[tokio::test]
+    async fn stateful_codex_429_keeps_wait_hint_without_replaying_or_penalizing_health() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "1")],
+                    r#"{"error":{"code":"rate_limit_exceeded"}}"#,
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3));
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 5;
+        fwd.max_attempts = 2;
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(750),
+            send_codex(
+                &fwd,
+                json!({"model":"synthetic","background":true,"input":"run once"}),
+                vec![
+                    codex_api_provider("a", &base),
+                    codex_api_provider("b", &base),
+                ],
+            ),
+        )
+        .await;
+        upstream.abort();
+        let result = outcome.expect("unsafe retry must not sleep");
+        assert!(matches!(
+            result,
+            Err(ForwardError {
+                error: ProxyError::RateLimited {
+                    retry_after_secs: Some(1),
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(fwd.status.read().await.rate_limit_wait_count, 0);
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+        let stats = fwd
+            .router
+            .get_circuit_breaker_stats("a", "codex")
+            .await
+            .unwrap();
+        assert_eq!(stats.failed_requests, 0);
+        assert_eq!(stats.half_open_probes, 0);
+        assert!(fwd.router.rate_limit_cooldown_secs("a", "codex").await > 0);
+    }
+
+    #[tokio::test]
+    async fn stateful_codex_disconnect_does_not_repeat_a_potentially_executed_request() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = hits.clone();
+        let upstream = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = vec![0; 4096];
+                let _ = socket.read(&mut bytes).await;
+                observed.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3))
+            .with_same_provider_retry(2, 1, 1);
+        fwd.max_attempts = 2;
+        let result = send_codex(
+            &fwd,
+            json!({"model":"synthetic","background":true,"input":"run once"}),
+            vec![
+                codex_api_provider("a", &base),
+                codex_api_provider("b", &base),
+            ],
+        )
+        .await;
+        upstream.abort();
+        assert!(result.is_err());
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            fwd.router
+                .get_circuit_breaker_stats("a", "codex")
+                .await
+                .unwrap()
+                .failed_requests,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn earlier_success_cannot_clear_a_newer_concurrent_rate_limit() {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let entered_tx = Arc::new(tokio::sync::Mutex::new(Some(entered_tx)));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let upstream_release = release.clone();
+        let app = axum::Router::new().fallback(move || {
+            let entered_tx = entered_tx.clone();
+            let release = upstream_release.clone();
+            async move {
+                if let Some(sender) = entered_tx.lock().await.take() { let _ = sender.send(()); }
+                release.notified().await;
+                axum::Json(json!({"id":"resp_earlier","object":"response","status":"completed","output":[]}))
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let fwd = Arc::new(test_forwarder(
+            Duration::from_secs(3),
+            Duration::from_secs(3),
+        ));
+        let request_fwd = fwd.clone();
+        let request = tokio::spawn(async move {
+            send_codex(
+                &request_fwd,
+                json!({"model":"synthetic","input":"earlier"}),
+                vec![codex_api_provider("a", &base)],
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entered_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        fwd.router
+            .note_rate_limited("a", "codex", 30, Some(30))
+            .await;
+        release.notify_one();
+        let result = request.await.unwrap();
+        upstream.abort();
+        assert!(result.is_ok());
+        assert!(
+            fwd.router.rate_limit_cooldown_secs("a", "codex").await > 0,
+            "a success started before the 429 erased its cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_quota_exhaustion_skips_wait_and_can_fail_over_once() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if call == 0 {
+                    (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"error":{"type":"rate_limit_error","code":"insufficient_quota","message":"private billing detail"}})))
+                } else {
+                    (StatusCode::OK, axum::Json(json!({"id":"resp_fallback","object":"response","status":"completed","output":[]})))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3))
+            .with_same_provider_retry(2, 1, 1);
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 5;
+        fwd.max_attempts = 2;
+        let result = send_codex(
+            &fwd,
+            json!({"model":"synthetic","input":"hello"}),
+            vec![
+                codex_api_provider("exhausted", &base),
+                codex_api_provider("fallback", &base),
+            ],
+        )
+        .await
+        .ok()
+        .expect("uses fallback without waiting");
+        upstream.abort();
+        assert_eq!(result.provider.id, "fallback");
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(fwd.status.read().await.rate_limit_wait_count, 0);
+        let stats = fwd
+            .router
+            .get_circuit_breaker_stats("exhausted", "codex")
+            .await
+            .unwrap();
+        assert!(stats.fatal);
+        assert_eq!(stats.failed_requests, 1);
+        assert_eq!(
+            fwd.router
+                .rate_limit_cooldown_secs("exhausted", "codex")
+                .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn http_rate_limit_hints_respect_body_fallback_header_precedence_and_overflow() {
+        for (header_values, error, expected) in [
+            (
+                vec![],
+                json!({"retry_after_seconds":null,"retry_after":"17"}),
+                17,
+            ),
+            (
+                vec!["bad", "11", "23"],
+                json!({"retry_after_seconds":3}),
+                23,
+            ),
+            (
+                vec!["9999999999999999999999999"],
+                json!({"retry_after_seconds":1}),
+                u64::MAX,
+            ),
+        ] {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let observed = hits.clone();
+            let app = axum::Router::new().fallback(move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                let header_values = header_values.clone();
+                let mut error = error.clone();
+                error["code"] = json!("rate_limit_exceeded");
+                error["message"] = json!("quota exceeded words are not a billing code");
+                async move {
+                    let mut builder = axum::response::Response::builder()
+                        .status(StatusCode::TOO_MANY_REQUESTS)
+                        .header("content-type", "application/json");
+                    for value in header_values {
+                        builder = builder.header("retry-after", value);
+                    }
+                    builder
+                        .body(axum::body::Body::from(json!({"error":error}).to_string()))
+                        .unwrap()
+                }
+            });
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3));
+            fwd.rate_limit_retry_enabled = true;
+            fwd.rate_limit_max_wait_secs = 5;
+            let result = send_codex(
+                &fwd,
+                json!({"model":"synthetic","input":"hello"}),
+                vec![codex_api_provider("a", &base)],
+            )
+            .await;
+            upstream.abort();
+            assert!(
+                matches!(result, Err(ForwardError { error: ProxyError::RateLimited { retry_after_secs: Some(seconds), .. }, .. }) if seconds == expected)
+            );
+            assert_eq!(hits.load(Ordering::SeqCst), 1);
+            assert_eq!(fwd.status.read().await.rate_limit_wait_count, 0);
+        }
     }
 
     #[tokio::test]

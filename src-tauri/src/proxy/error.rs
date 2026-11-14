@@ -226,6 +226,44 @@ pub fn is_billing_exhausted_body(body: &str) -> bool {
             && (lower.contains("reached") || lower.contains("exceeded")))
 }
 
+/// Structured quota errors must not enter the transient 429 wait loop. Message
+/// text alone is not enough: some gateways mention quota in ordinary limits.
+pub(crate) fn is_billing_error_object(error: &serde_json::Value) -> bool {
+    ["code", "type"].iter().any(|field| {
+        matches!(
+            error.get(*field).and_then(serde_json::Value::as_str),
+            Some(
+                "insufficient_quota"
+                    | "billing_hard_limit_reached"
+                    | "billing_error"
+                    | "payment_required"
+            )
+        )
+    })
+}
+
+/// Take the longest valid repeated Retry-After header. Do not split on commas:
+/// a valid HTTP-date itself contains a comma.
+pub(crate) fn retry_after_from_headers(headers: &http::HeaderMap) -> Option<u64> {
+    headers
+        .get_all(http::header::RETRY_AFTER)
+        .iter()
+        .filter_map(|value| value.to_str().ok().and_then(parse_retry_after))
+        .max()
+}
+
+pub(crate) fn retry_after_from_error(error: &serde_json::Value) -> Option<u64> {
+    ["retry_after_seconds", "retry_after"]
+        .iter()
+        .filter_map(|field| error.get(*field))
+        .filter_map(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(parse_retry_after))
+        })
+        .max()
+}
+
 /// 解析上游 `Retry-After` 响应头
 ///
 /// 支持两种规范格式：
@@ -234,21 +272,30 @@ pub fn is_billing_exhausted_body(body: &str) -> bool {
 ///
 /// 非法值返回 `None`，由调用方走指数退避兜底。
 pub fn parse_retry_after(value: &str) -> Option<u64> {
+    parse_retry_after_at(value, chrono::Utc::now())
+}
+
+fn parse_retry_after_at(value: &str, now: chrono::DateTime<chrono::Utc>) -> Option<u64> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
     }
 
     // 数字秒
-    if let Ok(secs) = trimmed.parse::<u64>() {
-        return Some(secs);
+    if trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
+        // A syntactically valid but enormous wait must not fall back to a
+        // one-second retry. Saturation lets the existing wait cap reject it.
+        return Some(trimmed.parse::<u64>().unwrap_or(u64::MAX));
     }
 
     // HTTP-date（RFC 7231）
     if let Ok(ts) = chrono::DateTime::parse_from_rfc2822(trimmed) {
-        let now = chrono::Utc::now().timestamp();
-        let secs = ts.timestamp() - now;
-        return (secs > 0).then_some(secs as u64);
+        let remaining = ts.signed_duration_since(now).to_std().ok()?;
+        return Some(
+            remaining
+                .as_secs()
+                .saturating_add(u64::from(remaining.subsec_nanos() > 0)),
+        );
     }
 
     None
@@ -256,7 +303,7 @@ pub fn parse_retry_after(value: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod rate_limit_tests {
-    use super::parse_retry_after;
+    use super::*;
 
     #[test]
     fn parses_numeric_seconds() {
@@ -280,12 +327,47 @@ mod rate_limit_tests {
         assert_eq!(parse_retry_after(""), None);
         assert_eq!(parse_retry_after("abc"), None);
         assert_eq!(parse_retry_after("-5"), None);
+        assert_eq!(parse_retry_after("+5"), None);
+    }
+
+    #[test]
+    fn repeated_headers_use_the_longest_valid_wait_and_ignore_bad_values() {
+        let mut headers = http::HeaderMap::new();
+        for value in ["invalid", "1", "30", "2"] {
+            headers.append(http::header::RETRY_AFTER, value.parse().unwrap());
+        }
+        assert_eq!(retry_after_from_headers(&headers), Some(30));
+        let error = serde_json::json!({"retry_after_seconds":null,"retry_after":"7"});
+        assert_eq!(retry_after_from_error(&error), Some(7));
+        assert_eq!(
+            retry_after_from_error(&serde_json::json!({"retry_after_seconds":2,"retry_after":9})),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn date_wait_does_not_undershoot_and_numeric_overflow_does_not_retry_early() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-14T00:00:00.250Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            parse_retry_after_at("Sat, 14 Nov 2026 00:00:02 GMT", now),
+            Some(2)
+        );
+        assert_eq!(
+            parse_retry_after_at("Sat, 14 Nov 2026 00:00:00 GMT", now),
+            None
+        );
+        assert_eq!(
+            parse_retry_after("9999999999999999999999999999999999"),
+            Some(u64::MAX)
+        );
     }
 }
 
 #[cfg(test)]
 mod billing_tests {
-    use super::is_billing_exhausted_body;
+    use super::{is_billing_error_object, is_billing_exhausted_body};
 
     #[test]
     fn detects_known_billing_payloads() {
@@ -303,6 +385,22 @@ mod billing_tests {
         ));
         assert!(!is_billing_exhausted_body("permission denied"));
         assert!(!is_billing_exhausted_body(""));
+    }
+
+    #[test]
+    fn structured_quota_classification_ignores_untrusted_message_text() {
+        assert!(is_billing_error_object(
+            &serde_json::json!({"type":"rate_limit_error","code":"insufficient_quota"})
+        ));
+        assert!(is_billing_error_object(
+            &serde_json::json!({"type":"billing_error"})
+        ));
+        assert!(!is_billing_error_object(
+            &serde_json::json!({"code":"rate_limit_exceeded","message":"insufficient_quota mentioned by a gateway"})
+        ));
+        assert!(!is_billing_error_object(
+            &serde_json::json!({"metadata":{"code":"insufficient_quota"}})
+        ));
     }
 }
 

@@ -73,6 +73,7 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
   const requests = [];
   let scenario = "history";
   let hits = 0;
+  let releaseEarlierSuccess;
   function sendStream(response, text) {
     const coding = scenario.includes("gzip")
       ? "gzip"
@@ -105,6 +106,57 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         body,
       });
       hits += 1;
+      if (scenario === "stateful-503") {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "server_error" } }));
+        return;
+      }
+      if (scenario === "quota-429") {
+        response.writeHead(429, {
+          "content-type": "application/json",
+          "retry-after": "1",
+        });
+        response.end(
+          JSON.stringify({
+            error: { type: "rate_limit_error", code: "insufficient_quota" },
+          }),
+        );
+        return;
+      }
+      if (scenario === "body-wait-hint" || scenario === "repeated-wait-hint") {
+        response.writeHead(429, {
+          "content-type": "application/json",
+          ...(scenario === "repeated-wait-hint"
+            ? { "retry-after": ["bad", "11", "23"] }
+            : {}),
+        });
+        response.end(
+          JSON.stringify({
+            error: {
+              code: "rate_limit_exceeded",
+              retry_after_seconds: null,
+              retry_after: "17",
+            },
+          }),
+        );
+        return;
+      }
+      if (scenario === "cooldown-race") {
+        if (body.input === "Earlier success") {
+          await new Promise((done) => {
+            releaseEarlierSuccess = done;
+          });
+        } else if (body.input === "Newer rate limit") {
+          response.writeHead(429, {
+            "content-type": "application/json",
+            "retry-after": "30",
+          });
+          response.end(
+            JSON.stringify({ error: { code: "rate_limit_exceeded" } }),
+          );
+          return;
+        }
+      }
       if (
         scenario === "always-429" ||
         (scenario === "cancel-wait" && body.input === "Cancelled retry") ||
@@ -646,6 +698,137 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     } finally {
       client.destroy();
     }
+
+    await setCompatibility(cdp, until, false);
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 2,
+        sameProviderRetryBackoffMs: 1,
+        sameProviderRetryMaxBackoffMs: 1,
+        rateLimitRetryEnabled: true,
+        rateLimitMaxWaitSecs: 5,
+      },
+    });
+    scenario = "stateful-503";
+    for (const extra of [
+      { background: true },
+      { previous_response_id: "resp_ci_existing" },
+      { conversation: "conv_ci_existing" },
+      { tools: [{ type: "web_search" }] },
+    ]) {
+      hits = 0;
+      const outcome = await send({
+        model: "ci-model",
+        input: "Run once",
+        ...extra,
+      });
+      assert.equal(outcome.status, 503, outcome.text);
+      assert.equal(hits, 1, "stateful HTTP error was replayed");
+    }
+    check(label + " Codex stateful HTTP errors are never replayed");
+
+    scenario = "always-429";
+    hits = 0;
+    const waitsBeforeStateful = (await cdp.invoke("get_proxy_status"))
+      .rate_limit_wait_count;
+    const limitedState = await send({
+      model: "ci-model",
+      input: "Run once",
+      background: true,
+    });
+    assert.equal(limitedState.status, 429, limitedState.text);
+    assert.equal(limitedState.retryAfter, "1");
+    assert.equal(hits, 1);
+    assert.equal(
+      (await cdp.invoke("get_proxy_status")).rate_limit_wait_count,
+      waitsBeforeStateful,
+    );
+    check(
+      label + " Codex stateful rate limits return Retry-After without replay",
+    );
+
+    for (const [name, seconds] of [
+      ["body-wait-hint", "17"],
+      ["repeated-wait-hint", "23"],
+    ]) {
+      scenario = name;
+      hits = 0;
+      const hinted = await send({ model: "ci-model", input: "Wait guidance" });
+      assert.equal(hinted.status, 429, hinted.text);
+      assert.equal(hinted.retryAfter, seconds);
+      assert.equal(hits, 1, "a wait longer than the cap must not retry");
+    }
+    check(
+      label +
+        " Codex body and repeated header wait hints preserve the longer delay",
+    );
+
+    scenario = "cooldown-race";
+    hits = 0;
+    releaseEarlierSuccess = undefined;
+    const earlier = send({ model: "ci-model", input: "Earlier success" });
+    try {
+      await until(
+        () => Boolean(releaseEarlierSuccess),
+        "earlier request reaches upstream",
+      );
+      const newer = await send({
+        model: "ci-model",
+        input: "Newer rate limit",
+      });
+      assert.equal(newer.status, 429, newer.text);
+      releaseEarlierSuccess();
+      const success = await earlier;
+      assert.equal(success.status, 200, success.text);
+      const cooling = await cdp.invoke("get_rate_limit_cooldowns", {
+        appType: "codex",
+      });
+      assert.ok(
+        cooling.some(
+          (item) => item.providerId === provider.id && item.remainingSecs > 0,
+        ),
+        "old success erased a newer cooldown",
+      );
+      assert.equal(hits, 2);
+      check(
+        label + " Codex older successes preserve newer concurrent cooldowns",
+      );
+    } finally {
+      releaseEarlierSuccess?.();
+      await earlier.catch(() => {});
+    }
+
+    scenario = "quota-429";
+    hits = 0;
+    const waitsBeforeQuota = (await cdp.invoke("get_proxy_status"))
+      .rate_limit_wait_count;
+    const exhausted = await send({
+      model: "ci-model",
+      input: "Quota exhaustion",
+    });
+    assert.equal(hits, 1);
+    assert.notEqual(exhausted.status, 429, exhausted.text);
+    assert.equal(
+      JSON.parse(exhausted.text).error.code,
+      "cc_switch_billing_exhausted",
+    );
+    assert.equal(
+      (await cdp.invoke("get_proxy_status")).rate_limit_wait_count,
+      waitsBeforeQuota,
+    );
+    const exhaustedHealth = await cdp.invoke("get_provider_health", {
+      providerId: provider.id,
+      appType: "codex",
+    });
+    assert.equal(exhaustedHealth.fatal, true);
+    check(
+      label +
+        " Codex HTTP quota exhaustion never enters the rate limit retry loop",
+    );
+    // Preserve the established relaunch acceptance preference.
+    await setCompatibility(cdp, until, true);
   } finally {
     try {
       if (proxyStarted) await cdp.invoke("stop_proxy_with_restore");

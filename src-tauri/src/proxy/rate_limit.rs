@@ -2,15 +2,14 @@
 //!
 //! ## 解决的问题
 //!
-//! 429 等待重试此前是「每请求独立」的：同一个 provider 被上游限流后，
-//! N 个并发请求会各自等待、各自重试，形成 thundering herd —— 上游的
-//! 限流窗口不但没被尊重，反而被本地重试放大了 N 倍。
+//! 429 等待重试按请求独立计数。本表共享冷却信息以便优先选择其他供应商，
+//! 并防止较早发出的成功请求抹去新的限流窗口；它不是请求排队或节流器。
 //!
-//! 本模块把「某个 provider 在什么时刻之前不应该再被请求」变成进程内共享状态：
+//! 本模块把供应商的冷却期限保存为进程内共享状态：
 //!
 //! - 收到 429 时登记冷却截止时间（`note_rate_limited`）
 //! - 路由选择阶段把仍在冷却中的 provider 排到队尾（`cooldown_remaining`）
-//! - 该 provider 请求成功后立即清除冷却（`clear`）
+//! - 成功只能清除本次发送前已知的冷却，不能清除并发请求后来登记的窗口
 //!
 //! ## 与熔断器的分工
 //!
@@ -20,11 +19,18 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// 冷却表 key：`"app_type:provider_id"`
 pub(crate) type CooldownKey = String;
+
+/// A request observes the current generation immediately before sending.
+/// Even a shorter overlapping 429 advances it, so an older success cannot
+/// mistake an in-flight rate-limit response for confirmed recovery.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CooldownEpoch(u64);
 
 /// 构造冷却表 key。
 ///
@@ -40,13 +46,16 @@ struct CooldownEntry {
     until: Instant,
     /// 上游给出的 Retry-After（无该头时为 None，说明走的是本地退避估算）
     retry_after_secs: Option<u64>,
+    generation: u64,
 }
 
 impl CooldownEntry {
     fn remaining_secs(&self, now: Instant) -> u64 {
         // Instant 不能直接相减得到 Duration 的负数，用 checked_duration_since
         match self.until.checked_duration_since(now) {
-            Some(remaining) => remaining.as_secs(),
+            Some(remaining) => remaining
+                .as_secs()
+                .saturating_add(u64::from(remaining.subsec_nanos() > 0)),
             None => 0,
         }
     }
@@ -74,13 +83,16 @@ pub struct CooldownSnapshot {
 #[derive(Default)]
 pub struct RateLimitCooldown {
     entries: RwLock<HashMap<CooldownKey, CooldownEntry>>,
+    generation: AtomicU64,
 }
 
 impl RateLimitCooldown {
     pub fn new() -> Self {
-        Self {
-            entries: RwLock::new(HashMap::new()),
-        }
+        Self::default()
+    }
+
+    pub(crate) fn epoch(&self) -> CooldownEpoch {
+        CooldownEpoch(self.generation.load(Ordering::SeqCst))
     }
 
     /// 登记一次限流冷却。
@@ -102,8 +114,10 @@ impl RateLimitCooldown {
         let candidate_until = Instant::now() + Duration::from_secs(wait_secs);
 
         let mut entries = self.entries.write().await;
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         match entries.get_mut(&key) {
             Some(existing) => {
+                existing.generation = generation;
                 if candidate_until > existing.until {
                     existing.until = candidate_until;
                     existing.retry_after_secs = retry_after_secs;
@@ -115,6 +129,7 @@ impl RateLimitCooldown {
                     CooldownEntry {
                         until: candidate_until,
                         retry_after_secs,
+                        generation,
                     },
                 );
             }
@@ -135,11 +150,27 @@ impl RateLimitCooldown {
         }
     }
 
-    /// 清除冷却（请求成功后调用）。
+    /// Explicit reset; ordinary request success uses clear_after_success.
     pub async fn clear(&self, app_type: &str, provider_id: &str) {
         let key = cooldown_key(app_type, provider_id);
         let mut entries = self.entries.write().await;
         entries.remove(&key);
+    }
+
+    pub(crate) async fn clear_after_success(
+        &self,
+        app_type: &str,
+        provider_id: &str,
+        observed: CooldownEpoch,
+    ) {
+        let key = cooldown_key(app_type, provider_id);
+        let mut entries = self.entries.write().await;
+        if entries
+            .get(&key)
+            .is_some_and(|entry| entry.generation <= observed.0)
+        {
+            entries.remove(&key);
+        }
     }
 
     /// 顺带清理所有已过期条目，返回清理数量。
@@ -180,9 +211,8 @@ impl RateLimitCooldown {
 
 /// 判断是否需要为一次限流登记共享冷却。
 ///
-/// 只有「本进程决定继续等待」的限流才需要冷却：此时别的并发请求应该让路，
-/// 而不是也去撞同一个窗口。放弃等待（走故障转移）的限流不需要登记 ——
-/// 那个 provider 已经被 `attempted_providers` 跳过，没有并发放大风险。
+/// Respect the existing setting: enabled rate-limit handling records positive
+/// waits, including a final limit that exceeds this request's retry budget.
 pub(crate) fn should_register_cooldown(
     rate_limit_retry_enabled: bool,
     wait_secs: Option<u64>,
@@ -193,6 +223,48 @@ pub(crate) fn should_register_cooldown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn final_fractional_second_remains_in_cooldown() {
+        let now = Instant::now();
+        let entry = CooldownEntry {
+            until: now + Duration::from_millis(750),
+            retry_after_secs: Some(1),
+            generation: 1,
+        };
+        assert_eq!(entry.remaining_secs(now), 1);
+        assert_eq!(entry.remaining_secs(entry.until), 0);
+    }
+
+    #[tokio::test]
+    async fn success_only_clears_cooldown_known_at_attempt_start() {
+        let cooldown = RateLimitCooldown::new();
+        let earlier = cooldown.epoch();
+        cooldown.note_rate_limited("codex", "a", 30, Some(30)).await;
+        cooldown.clear_after_success("codex", "a", earlier).await;
+        assert!(cooldown.remaining_secs("codex", "a").await > 0);
+        let current = cooldown.epoch();
+        cooldown
+            .note_rate_limited("claude", "b", 60, Some(60))
+            .await;
+        cooldown.clear_after_success("codex", "a", current).await;
+        assert_eq!(cooldown.remaining_secs("codex", "a").await, 0);
+        assert!(cooldown.remaining_secs("claude", "b").await > 0);
+    }
+
+    #[tokio::test]
+    async fn shorter_overlapping_limit_and_reset_do_not_allow_a_stale_clear() {
+        let cooldown = RateLimitCooldown::new();
+        cooldown.note_rate_limited("codex", "a", 30, Some(30)).await;
+        let observed = cooldown.epoch();
+        cooldown.note_rate_limited("codex", "a", 1, Some(1)).await;
+        cooldown.clear_after_success("codex", "a", observed).await;
+        assert!(cooldown.remaining_secs("codex", "a").await > 20);
+        cooldown.clear("codex", "a").await;
+        cooldown.note_rate_limited("codex", "a", 30, Some(30)).await;
+        cooldown.clear_after_success("codex", "a", observed).await;
+        assert!(cooldown.remaining_secs("codex", "a").await > 20);
+    }
 
     #[tokio::test]
     async fn cooldown_is_visible_after_registration() {
