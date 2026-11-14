@@ -74,6 +74,11 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
   let scenario = "history";
   let hits = 0;
   let releaseEarlierSuccess;
+  let parallelInitialResponses = [];
+  let recoveryActive = 0;
+  let recoveryPeak = 0;
+  let sharedNotBefore = 0;
+  let recoveredAt = 0;
   function sendStream(response, text) {
     const coding = scenario.includes("gzip")
       ? "gzip"
@@ -106,6 +111,52 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         body,
       });
       hits += 1;
+      if (scenario === "parallel-recovery") {
+        if (hits <= 2) {
+          parallelInitialResponses.push(response);
+          if (parallelInitialResponses.length === 2) {
+            for (const limited of parallelInitialResponses) {
+              limited.writeHead(429, {
+                "content-type": "application/json",
+                "retry-after": "1",
+              });
+              limited.end(
+                JSON.stringify({ error: { code: "rate_limit_exceeded" } }),
+              );
+            }
+            parallelInitialResponses = [];
+          }
+          return;
+        }
+        recoveryActive += 1;
+        recoveryPeak = Math.max(recoveryPeak, recoveryActive);
+        await new Promise((done) => setTimeout(done, 200));
+        recoveryActive -= 1;
+      }
+      if (scenario === "extended-recovery") {
+        if (body.input === "Extend shared cooldown") {
+          sharedNotBefore = Date.now() + 2000;
+          response.writeHead(429, {
+            "content-type": "application/json",
+            "retry-after": "2",
+          });
+          response.end(
+            JSON.stringify({ error: { code: "rate_limit_exceeded" } }),
+          );
+          return;
+        }
+        if (hits === 1) {
+          response.writeHead(429, {
+            "content-type": "application/json",
+            "retry-after": "1",
+          });
+          response.end(
+            JSON.stringify({ error: { code: "rate_limit_exceeded" } }),
+          );
+          return;
+        }
+        recoveredAt = Date.now();
+      }
       if (scenario === "stateful-503") {
         response.writeHead(503, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: { code: "server_error" } }));
@@ -798,6 +849,80 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     } finally {
       releaseEarlierSuccess?.();
       await earlier.catch(() => {});
+    }
+
+    await cdp.invoke("reset_circuit_breaker", {
+      providerId: provider.id,
+      appType: "codex",
+    });
+    await cdp.invoke("update_proxy_config_for_app", {
+      config: {
+        ...proxyBefore,
+        autoFailoverEnabled: false,
+        sameProviderRetries: 0,
+        rateLimitRetryEnabled: true,
+        rateLimitMaxWaitSecs: 5,
+      },
+    });
+    scenario = "parallel-recovery";
+    hits = 0;
+    recoveryActive = 0;
+    recoveryPeak = 0;
+    parallelInitialResponses = [];
+    const parallel = await Promise.all([
+      send({ model: "ci-model", input: "Parallel one", stream: true }),
+      send({ model: "ci-model", input: "Parallel two", stream: true }),
+    ]);
+    for (const outcome of parallel) {
+      assert.equal(outcome.status, 200, outcome.text);
+      assert.match(outcome.text, /YunSwitch Codex smoke/);
+    }
+    assert.equal(hits, 4);
+    assert.equal(
+      recoveryPeak,
+      1,
+      "rate-limit recovery requests must not overlap",
+    );
+    assert.ok(!(await cdp.invoke("get_proxy_status")).rate_limit_waiting);
+    check(
+      label +
+        " Codex parallel rate limits recover one request at a time per provider",
+    );
+
+    scenario = "extended-recovery";
+    hits = 0;
+    sharedNotBefore = 0;
+    recoveredAt = 0;
+    const extending = send({
+      model: "ci-model",
+      input: "Wait for shared cooldown",
+      stream: true,
+    });
+    try {
+      await until(
+        async () =>
+          Boolean((await cdp.invoke("get_proxy_status")).rate_limit_waiting),
+        "initial request waits for recovery",
+      );
+      const additional = await send({
+        model: "ci-model",
+        input: "Extend shared cooldown",
+        background: true,
+      });
+      assert.equal(additional.status, 429, additional.text);
+      assert.equal(additional.retryAfter, "2");
+      const recovered = await extending;
+      assert.equal(recovered.status, 200, recovered.text);
+      assert.equal(hits, 3);
+      assert.ok(
+        recoveredAt >= sharedNotBefore - 25,
+        "retry preceded the newer shared cooldown",
+      );
+      check(
+        label + " Codex waiting retries honor newer shared cooldown deadlines",
+      );
+    } finally {
+      await extending.catch(() => {});
     }
 
     scenario = "quota-429";

@@ -186,6 +186,13 @@ impl RateLimitWaitGuard {
         status.end_rate_limit_wait(self.id);
         self.active = false;
     }
+
+    async fn extend(&self, total_secs: u64) {
+        self.status
+            .write()
+            .await
+            .extend_rate_limit_wait(self.id, total_secs);
+    }
 }
 
 impl Drop for RateLimitWaitGuard {
@@ -546,6 +553,88 @@ impl RequestForwarder {
         }
     }
 
+    /// One provider recovery may inspect an upstream response at a time. The
+    /// round's existing wait cap covers queueing and shared cooldown extensions.
+    /// The returned owner stays with the attempt until success/failure/cancel.
+    async fn wait_for_rate_limit_recovery(
+        &self,
+        provider: &Provider,
+        app_type: &str,
+        wait_secs: u64,
+        attempt: u32,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, u64> {
+        let started = std::time::Instant::now();
+        let Some(minimum) = started.checked_add(std::time::Duration::from_secs(wait_secs)) else {
+            return Err(wait_secs);
+        };
+        let Some(budget) = started.checked_add(std::time::Duration::from_secs(
+            self.rate_limit_max_wait_secs,
+        )) else {
+            return Err(wait_secs);
+        };
+        let waiting = RateLimitWaitGuard::acquire(
+            self.status.clone(),
+            super::types::RateLimitWaiting {
+                provider_name: provider.name.clone(),
+                provider_id: provider.id.clone(),
+                app_type: app_type.to_string(),
+                wait_secs,
+                attempt,
+                started_at: chrono::Utc::now().to_rfc3339(),
+            },
+        )
+        .await;
+        let acquired = tokio::time::timeout_at(
+            tokio::time::Instant::from_std(budget),
+            self.router
+                .acquire_rate_limit_recovery(&provider.id, app_type),
+        )
+        .await;
+        let permit = match acquired {
+            Ok(permit) => permit,
+            Err(_) => {
+                waiting.finish().await;
+                return Err(self
+                    .router
+                    .rate_limit_cooldown_secs(&provider.id, app_type)
+                    .await
+                    .max(1));
+            }
+        };
+        loop {
+            let target = self
+                .router
+                .rate_limit_not_before(&provider.id, app_type)
+                .await
+                .map_or(minimum, |shared| shared.max(minimum));
+            if target > budget {
+                let remaining = target.saturating_duration_since(std::time::Instant::now());
+                waiting.finish().await;
+                return Err(remaining
+                    .as_secs()
+                    .saturating_add(u64::from(remaining.subsec_nanos() > 0))
+                    .max(1));
+            }
+            let now = std::time::Instant::now();
+            if now >= target {
+                break;
+            }
+            let planned = target.saturating_duration_since(started);
+            waiting
+                .extend(
+                    planned
+                        .as_secs()
+                        .saturating_add(u64::from(planned.subsec_nanos() > 0)),
+                )
+                .await;
+            tokio::time::sleep_until(tokio::time::Instant::from_std(target)).await;
+            // Recheck after every wake, including extensions made by other
+            // requests while this task was asleep or waiting for the permit.
+        }
+        waiting.finish().await;
+        Ok(permit)
+    }
+
     /// 整流（thinking signature 或 budget）重试失败后的统一收尾。
     ///
     /// `None` 表示已记录熔断器、累积 `last_error`/`last_provider`，
@@ -782,6 +871,7 @@ impl RequestForwarder {
             // 两者计数互相独立；熔断器只在本循环结束后按最终结果记录一次。
             let mut rate_limit_attempt: u32 = 0;
             let mut same_provider_attempt: u32 = 0;
+            let mut recovery_permit = None;
             let forward_outcome = loop {
                 match self
                     .forward(
@@ -802,6 +892,9 @@ impl RequestForwarder {
                         retry_after_secs,
                         body,
                     }) => {
+                        // Release the previous recovery before sleeping/requeueing.
+                        // Keeping it would deadlock this request on its own gate.
+                        recovery_permit.take();
                         rate_limit_attempt += 1;
                         match self.rate_limit_wait_secs(retry_after_secs, rate_limit_attempt) {
                             Some(wait_secs) => {
@@ -809,8 +902,8 @@ impl RequestForwarder {
                                     "[{app_type_str}] Provider {} 限流，等待 {wait_secs}s 后重试（第 {rate_limit_attempt} 次）",
                                     provider.name
                                 );
-                                // Shared cooldown makes other healthy providers preferred.
-                                // It does not queue or block other in-flight requests.
+                                // Prefer healthy alternatives and share the actual
+                                // deadline with all rate-limit recovery attempts.
                                 if super::rate_limit::should_register_cooldown(
                                     self.rate_limit_retry_enabled,
                                     Some(wait_secs),
@@ -824,23 +917,23 @@ impl RequestForwarder {
                                         )
                                         .await;
                                 }
-                                // Register the real upstream cooldown before publishing
-                                // a cancellable wait. Only the request's UI entry is owned
-                                // by this guard; cancellation must not erase the cooldown.
-                                let waiting = RateLimitWaitGuard::acquire(
-                                    self.status.clone(),
-                                    super::types::RateLimitWaiting {
-                                        provider_name: provider.name.clone(),
-                                        provider_id: provider.id.clone(),
-                                        app_type: app_type_str.to_string(),
+                                match self
+                                    .wait_for_rate_limit_recovery(
+                                        provider,
+                                        app_type_str,
                                         wait_secs,
-                                        attempt: rate_limit_attempt,
-                                        started_at: chrono::Utc::now().to_rfc3339(),
-                                    },
-                                )
-                                .await;
-                                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
-                                waiting.finish().await;
+                                        rate_limit_attempt,
+                                    )
+                                    .await
+                                {
+                                    Ok(permit) => recovery_permit = Some(permit),
+                                    Err(seconds) => {
+                                        break Err(ProxyError::RateLimited {
+                                            retry_after_secs: Some(seconds),
+                                            body,
+                                        })
+                                    }
+                                }
                                 continue;
                             }
                             None => {
@@ -6224,6 +6317,280 @@ mod tests {
         ));
         assert!(requests.lock().await.is_empty());
         upstream.abort();
+    }
+
+    #[tokio::test]
+    async fn concurrent_rate_limit_retries_use_one_recovery_request_per_provider() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let in_flight = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let first_requests = Arc::new(tokio::sync::Barrier::new(2));
+        let recorded = hits.clone();
+        let running = in_flight.clone();
+        let peak = maximum.clone();
+        let app = axum::Router::new().fallback(move || {
+            let recorded = recorded.clone();
+            let running = running.clone();
+            let peak = peak.clone();
+            let first_requests = first_requests.clone();
+            async move {
+                let call = recorded.fetch_add(1, Ordering::SeqCst);
+                if call < 2 {
+                    first_requests.wait().await;
+                    (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"error":{"code":"rate_limit_exceeded","retry_after_seconds":1}})))
+                } else {
+                    let active = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(active, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                    running.fetch_sub(1, Ordering::SeqCst);
+                    (StatusCode::OK, axum::Json(json!({"id":"resp_recovery","object":"response","status":"completed","output":[]})))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut configured = test_forwarder(Duration::from_secs(4), Duration::from_secs(4));
+        configured.rate_limit_retry_enabled = true;
+        configured.rate_limit_max_wait_secs = 4;
+        let fwd = Arc::new(configured);
+        let request = || {
+            send_codex(
+                &fwd,
+                json!({"model":"synthetic","input":"retry"}),
+                vec![codex_api_provider("a", &base)],
+            )
+        };
+        let (first, second) = tokio::join!(request(), request());
+        upstream.abort();
+        assert!(first.is_ok() && second.is_ok());
+        assert_eq!(hits.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            maximum.load(Ordering::SeqCst),
+            1,
+            "limited requests retried concurrently"
+        );
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+    }
+
+    #[tokio::test]
+    async fn rate_limit_retry_respects_a_newer_shared_cooldown_deadline() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let retry_at = Arc::new(tokio::sync::Mutex::new(None));
+        let recorded = hits.clone();
+        let observed_retry = retry_at.clone();
+        let app = axum::Router::new().fallback(move || {
+            let recorded = recorded.clone();
+            let observed_retry = observed_retry.clone();
+            async move {
+                if recorded.fetch_add(1, Ordering::SeqCst) == 0 {
+                    (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"error":{"code":"rate_limit_exceeded","retry_after_seconds":1}})))
+                } else {
+                    *observed_retry.lock().await = Some(std::time::Instant::now());
+                    (StatusCode::OK, axum::Json(json!({"id":"resp_shared","object":"response","status":"completed","output":[]})))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut configured = test_forwarder(Duration::from_secs(4), Duration::from_secs(4));
+        configured.rate_limit_retry_enabled = true;
+        configured.rate_limit_max_wait_secs = 4;
+        let fwd = Arc::new(configured);
+        let request_fwd = fwd.clone();
+        let request = tokio::spawn(async move {
+            send_codex(
+                &request_fwd,
+                json!({"model":"synthetic","input":"retry"}),
+                vec![codex_api_provider("a", &base)],
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while fwd.status.read().await.rate_limit_waiting.is_none() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let earliest = std::time::Instant::now() + Duration::from_secs(2);
+        fwd.router.note_rate_limited("a", "codex", 2, Some(2)).await;
+        let outcome = request.await.unwrap();
+        upstream.abort();
+        assert!(outcome.is_ok());
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert!(
+            retry_at.lock().await.unwrap() >= earliest,
+            "retry ignored a later concurrent cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_recovery_owner_frees_the_provider_for_another_request() {
+        let fwd = Arc::new(test_forwarder(
+            Duration::from_secs(3),
+            Duration::from_secs(3),
+        ));
+        let provider = codex_api_provider("a", "http://127.0.0.1:1");
+        let owned_fwd = fwd.clone();
+        let owned_provider = provider.clone();
+        let owned = tokio::spawn(async move {
+            owned_fwd
+                .wait_for_rate_limit_recovery(&owned_provider, "codex", 2, 1)
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while fwd.status.read().await.rate_limit_waiting.is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        owned.abort();
+        assert!(owned.await.unwrap_err().is_cancelled());
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+        let next = tokio::time::timeout(
+            Duration::from_secs(1),
+            fwd.router.acquire_rate_limit_recovery("a", "codex"),
+        )
+        .await
+        .expect("cancelled recovery owns no future slot");
+        drop(next);
+    }
+
+    #[tokio::test]
+    async fn recovery_queue_timeout_keeps_429_and_cleans_the_wait() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let recorded = hits.clone();
+        let app = axum::Router::new().fallback(move || {
+            recorded.fetch_add(1, Ordering::SeqCst);
+            async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "1")],
+                    r#"{"error":{"code":"rate_limit_exceeded"}}"#,
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3));
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 1;
+        let blocker = fwd.router.acquire_rate_limit_recovery("a", "codex").await;
+        let result = send_codex(
+            &fwd,
+            json!({"model":"synthetic","input":"queue"}),
+            vec![codex_api_provider("a", &base)],
+        )
+        .await;
+        upstream.abort();
+        assert!(matches!(
+            result,
+            Err(ForwardError {
+                error: ProxyError::RateLimited {
+                    retry_after_secs: Some(_),
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+        drop(blocker);
+        let next = tokio::time::timeout(
+            Duration::from_secs(1),
+            fwd.router.acquire_rate_limit_recovery("a", "codex"),
+        )
+        .await
+        .unwrap();
+        drop(next);
+    }
+
+    #[tokio::test]
+    async fn cooldown_beyond_wait_budget_returns_without_resending() {
+        let mut fwd = test_forwarder(Duration::from_secs(3), Duration::from_secs(3));
+        fwd.rate_limit_max_wait_secs = 1;
+        fwd.router
+            .note_rate_limited("a", "codex", 30, Some(30))
+            .await;
+        let provider = codex_api_provider("a", "http://127.0.0.1:1");
+        let result = tokio::time::timeout(
+            Duration::from_millis(750),
+            fwd.wait_for_rate_limit_recovery(&provider, "codex", 1, 1),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, Err(seconds) if seconds > 20));
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
+    }
+
+    #[tokio::test]
+    async fn recovery_permit_releases_after_output_without_waiting_for_stream_end() {
+        let hits = Arc::new(tokio::sync::Mutex::new(HashMap::<String, usize>::new()));
+        let recorded = hits.clone();
+        let app = axum::Router::new().fallback(move |axum::Json(body): axum::Json<Value>| {
+            let recorded = recorded.clone();
+            async move {
+                let input = body["input"].as_str().unwrap().to_string();
+                let mut counts = recorded.lock().await;
+                let count = counts.entry(input.clone()).or_default();
+                *count += 1;
+                let limited = *count == 1;
+                drop(counts);
+                if limited {
+                    axum::response::Response::builder().status(StatusCode::TOO_MANY_REQUESTS)
+                        .header("retry-after", "1")
+                        .body(axum::body::Body::from(r#"{"error":{"code":"rate_limit_exceeded"}}"#)).unwrap()
+                } else {
+                    let stream = async_stream::stream! {
+                        yield Ok::<_, std::io::Error>(Bytes::from_static(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"committed\"}\n\n"));
+                        if input == "first" { std::future::pending::<()>().await; }
+                    };
+                    axum::response::Response::builder().status(StatusCode::OK)
+                        .header("content-type", "text/event-stream")
+                        .body(axum::body::Body::from_stream(stream)).unwrap()
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(4), Duration::from_secs(4));
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 4;
+        let first = send_codex(
+            &fwd,
+            json!({"model":"synthetic","input":"first","stream":true}),
+            vec![codex_api_provider("a", &base)],
+        )
+        .await
+        .ok()
+        .expect("productive output commits the first response");
+        let second = tokio::time::timeout(
+            Duration::from_secs(3),
+            send_codex(
+                &fwd,
+                json!({"model":"synthetic","input":"second","stream":true}),
+                vec![codex_api_provider("a", &base)],
+            ),
+        )
+        .await
+        .expect("first live stream must not hold the recovery gate");
+        assert!(second.is_ok());
+        drop(first);
+        upstream.abort();
+        assert_eq!(hits.lock().await.get("second"), Some(&2));
     }
 
     #[tokio::test]

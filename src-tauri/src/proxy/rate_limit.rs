@@ -3,7 +3,8 @@
 //! ## 解决的问题
 //!
 //! 429 等待重试按请求独立计数。本表共享冷却信息以便优先选择其他供应商，
-//! 并防止较早发出的成功请求抹去新的限流窗口；它不是请求排队或节流器。
+//! 并防止较早发出的成功请求抹去新的限流窗口。已遇到 429 的请求使用
+//! 每供应商独立的恢复许可，串行检查输出前的恢复结果。
 //!
 //! 本模块把供应商的冷却期限保存为进程内共享状态：
 //!
@@ -20,8 +21,9 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 /// 冷却表 key：`"app_type:provider_id"`
 pub(crate) type CooldownKey = String;
@@ -84,6 +86,9 @@ pub struct CooldownSnapshot {
 pub struct RateLimitCooldown {
     entries: RwLock<HashMap<CooldownKey, CooldownEntry>>,
     generation: AtomicU64,
+    // Weak references keep deleted providers and finished recoveries from
+    // retaining lock state. The owned permit itself keeps the active gate alive.
+    recovery_gates: RwLock<HashMap<CooldownKey, Weak<Mutex<()>>>>,
 }
 
 impl RateLimitCooldown {
@@ -93,6 +98,43 @@ impl RateLimitCooldown {
 
     pub(crate) fn epoch(&self) -> CooldownEpoch {
         CooldownEpoch(self.generation.load(Ordering::SeqCst))
+    }
+
+    pub(crate) async fn acquire_recovery(
+        &self,
+        app_type: &str,
+        provider_id: &str,
+    ) -> OwnedMutexGuard<()> {
+        let key = cooldown_key(app_type, provider_id);
+        let existing = self
+            .recovery_gates
+            .read()
+            .await
+            .get(&key)
+            .and_then(Weak::upgrade);
+        let gate = if let Some(gate) = existing {
+            gate
+        } else {
+            let mut gates = self.recovery_gates.write().await;
+            if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+                gate
+            } else {
+                gates.retain(|_, gate| gate.strong_count() > 0);
+                let gate = Arc::new(Mutex::new(()));
+                gates.insert(key, Arc::downgrade(&gate));
+                gate
+            }
+        };
+        gate.lock_owned().await
+    }
+
+    pub(crate) async fn not_before(&self, app_type: &str, provider_id: &str) -> Option<Instant> {
+        self.entries
+            .read()
+            .await
+            .get(&cooldown_key(app_type, provider_id))
+            .filter(|entry| !entry.is_expired(Instant::now()))
+            .map(|entry| entry.until)
     }
 
     /// 登记一次限流冷却。
@@ -223,6 +265,39 @@ pub(crate) fn should_register_cooldown(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn recovery_gates_are_scoped_and_cancelled_waiters_release_the_queue() {
+        let cooldown = Arc::new(RateLimitCooldown::new());
+        let first = cooldown.acquire_recovery("codex", "a").await;
+        // Different apps and providers are independent even during recovery.
+        let other_provider = cooldown.acquire_recovery("codex", "b").await;
+        let other_app = cooldown.acquire_recovery("claude", "a").await;
+        let queued_registry = cooldown.clone();
+        let queued =
+            tokio::spawn(async move { queued_registry.acquire_recovery("codex", "a").await });
+        tokio::task::yield_now().await;
+        assert!(!queued.is_finished());
+        queued.abort();
+        assert!(queued.await.unwrap_err().is_cancelled());
+        drop(first);
+        let next = tokio::time::timeout(
+            Duration::from_secs(1),
+            cooldown.acquire_recovery("codex", "a"),
+        )
+        .await
+        .expect("cancelled waiter must not reserve a later permit");
+        drop((next, other_provider, other_app));
+        assert!(cooldown
+            .recovery_gates
+            .read()
+            .await
+            .values()
+            .all(|gate| gate.strong_count() == 0));
+        let cleanup = cooldown.acquire_recovery("codex", "cleanup").await;
+        assert_eq!(cooldown.recovery_gates.read().await.len(), 1);
+        drop(cleanup);
+    }
 
     #[test]
     fn final_fractional_second_remains_in_cooldown() {

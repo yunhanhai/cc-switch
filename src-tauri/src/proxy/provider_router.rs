@@ -445,6 +445,26 @@ impl ProviderRouter {
         self.rate_limit_cooldown.epoch()
     }
 
+    pub(crate) async fn acquire_rate_limit_recovery(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        self.rate_limit_cooldown
+            .acquire_recovery(app_type, provider_id)
+            .await
+    }
+
+    pub(crate) async fn rate_limit_not_before(
+        &self,
+        provider_id: &str,
+        app_type: &str,
+    ) -> Option<std::time::Instant> {
+        self.rate_limit_cooldown
+            .not_before(app_type, provider_id)
+            .await
+    }
+
     pub(crate) async fn clear_cooldown_after_success(
         &self,
         provider_id: &str,
