@@ -892,9 +892,6 @@ impl RequestForwarder {
                         retry_after_secs,
                         body,
                     }) => {
-                        // Release the previous recovery before sleeping/requeueing.
-                        // Keeping it would deadlock this request on its own gate.
-                        recovery_permit.take();
                         rate_limit_attempt += 1;
                         match self.rate_limit_wait_secs(retry_after_secs, rate_limit_attempt) {
                             Some(wait_secs) => {
@@ -917,6 +914,10 @@ impl RequestForwarder {
                                         )
                                         .await;
                                 }
+                                // Publish a renewed limit before waking the next
+                                // queued recovery. Release before requeueing so
+                                // this request cannot deadlock on its own gate.
+                                recovery_permit.take();
                                 match self
                                     .wait_for_rate_limit_recovery(
                                         provider,
@@ -6591,6 +6592,59 @@ mod tests {
         drop(first);
         upstream.abort();
         assert_eq!(hits.lock().await.get("second"), Some(&2));
+    }
+
+    #[tokio::test]
+    async fn recovery_that_is_limited_again_publishes_the_new_window_before_requeueing() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let recovery_at = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let first_requests = Arc::new(tokio::sync::Barrier::new(2));
+        let recorded = hits.clone();
+        let observed = recovery_at.clone();
+        let app = axum::Router::new().fallback(move || {
+            let recorded = recorded.clone();
+            let observed = observed.clone();
+            let first_requests = first_requests.clone();
+            async move {
+                let call = recorded.fetch_add(1, Ordering::SeqCst);
+                if call < 2 {
+                    first_requests.wait().await;
+                } else {
+                    observed.lock().await.push(std::time::Instant::now());
+                }
+                if call < 3 {
+                    (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"error":{"code":"rate_limit_exceeded","retry_after_seconds":1}})))
+                } else {
+                    (StatusCode::OK, axum::Json(json!({"id":"resp_recovered","object":"response","status":"completed","output":[]})))
+                }
+            }
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let upstream = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut fwd = test_forwarder(Duration::from_secs(4), Duration::from_secs(4));
+        fwd.rate_limit_retry_enabled = true;
+        fwd.rate_limit_max_wait_secs = 4;
+        let request = || {
+            send_codex(
+                &fwd,
+                json!({"model":"synthetic","input":"retry"}),
+                vec![codex_api_provider("a", &base)],
+            )
+        };
+        let (first, second) = tokio::join!(request(), request());
+        upstream.abort();
+        assert!(first.is_ok() && second.is_ok());
+        assert_eq!(hits.load(Ordering::SeqCst), 5);
+        let times = recovery_at.lock().await;
+        assert_eq!(times.len(), 3);
+        assert!(
+            times[1].duration_since(times[0]) >= Duration::from_secs(1),
+            "queued recovery did not honor the renewed limit"
+        );
+        assert!(fwd.status.read().await.rate_limit_waiting.is_none());
     }
 
     #[tokio::test]

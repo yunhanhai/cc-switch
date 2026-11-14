@@ -79,6 +79,8 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
   let recoveryPeak = 0;
   let sharedNotBefore = 0;
   let recoveredAt = 0;
+  let renewedNotBefore = 0;
+  let firstRenewedRecovery = 0;
   function sendStream(response, text) {
     const coding = scenario.includes("gzip")
       ? "gzip"
@@ -111,7 +113,7 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
         body,
       });
       hits += 1;
-      if (scenario === "parallel-recovery") {
+      if (scenario === "parallel-recovery" || scenario === "renewed-recovery") {
         if (hits <= 2) {
           parallelInitialResponses.push(response);
           if (parallelInitialResponses.length === 2) {
@@ -127,6 +129,20 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
             parallelInitialResponses = [];
           }
           return;
+        }
+        if (scenario === "renewed-recovery" && hits === 3) {
+          renewedNotBefore = Date.now() + 1000;
+          response.writeHead(429, {
+            "content-type": "application/json",
+            "retry-after": "1",
+          });
+          response.end(
+            JSON.stringify({ error: { code: "rate_limit_exceeded" } }),
+          );
+          return;
+        }
+        if (scenario === "renewed-recovery" && !firstRenewedRecovery) {
+          firstRenewedRecovery = Date.now();
         }
         recoveryActive += 1;
         recoveryPeak = Math.max(recoveryPeak, recoveryActive);
@@ -924,6 +940,27 @@ export async function exerciseCodexCompatibility(cdp, { check, until, label }) {
     } finally {
       await extending.catch(() => {});
     }
+
+    scenario = "renewed-recovery";
+    hits = 0;
+    parallelInitialResponses = [];
+    renewedNotBefore = 0;
+    firstRenewedRecovery = 0;
+    const renewed = await Promise.all([
+      send({ model: "ci-model", input: "Renewed one", stream: true }),
+      send({ model: "ci-model", input: "Renewed two", stream: true }),
+    ]);
+    for (const outcome of renewed)
+      assert.equal(outcome.status, 200, outcome.text);
+    assert.equal(hits, 5);
+    assert.ok(
+      firstRenewedRecovery >= renewedNotBefore - 25,
+      "queued recovery ignored a renewed limit",
+    );
+    assert.ok(!(await cdp.invoke("get_proxy_status")).rate_limit_waiting);
+    check(
+      label + " Codex renewed limits are registered before releasing recovery",
+    );
 
     scenario = "quota-429";
     hits = 0;
